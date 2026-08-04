@@ -131,7 +131,7 @@ COL_FECHA_PEDIDO_ME5A = "Fecha de pedido - ME5A"
 COL_FECHA_APROBACION_ARIBA = "Fecha de aprobación - ARIBA"
 
 COL_FECHA_FACTURACION_ME80FN = "Fecha facturación proveedor - ME80FN"
-COL_FECHA_RECEPCION_ME80FN = "Fecha recepción mercancía - ME80FN"
+COL_FECHA_RECEPCION_ME80FN = "Fecha de entrada - ME80FN"
 
 COL_ESTADO_MATCH = "Estado del match"
 
