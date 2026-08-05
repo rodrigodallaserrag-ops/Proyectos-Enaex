@@ -1,6 +1,6 @@
 pandas
 requests
-streamlit
+streamlit==1.49.1
 lxml
 openpyxl
 xlrd>=2.0.1
