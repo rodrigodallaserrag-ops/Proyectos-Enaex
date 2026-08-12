@@ -90,17 +90,22 @@ with h3:
     meses = st.multiselect("Mes", sorted(_base_mes["Mes"].dropna().unique().astype(int)))
 with h4:
     _base_dia = _base_mes[_base_mes["Mes"].isin(meses)] if meses else _base_mes
-    dias = st.multiselect("Día", sorted(_base_dia["Día"].dropna().unique().astype(int)))
+    # Fechas completas (no solo el número de día) para no mezclar, por ejemplo,
+    # el 30 de julio con el 30 de agosto si se seleccionan ambos meses.
+    fechas_disponibles = sorted(_base_dia["Fecha de pedido"].dt.date.dropna().unique())
+    fechas = st.multiselect(
+        "Día", fechas_disponibles, format_func=lambda f: f.strftime("%d-%m-%Y")
+    )
 
-if años or meses or dias:
+if años or meses or fechas:
     es_pedido_completo = df_f["Estado Solped"] == "Pedido completo"
     cond_fecha = pd.Series(True, index=df_f.index)
     if años:
         cond_fecha &= df_f["Año"].isin(años)
     if meses:
         cond_fecha &= df_f["Mes"].isin(meses)
-    if dias:
-        cond_fecha &= df_f["Día"].isin(dias)
+    if fechas:
+        cond_fecha &= df_f["Fecha de pedido"].dt.date.isin(fechas)
     df_f = df_f[~es_pedido_completo | (es_pedido_completo & cond_fecha)]
 
 checkpoints.append(("4a. Sin pedido tras jerarquía (debe ser IGUAL al paso 3)", (df_f["Estado Solped"] == "Sin pedido").sum()))
