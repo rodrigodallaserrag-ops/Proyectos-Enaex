@@ -225,8 +225,8 @@ def calcular_metricas_por_grupo(df: pd.DataFrame, group_cols: list[str]) -> pd.D
             {
                 "Promedio días de gestión": g["Nivel de Servicio"].mean(),
                 "% Cumplimiento": (g["Cumple"] == "Cumple").sum() / max(len(g), 1) * 100,
-                # Recuento DISTINTIVO de pedidos, igual que la tarjeta del pbix
-                "Pos. OC generadas": g["Pedido"].nunique(),
+                # DISTINCTCOUNT de DAX: incluye el BLANK como un valor más
+                "Pos. OC generadas": g["Pedido"].nunique() + (1 if g["Pedido"].isna().any() else 0),
             }
         )
 
