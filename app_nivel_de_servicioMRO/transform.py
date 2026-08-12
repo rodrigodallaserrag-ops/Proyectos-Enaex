@@ -225,9 +225,9 @@ def calcular_metricas_por_grupo(df: pd.DataFrame, group_cols: list[str]) -> pd.D
             {
                 "Promedio días de gestión": g["Nivel de Servicio"].mean(),
                 "% Cumplimiento": (g["Cumple"] == "Cumple").sum() / max(len(g), 1) * 100,
-                "Pos. OC generadas": g["Pedido"].notna().sum(),
+                # Recuento DISTINTIVO de pedidos, igual que la tarjeta del pbix
+                "Pos. OC generadas": g["Pedido"].nunique(),
             }
         )
 
     return df.groupby(group_cols).apply(_agg, include_groups=False).reset_index()
-
