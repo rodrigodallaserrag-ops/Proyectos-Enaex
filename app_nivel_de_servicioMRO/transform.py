@@ -185,6 +185,11 @@ def pipeline_completo(
     df = df.sort_values("Fecha de solicitud", ascending=False)
 
     # Limpieza final (equivalente a 'Columnas quitadas2' / 'Columnas quitadas3')
+    # OJO: se conservan LAS DOS columnas de comprador:
+    #   - "Comprador por Grupo Compras"  -> la del pbix, con override de MRP
+    #   - "Comprador (Grupo de compras)" -> la pura, según el grupo de compras,
+    #     que reparte las líneas MRP entre los compradores reales en vez de
+    #     concentrarlas en el responsable de MRP.
     columnas_auxiliares = [
         "_fecha_repor_fecha_mod",
         "_fecha_pedi_fecha_modi",
@@ -203,10 +208,14 @@ def pipeline_completo(
         "Consumo",
         "Pos.solicitud pedido",
         "Responsable de MRP.Responsable Compra.title",
-        "Comprador por Grupo Compras",
     ]
     df = df.drop(columns=[c for c in columnas_auxiliares if c in df.columns])
-    df = df.rename(columns={"Comprador por Grupo Compras2": "Comprador por Grupo Compras"})
+    df = df.rename(
+        columns={
+            "Comprador por Grupo Compras": "Comprador (Grupo de compras)",
+            "Comprador por Grupo Compras2": "Comprador por Grupo Compras",
+        }
+    )
 
     return df.reset_index(drop=True)
 
@@ -218,16 +227,44 @@ def calcular_metricas_por_grupo(df: pd.DataFrame, group_cols: list[str]) -> pd.D
 
         % Cumplimiento          = DIVIDE(COUNTROWS(Cumple="Cumple"), COUNTROWS(todo))
         Promedio días de gestión = AVERAGE('Data (2)'[Nivel de servicio])
-        Pos. OC generadas        = filas con Pedido no vacío
+        Pos. OC generadas        = POSICIONES con pedido, SIN quitar duplicados,
+                                   para que la columna sume verticalmente.
+
+    OJO: la tarjeta general usa recuento DISTINTIVO (quita duplicados) porque
+    ahí interesa cuántas OC distintas se generaron. Acá interesa cuántas
+    posiciones gestionó cada comprador, así que se cuentan todas las líneas.
     """
     def _agg(g):
         return pd.Series(
             {
                 "Promedio días de gestión": g["Nivel de Servicio"].mean(),
                 "% Cumplimiento": (g["Cumple"] == "Cumple").sum() / max(len(g), 1) * 100,
-                # DISTINCTCOUNT de DAX: incluye el BLANK como un valor más
-                "Pos. OC generadas": g["Pedido"].nunique() + (1 if g["Pedido"].isna().any() else 0),
+                "Pos. OC generadas": g["Pedido"].notna().sum(),
             }
         )
 
     return df.groupby(group_cols).apply(_agg, include_groups=False).reset_index()
+
+
+def agregar_fila_total(tabla: pd.DataFrame, df_completo: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
+    """
+    Agrega una fila TOTAL al final de la tabla, calculada sobre TODAS las líneas
+    del conjunto filtrado (no promediando los promedios de cada fila).
+
+    Esto importa porque:
+      - % Cumplimiento total = líneas que cumplen / total de líneas.
+        NO es el promedio de los porcentajes de cada comprador (eso daría el
+        mismo peso a compradores con volúmenes muy distintos).
+      - Promedio días total = promedio sobre todas las líneas, por el mismo motivo.
+      - Pos. OC total = SUMA de la columna (criterio definido por el usuario).
+        Ojo: puede quedar por encima del recuento distintivo global si un mismo
+        pedido aparece en más de una fila de la tabla.
+    """
+    n = len(df_completo)
+    total = {c: "" for c in group_cols}
+    total[group_cols[0]] = "TOTAL"
+    total["Promedio días de gestión"] = df_completo["Nivel de Servicio"].mean() if n else float("nan")
+    total["% Cumplimiento"] = (df_completo["Cumple"] == "Cumple").sum() / n * 100 if n else 0
+    total["Pos. OC generadas"] = tabla["Pos. OC generadas"].sum()
+
+    return pd.concat([tabla, pd.DataFrame([total])], ignore_index=True)
