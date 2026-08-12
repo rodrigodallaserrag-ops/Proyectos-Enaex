@@ -57,14 +57,35 @@ def calcular_solped_mrp(df: pd.DataFrame) -> pd.DataFrame:
 def filtrar_solicitudes_vigentes(df: pd.DataFrame) -> pd.DataFrame:
     """
     Pasos M: 'Personalizado' (flag 2/0), 'Personalizado.3', 'Filas filtradas'.
-    Se queda solo con: Solped MRP en (MRP, Ariba), o ERP sin indicador de
-    liberación/bloqueo (Indicador liberación vacío/nulo).
+
+    Traducción literal del M:
+        Personalizado   = 2 si (Solped MRP in [MRP, Ariba]) o (ERP y sin indicador), si no 0
+        Personalizado.3 = si indicador vacío/nulo -> Personalizado
+                          si indicador "X" o "B"  -> 0
+                          en cualquier otro caso  -> el indicador convertido a número
+        Filtro final: conservar solo las filas donde Personalizado.3 = 2
+
+    OJO: el último "else" es clave. Un indicador con valor "2" hace que la fila
+    se conserve aunque sea ERP, porque su valor numérico es exactamente 2.
     """
-    sin_indicador = df["Indicador liberación"].isna()
-    mantener = df["Solped MRP"].isin(["MRP", "Ariba"]) | (
-        (df["Solped MRP"] == "ERP") & sin_indicador
+    df = df.copy()
+    ind = df["Indicador liberación"]
+    sin_indicador = ind.isna()
+
+    personalizado = np.where(
+        df["Solped MRP"].isin(["MRP", "Ariba"]) | ((df["Solped MRP"] == "ERP") & sin_indicador),
+        2,
+        0,
     )
-    return df[mantener].copy()
+
+    ind_num = pd.to_numeric(ind, errors="coerce")
+    personalizado_3 = np.select(
+        [sin_indicador, ind.isin(["X", "B"])],
+        [personalizado, 0],
+        default=ind_num,
+    )
+
+    return df[personalizado_3 == 2].copy()
 
 
 def calcular_nivel_servicio_dias(df: pd.DataFrame, fecha_corte: pd.Timestamp) -> pd.DataFrame:
@@ -192,8 +213,12 @@ def pipeline_completo(
 
 def calcular_metricas_por_grupo(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
     """
-    Reemplaza las medidas DAX 'Promedio días de gestión', '% Cumplimiento'
-    y 'Pos. OC generadas', agregadas a nivel de comprador/centro/etc.
+    Reemplaza las medidas DAX del pbix, agregadas a nivel de comprador/centro/etc.
+    Fórmulas confirmadas y validadas al 100% contra el pbix (ver conversación):
+
+        % Cumplimiento          = DIVIDE(COUNTROWS(Cumple="Cumple"), COUNTROWS(todo))
+        Promedio días de gestión = AVERAGE('Data (2)'[Nivel de servicio])
+        Pos. OC generadas        = filas con Pedido no vacío
     """
     def _agg(g):
         return pd.Series(
@@ -205,3 +230,4 @@ def calcular_metricas_por_grupo(df: pd.DataFrame, group_cols: list[str]) -> pd.D
         )
 
     return df.groupby(group_cols).apply(_agg, include_groups=False).reset_index()
+
