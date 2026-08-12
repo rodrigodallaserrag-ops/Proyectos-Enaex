@@ -1,0 +1,207 @@
+"""
+Transformaciones - traducción 1:1 del código M (Power Query) de la query
+"Data (2)" del pbix Nivel_de_servicio_BI.pbix.
+
+Cada función de acá corresponde a uno o más pasos del "let...in" original.
+Se mantiene el orden exacto porque varios pasos dependen de columnas
+intermedias que después se descartan (igual que en el M).
+"""
+import numpy as np
+import pandas as pd
+import config
+
+
+def _dias_entre(fecha_fin: pd.Series, fecha_inicio: pd.Series) -> pd.Series:
+    """fecha_fin - fecha_inicio, en días (equivalente a la resta de fechas en M)."""
+    return (fecha_fin - fecha_inicio).dt.days
+
+
+def unir_responsables(
+    df: pd.DataFrame,
+    df_resp_grupo: pd.DataFrame,
+    df_resp_mrp: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Pasos M: "Consultas combinadas", "Se expandió Responsable por Grupo de
+    Compras", "Consultas combinadas1", "Se expandió Responsable de MRP",
+    "Personalizada agregada" (Comprador por Grupo Compras2).
+    """
+    df = df.merge(
+        df_resp_grupo, left_on="Grupo de compras", right_on="Grupo de Compras", how="left"
+    ).drop(columns=["Grupo de Compras"])
+
+    df = df.merge(df_resp_mrp, left_on="Autor", right_on="Title", how="left").drop(columns=["Title"])
+
+    resp_mrp_col = "Responsable de MRP.Responsable Compra.title"
+    df["Comprador por Grupo Compras2"] = np.where(
+        df[resp_mrp_col].isna(), df["Comprador por Grupo Compras"], df[resp_mrp_col]
+    )
+    return df
+
+
+def calcular_solped_mrp(df: pd.DataFrame) -> pd.DataFrame:
+    """Paso M: 'Personalizada agregada1' -> columna 'Solped MRP'."""
+    df = df.copy()
+    resp_mrp_col = "Responsable de MRP.Responsable Compra.title"
+    sin_resp_mrp = df[resp_mrp_col].isna()
+    es_ariba = sin_resp_mrp & (df["Solicitud de pedido"] > config.UMBRAL_SOLICITUD_ARIBA)
+
+    df["Solped MRP"] = np.select(
+        [es_ariba, sin_resp_mrp],
+        ["Ariba", "ERP"],
+        default="MRP",
+    )
+    return df
+
+
+def filtrar_solicitudes_vigentes(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Pasos M: 'Personalizado' (flag 2/0), 'Personalizado.3', 'Filas filtradas'.
+    Se queda solo con: Solped MRP en (MRP, Ariba), o ERP sin indicador de
+    liberación/bloqueo (Indicador liberación vacío/nulo).
+    """
+    sin_indicador = df["Indicador liberación"].isna()
+    mantener = df["Solped MRP"].isin(["MRP", "Ariba"]) | (
+        (df["Solped MRP"] == "ERP") & sin_indicador
+    )
+    return df[mantener].copy()
+
+
+def calcular_nivel_servicio_dias(df: pd.DataFrame, fecha_corte: pd.Timestamp) -> pd.DataFrame:
+    """
+    Pasos M: 'Fecha Repor-Fecha mod', 'Fecha Pedi-Fech Modi',
+    'Personalizada agregada5' (Nivel de Servicio v1).
+    """
+    df = df.copy()
+    df["_fecha_repor_fecha_mod"] = _dias_entre(pd.Timestamp(fecha_corte), df["Fecha modificación"])
+    df["_fecha_pedi_fecha_modi"] = _dias_entre(df["Fecha de pedido"], df["Fecha modificación"])
+
+    sin_pedido = df["Pedido"].isna()
+    df["_nivel_servicio_v1"] = np.where(
+        sin_pedido, df["_fecha_repor_fecha_mod"], df["_fecha_pedi_fecha_modi"]
+    )
+    return df
+
+
+def unir_centro_sociedad(df: pd.DataFrame, df_centro_sociedad: pd.DataFrame) -> pd.DataFrame:
+    """
+    Paso M: 'Consultas combinadas2' + expandir + rename (OJO: el M
+    intercambia 'Nombre Centro' <-> 'Nombre Centro 2' al renombrar,
+    se replica igual).
+    """
+    df = df.merge(df_centro_sociedad, left_on="Centro", right_on="Título", how="left").drop(
+        columns=["Título"]
+    )
+    df = df.rename(columns={"Nombre Centro": "Nombre Centro 2", "Nombre Centro 2": "Nombre Centro"})
+    return df
+
+
+def calcular_estado_solped_y_nivel_servicio(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Pasos M: 'Personalizada agregada6' (Estado Solped), 'Personalizada
+    agregada7'/'Columnas con nombre cambiado5' (Nivel de Servicio final).
+    """
+    df = df.copy()
+    sin_pedido = df["Pedido"].isna()
+    pedido_completo = df["Cantidad pedida"] == df["Cantidad solicitada"]
+
+    df["Estado Solped"] = np.select(
+        [sin_pedido, pedido_completo],
+        ["Sin pedido", "Pedido completo"],
+        default="Pedido incompleto",
+    )
+
+    df["Nivel de Servicio"] = np.where(
+        df["Estado Solped"] == "Pedido incompleto",
+        df["_fecha_repor_fecha_mod"],
+        df["_nivel_servicio_v1"],
+    )
+    return df
+
+
+def calcular_aplica(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Pasos M: 'Personalizada agregada8' (chequeo solo para 'Sin pedido'),
+    'Personalizada agregada9' -> columna 'Aplica?'.
+    """
+    df = df.copy()
+    check = np.where(df["Estado Solped"] == "Sin pedido", df["Nivel de Servicio"], np.nan)
+    df["Aplica?"] = np.where(
+        pd.isna(check) | (check >= config.DIAS_GRACIA_SIN_PEDIDO), "Aplica", "No aplica"
+    )
+    return df
+
+
+def calcular_cumple(df: pd.DataFrame) -> pd.DataFrame:
+    """Paso M: 'Personalizada agregada10' -> columna 'Cumple'. SLA: 10 días
+    para ERP/MRP, 7 días para Ariba."""
+    df = df.copy()
+    cumple_erp_mrp = (df["Nivel de Servicio"] <= config.SLA_DIAS_ERP_MRP) & df["Solped MRP"].isin(
+        ["ERP", "MRP"]
+    )
+    cumple_ariba = (df["Nivel de Servicio"] <= config.SLA_DIAS_ARIBA) & (df["Solped MRP"] == "Ariba")
+    df["Cumple"] = np.where(cumple_erp_mrp | cumple_ariba, "Cumple", "No cumple")
+    return df
+
+
+def pipeline_completo(
+    df_data: pd.DataFrame,
+    df_resp_grupo: pd.DataFrame,
+    df_centro_sociedad: pd.DataFrame,
+    df_resp_mrp: pd.DataFrame,
+    fecha_corte: pd.Timestamp,
+) -> pd.DataFrame:
+    """Corre el pipeline completo, en el mismo orden que el 'let...in' del M."""
+    df = unir_responsables(df_data, df_resp_grupo, df_resp_mrp)
+    df = calcular_solped_mrp(df)
+    df = filtrar_solicitudes_vigentes(df)
+    df = calcular_nivel_servicio_dias(df, fecha_corte)
+    df = unir_centro_sociedad(df, df_centro_sociedad)
+    df = calcular_estado_solped_y_nivel_servicio(df)
+    df = calcular_aplica(df)
+    df = calcular_cumple(df)
+
+    df = df.sort_values("Fecha de solicitud", ascending=False)
+
+    # Limpieza final (equivalente a 'Columnas quitadas2' / 'Columnas quitadas3')
+    columnas_auxiliares = [
+        "_fecha_repor_fecha_mod",
+        "_fecha_pedi_fecha_modi",
+        "_nivel_servicio_v1",
+        "Fecha de liberación",
+        "Cantidad solicitada",
+        "Unidad de medida",
+        "Valor total",
+        "Moneda",
+        "Indicador liberación",
+        "Grupo de artículos",
+        "Autor",
+        "Concluida",
+        "Tipo de posición",
+        "Tipo de imputación",
+        "Consumo",
+        "Pos.solicitud pedido",
+        "Responsable de MRP.Responsable Compra.title",
+        "Comprador por Grupo Compras",
+    ]
+    df = df.drop(columns=[c for c in columnas_auxiliares if c in df.columns])
+    df = df.rename(columns={"Comprador por Grupo Compras2": "Comprador por Grupo Compras"})
+
+    return df.reset_index(drop=True)
+
+
+def calcular_metricas_por_grupo(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
+    """
+    Reemplaza las medidas DAX 'Promedio días de gestión', '% Cumplimiento'
+    y 'Pos. OC generadas', agregadas a nivel de comprador/centro/etc.
+    """
+    def _agg(g):
+        return pd.Series(
+            {
+                "Promedio días de gestión": g["Nivel de Servicio"].mean(),
+                "% Cumplimiento": (g["Cumple"] == "Cumple").sum() / max(len(g), 1) * 100,
+                "Pos. OC generadas": g["Pedido"].notna().sum(),
+            }
+        )
+
+    return df.groupby(group_cols).apply(_agg, include_groups=False).reset_index()
