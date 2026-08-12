@@ -49,6 +49,23 @@ df["Día"] = df["Fecha de pedido"].dt.day
 # Registro de conteos por etapa - para el panel de diagnóstico al final
 checkpoints = [("0. Total tras el pipeline (sin filtros)", len(df))]
 
+# Registro de las 3 métricas en cada etapa, para localizar dónde diverge del pbix
+metricas_por_etapa = []
+
+
+def _snapshot(nombre, d):
+    """Guarda las 3 métricas del pbix para el subconjunto d en esta etapa."""
+    n = len(d)
+    pct = (d["Cumple"] == "Cumple").sum() / n * 100 if n else 0
+    prom = d["Nivel de Servicio"].mean() if n else float("nan")
+    pos_oc = d["Pedido"].nunique()
+    metricas_por_etapa.append(
+        (nombre, f"{n:,}", f"{pct:.2f}%", f"{prom:.2f}" if pd.notna(prom) else "-", f"{pos_oc:,}")
+    )
+
+
+_snapshot("0. Sin filtros", df)
+
 # ---- Filtros: Centro y Aplica? ----
 st.subheader("Filtros")
 c1, c2 = st.columns(2)
@@ -65,6 +82,7 @@ checkpoints.append(("1. Tras filtro Centro", len(df_f)))
 if aplica:
     df_f = df_f[df_f["Aplica?"].isin(aplica)]
 checkpoints.append(("2. Tras filtro Aplica?", len(df_f)))
+_snapshot("2. Tras Centro + Aplica?", df_f)
 
 # ---- Estado Solped ----
 st.caption("Estado Solped (el filtro de fecha de abajo solo aplica dentro de 'Pedido completo')")
@@ -74,7 +92,11 @@ with h1:
 
 if estados:
     df_f = df_f[df_f["Estado Solped"].isin(estados)]
-checkpoints.append(("3. Tras filtro Estado Solped", len(df_f)))
+checkpoints.append(("3. Tras filtro Estado Solped (total)", len(df_f)))
+checkpoints.append(("3a. Sin pedido (antes de jerarquía)", (df_f["Estado Solped"] == "Sin pedido").sum()))
+checkpoints.append(("3b. Pedido incompleto (antes de jerarquía)", (df_f["Estado Solped"] == "Pedido incompleto").sum()))
+checkpoints.append(("3c. Pedido completo (antes de jerarquía)", (df_f["Estado Solped"] == "Pedido completo").sum()))
+_snapshot("3. Tras Estado Solped", df_f)
 
 conteo_sin_pedido_antes = (df_f["Estado Solped"] == "Sin pedido").sum()
 conteo_incompleto_antes = (df_f["Estado Solped"] == "Pedido incompleto").sum()
@@ -108,10 +130,11 @@ if años or meses or fechas:
         cond_fecha &= df_f["Fecha de pedido"].dt.date.isin(fechas)
     df_f = df_f[~es_pedido_completo | (es_pedido_completo & cond_fecha)]
 
-checkpoints.append(("4a. Sin pedido tras jerarquía (debe ser IGUAL al paso 3)", (df_f["Estado Solped"] == "Sin pedido").sum()))
-checkpoints.append(("4b. Pedido incompleto tras jerarquía (debe ser IGUAL al paso 3)", (df_f["Estado Solped"] == "Pedido incompleto").sum()))
-checkpoints.append(("4c. Pedido completo tras jerarquía (este SÍ puede bajar)", (df_f["Estado Solped"] == "Pedido completo").sum()))
+checkpoints.append(("4a. Sin pedido tras jerarquía (debe ser IGUAL a 3a)", (df_f["Estado Solped"] == "Sin pedido").sum()))
+checkpoints.append(("4b. Pedido incompleto tras jerarquía (debe ser IGUAL a 3b)", (df_f["Estado Solped"] == "Pedido incompleto").sum()))
+checkpoints.append(("4c. Pedido completo tras jerarquía (debe ser MENOR O IGUAL a 3c)", (df_f["Estado Solped"] == "Pedido completo").sum()))
 checkpoints.append(("4. Total tras jerarquía de fecha", len(df_f)))
+_snapshot("4. Tras jerarquía Año/Mes/Día", df_f)
 
 # ---- Solped MRP y Cumple ----
 c3, c4 = st.columns(2)
@@ -123,10 +146,12 @@ with c4:
 if solped_mrp:
     df_f = df_f[df_f["Solped MRP"].isin(solped_mrp)]
 checkpoints.append(("5. Tras filtro Solped MRP", len(df_f)))
+_snapshot("5. Tras Solped MRP", df_f)
 
 if cumple:
     df_f = df_f[df_f["Cumple"].isin(cumple)]
 checkpoints.append(("6. Tras filtro Cumple (RESULTADO FINAL)", len(df_f)))
+_snapshot("6. RESULTADO FINAL", df_f)
 
 # ---- Panel de diagnóstico ----
 with st.expander("🔍 Diagnóstico de filtrado (para comparar contra el pbix)"):
@@ -137,6 +162,9 @@ with st.expander("🔍 Diagnóstico de filtrado (para comparar contra el pbix)")
         "en cuál empiezan a diferir."
     )
     st.table(pd.DataFrame(checkpoints, columns=["Etapa", "Filas"]))
+
+    st.write("**Las 3 métricas en cada etapa del filtro** — compara contra el pbix aplicando los mismos slicers, uno a uno, para ver en cuál se separan:")
+    st.table(pd.DataFrame(metricas_por_etapa, columns=["Etapa", "Filas", "% Cumplimiento", "Prom. días", "Pos. OC"]))
 
     st.write("Detalle de las solicitudes en el resultado final, para cruzar 1 a 1 contra el export del pbix:")
     st.dataframe(
@@ -151,11 +179,25 @@ with st.expander("🔍 Diagnóstico de filtrado (para comparar contra el pbix)")
 c1, c2, c3 = st.columns(3)
 pct_cumplimiento = (df_f["Cumple"] == "Cumple").sum() / max(len(df_f), 1) * 100
 promedio_dias = df_f["Nivel de Servicio"].mean()
-total_pedidos = df_f["Pedido"].nunique()
+# La tarjeta del pbix usa recuento DISTINTIVO de pedidos (quita duplicados),
+# aunque el rótulo diga "Pos.". OJO: DISTINCTCOUNT en DAX cuenta el BLANK
+# como un valor más si hay filas sin pedido; pandas lo excluye. Por eso se
+# muestra también el conteo con blanco, para poder cuadrar contra el pbix.
+pedidos_distintos = df_f["Pedido"].nunique()
+hay_blancos = df_f["Pedido"].isna().any()
+distinct_dax = pedidos_distintos + (1 if hay_blancos else 0)
+pos_oc_filas = df_f["Pedido"].notna().sum()
 
-c1.metric("% Cumplimiento", f"{pct_cumplimiento:.1f}%")
-c2.metric("Promedio días de gestión", f"{promedio_dias:.1f}" if pd.notna(promedio_dias) else "-")
-c3.metric("Pedidos (OC)", f"{total_pedidos:,}")
+c1.metric("% Cumplimiento", f"{pct_cumplimiento:.2f}%")
+c2.metric("Promedio días de gestión", f"{promedio_dias:.2f}" if pd.notna(promedio_dias) else "-")
+c3.metric(
+    "Pos. OC generadas (distintivo)",
+    f"{pedidos_distintos:,}",
+    help=(
+        f"DISTINCTCOUNT equivalente en DAX (contando el blanco): {distinct_dax:,}\n"
+        f"Posiciones/filas con pedido: {pos_oc_filas:,}"
+    ),
+)
 
 st.divider()
 
