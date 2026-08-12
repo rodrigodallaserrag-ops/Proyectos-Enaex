@@ -58,7 +58,7 @@ def _snapshot(nombre, d):
     n = len(d)
     pct = (d["Cumple"] == "Cumple").sum() / n * 100 if n else 0
     prom = d["Nivel de Servicio"].mean() if n else float("nan")
-    pos_oc = d["Pedido"].nunique()
+    pos_oc = d["Pedido"].nunique() + (1 if d["Pedido"].isna().any() else 0)
     metricas_por_etapa.append(
         (nombre, f"{n:,}", f"{pct:.2f}%", f"{prom:.2f}" if pd.notna(prom) else "-", f"{pos_oc:,}")
     )
@@ -179,25 +179,13 @@ with st.expander("🔍 Diagnóstico de filtrado (para comparar contra el pbix)")
 c1, c2, c3 = st.columns(3)
 pct_cumplimiento = (df_f["Cumple"] == "Cumple").sum() / max(len(df_f), 1) * 100
 promedio_dias = df_f["Nivel de Servicio"].mean()
-# La tarjeta del pbix usa recuento DISTINTIVO de pedidos (quita duplicados),
-# aunque el rótulo diga "Pos.". OJO: DISTINCTCOUNT en DAX cuenta el BLANK
-# como un valor más si hay filas sin pedido; pandas lo excluye. Por eso se
-# muestra también el conteo con blanco, para poder cuadrar contra el pbix.
-pedidos_distintos = df_f["Pedido"].nunique()
-hay_blancos = df_f["Pedido"].isna().any()
-distinct_dax = pedidos_distintos + (1 if hay_blancos else 0)
-pos_oc_filas = df_f["Pedido"].notna().sum()
+# Réplica de DISTINCTCOUNT de DAX: cuenta valores distintos e incluye el BLANK
+# como uno más cuando existen filas sin pedido (pandas lo excluye por defecto).
+pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
 c1.metric("% Cumplimiento", f"{pct_cumplimiento:.2f}%")
 c2.metric("Promedio días de gestión", f"{promedio_dias:.2f}" if pd.notna(promedio_dias) else "-")
-c3.metric(
-    "Pos. OC generadas (distintivo)",
-    f"{pedidos_distintos:,}",
-    help=(
-        f"DISTINCTCOUNT equivalente en DAX (contando el blanco): {distinct_dax:,}\n"
-        f"Posiciones/filas con pedido: {pos_oc_filas:,}"
-    ),
-)
+c3.metric("Pos. OC generadas", f"{pedidos_distintos:,}")
 
 st.divider()
 
