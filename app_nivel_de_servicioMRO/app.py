@@ -60,7 +60,7 @@ def _snapshot(nombre, d):
     prom = d["Nivel de Servicio"].mean() if n else float("nan")
     pos_oc = d["Pedido"].nunique() + (1 if d["Pedido"].isna().any() else 0)
     metricas_por_etapa.append(
-        (nombre, f"{n:,}", f"{pct:.2f}%", f"{prom:.2f}" if pd.notna(prom) else "-", f"{pos_oc:,}")
+        (nombre, f"{n:,}", f"{pct:.0f}%", f"{prom:.0f}" if pd.notna(prom) else "-", f"{pos_oc:,}")
     )
 
 
@@ -150,8 +150,58 @@ _snapshot("5. Tras Solped MRP", df_f)
 
 if cumple:
     df_f = df_f[df_f["Cumple"].isin(cumple)]
-checkpoints.append(("6. Tras filtro Cumple (RESULTADO FINAL)", len(df_f)))
-_snapshot("6. RESULTADO FINAL", df_f)
+checkpoints.append(("6. Tras filtro Cumple", len(df_f)))
+_snapshot("6. Tras Cumple", df_f)
+
+# ---- Segunda capa: filtro por rango de Nivel de Servicio (días) ----
+# Los valores negativos aparecen cuando la solped se modificó DESPUÉS de que
+# ya existía la OC (Fecha modificación > Fecha de pedido). No representan
+# gestión real y, por la regla de Cumple (<=10 o <=7), siempre puntúan como
+# "Cumple", lo que infla el indicador.
+st.divider()
+st.subheader("Filtro por días de gestión (Nivel de Servicio)")
+
+if len(df_f):
+    ns_min_dato = int(df_f["Nivel de Servicio"].min())
+    ns_max_dato = int(df_f["Nivel de Servicio"].max())
+    n_negativos = (df_f["Nivel de Servicio"] < 0).sum()
+
+    f1, f2 = st.columns([1, 2])
+    with f1:
+        excluir_negativos = st.checkbox(
+            "Excluir negativos (solo desde 0)",
+            value=False,
+            help=(
+                f"Hay {n_negativos:,} filas con días negativos en la selección actual. "
+                "Ocurren cuando la solped se modificó después de generada la OC. "
+                "Al excluirlas el promedio deja de estar distorsionado."
+            ),
+        )
+    with f2:
+        if excluir_negativos:
+            rango_ns = (0, ns_max_dato)
+            st.caption(f"Rango aplicado: 0 a {ns_max_dato:,} días (negativos excluidos)")
+        elif ns_min_dato < ns_max_dato:
+            rango_ns = st.slider(
+                "Rango de días de gestión",
+                min_value=ns_min_dato,
+                max_value=ns_max_dato,
+                value=(ns_min_dato, ns_max_dato),
+            )
+        else:
+            rango_ns = (ns_min_dato, ns_max_dato)
+            st.caption(f"Todas las filas tienen {ns_min_dato} días")
+
+    df_f = df_f[df_f["Nivel de Servicio"].between(rango_ns[0], rango_ns[1])]
+
+    if n_negativos and not excluir_negativos:
+        st.caption(
+            f"⚠️ La selección incluye {n_negativos:,} filas con días negativos, "
+            "que siempre cuentan como 'Cumple' y bajan el promedio."
+        )
+
+checkpoints.append(("7. Tras filtro Nivel de Servicio (RESULTADO FINAL)", len(df_f)))
+_snapshot("7. RESULTADO FINAL", df_f)
 
 # ---- Panel de diagnóstico ----
 with st.expander("🔍 Diagnóstico de filtrado (para comparar contra el pbix)"):
@@ -183,22 +233,53 @@ promedio_dias = df_f["Nivel de Servicio"].mean()
 # como uno más cuando existen filas sin pedido (pandas lo excluye por defecto).
 pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
-c1.metric("% Cumplimiento", f"{pct_cumplimiento:.2f}%")
-c2.metric("Promedio días de gestión", f"{promedio_dias:.2f}" if pd.notna(promedio_dias) else "-")
-c3.metric("Pos. OC generadas", f"{pedidos_distintos:,}")
+c1.metric("% Cumplimiento", f"{pct_cumplimiento:.0f}%")
+c2.metric("Promedio días de gestión", f"{promedio_dias:.0f}" if pd.notna(promedio_dias) else "-")
+c3.metric("OC generadas", f"{pedidos_distintos:,}", help="Órdenes de compra distintas (sin duplicados)")
 
 st.divider()
 
 # ---- Tabla por Comprador ----
 st.subheader("Por comprador")
-tabla_comprador = transform.calcular_metricas_por_grupo(df_f, ["Comprador por Grupo Compras"])
-st.dataframe(tabla_comprador, use_container_width=True)
+st.caption(
+    "Asignación por **grupo de compras**: las líneas MRP se reparten entre los "
+    "compradores responsables de cada grupo, en vez de concentrarse en el responsable de MRP."
+)
+col_comprador = (
+    "Comprador (Grupo de compras)"
+    if "Comprador (Grupo de compras)" in df_f.columns
+    else "Comprador por Grupo Compras"
+)
+tabla_comprador = transform.calcular_metricas_por_grupo(df_f, [col_comprador])
+tabla_comprador = transform.agregar_fila_total(tabla_comprador, df_f, [col_comprador])
+
+_formato = {
+    "Promedio días de gestión": "{:.0f}",
+    "% Cumplimiento": "{:.0f}%",
+    "Pos. OC generadas": "{:,.0f}",
+}
+
+
+def _resaltar_total(fila):
+    """Deja la fila TOTAL en negrita y con fondo, como en una planilla."""
+    es_total = str(fila.iloc[0]) == "TOTAL"
+    return ["font-weight: bold; background-color: rgba(128,128,128,0.15)" if es_total else "" for _ in fila]
+
+
+st.dataframe(
+    tabla_comprador.style.format(_formato).apply(_resaltar_total, axis=1),
+    use_container_width=True,
+)
 
 # ---- Tabla por Centro ----
 st.subheader("Por centro")
 group_cols_centro = [c for c in ["Centro", "Nombre Centro"] if c in df_f.columns]
 tabla_centro = transform.calcular_metricas_por_grupo(df_f, group_cols_centro)
-st.dataframe(tabla_centro, use_container_width=True)
+tabla_centro = transform.agregar_fila_total(tabla_centro, df_f, group_cols_centro)
+st.dataframe(
+    tabla_centro.style.format(_formato).apply(_resaltar_total, axis=1),
+    use_container_width=True,
+)
 
 with st.expander("Ver detalle de solicitudes"):
     st.dataframe(df_f, use_container_width=True)
