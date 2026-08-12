@@ -47,26 +47,55 @@ df = transform.pipeline_completo(
 )
 
 # ---- Filtros (slicers del pbix) ----
-c1, c2, c3, c4, c5 = st.columns(5)
+df["Año"] = df["Fecha de pedido"].dt.year
+df["Mes"] = df["Fecha de pedido"].dt.month
+df["Día"] = df["Fecha de pedido"].dt.day
+
+st.subheader("Filtros")
+c1, c2 = st.columns(2)
 with c1:
     centros = st.multiselect("Centro", sorted(df["Centro"].dropna().unique()))
 with c2:
-    estados = st.multiselect("Estado Solped", sorted(df["Estado Solped"].dropna().unique()))
-with c3:
     aplica = st.multiselect("Aplica?", sorted(df["Aplica?"].dropna().unique()))
-with c4:
-    solped_mrp = st.multiselect("Solped MRP", sorted(df["Solped MRP"].dropna().unique()))
-with c5:
-    cumple = st.multiselect("Nivel de Servicio (Cumple)", sorted(df["Cumple"].dropna().unique()))
 
 df_f = df.copy()
-for col, valores in [
-    ("Centro", centros),
-    ("Estado Solped", estados),
-    ("Aplica?", aplica),
-    ("Solped MRP", solped_mrp),
-    ("Cumple", cumple),
-]:
+if centros:
+    df_f = df_f[df_f["Centro"].isin(centros)]
+if aplica:
+    df_f = df_f[df_f["Aplica?"].isin(aplica)]
+
+# Jerarquía: Estado Solped -> Año -> Mes -> Día (de Fecha de pedido).
+# Nota: las filas "Sin pedido" no tienen Fecha de pedido, así que al filtrar
+# por Año/Mes/Día quedan fuera automáticamente (igual que en el pbix).
+st.caption("Jerarquía: Estado Solped → Año → Mes → Día (Fecha de pedido)")
+h1, h2, h3, h4 = st.columns(4)
+with h1:
+    estados = st.multiselect("Estado Solped", sorted(df_f["Estado Solped"].dropna().unique()))
+if estados:
+    df_f = df_f[df_f["Estado Solped"].isin(estados)]
+
+with h2:
+    años = st.multiselect("Año", sorted(df_f["Año"].dropna().unique().astype(int)))
+if años:
+    df_f = df_f[df_f["Año"].isin(años)]
+
+with h3:
+    meses = st.multiselect("Mes", sorted(df_f["Mes"].dropna().unique().astype(int)))
+if meses:
+    df_f = df_f[df_f["Mes"].isin(meses)]
+
+with h4:
+    dias = st.multiselect("Día", sorted(df_f["Día"].dropna().unique().astype(int)))
+if dias:
+    df_f = df_f[df_f["Día"].isin(dias)]
+
+c3, c4 = st.columns(2)
+with c3:
+    solped_mrp = st.multiselect("Solped MRP", sorted(df_f["Solped MRP"].dropna().unique()))
+with c4:
+    cumple = st.multiselect("Nivel de Servicio (Cumple)", sorted(df_f["Cumple"].dropna().unique()))
+
+for col, valores in [("Solped MRP", solped_mrp), ("Cumple", cumple)]:
     if valores:
         df_f = df_f[df_f[col].isin(valores)]
 
@@ -95,3 +124,4 @@ st.dataframe(tabla_centro, use_container_width=True)
 
 with st.expander("Ver detalle de solicitudes"):
     st.dataframe(df_f, use_container_width=True)
+
