@@ -65,29 +65,40 @@ if aplica:
     df_f = df_f[df_f["Aplica?"].isin(aplica)]
 
 # Jerarquía: Estado Solped -> Año -> Mes -> Día (de Fecha de pedido).
-# Nota: las filas "Sin pedido" no tienen Fecha de pedido, así que al filtrar
-# por Año/Mes/Día quedan fuera automáticamente (igual que en el pbix).
-st.caption("Jerarquía: Estado Solped → Año → Mes → Día (Fecha de pedido)")
+# OJO: el filtro de fecha solo restringe las filas "Pedido completo".
+# "Sin pedido" y "Pedido incompleto", si están seleccionados, se muestran
+# completos sin que la fecha los afecte (igual que en el pbix).
+st.caption("Estado Solped (el filtro de fecha solo aplica dentro de 'Pedido completo')")
 h1, h2, h3, h4 = st.columns(4)
 with h1:
     estados = st.multiselect("Estado Solped", sorted(df_f["Estado Solped"].dropna().unique()))
-if estados:
-    df_f = df_f[df_f["Estado Solped"].isin(estados)]
+
+df_f = df_f[df_f["Estado Solped"].isin(estados)] if estados else df_f
+
+# Opciones de Año/Mes/Día calculadas SOLO sobre el subconjunto "Pedido completo"
+df_pedido_completo = df_f[df_f["Estado Solped"] == "Pedido completo"]
 
 with h2:
-    años = st.multiselect("Año", sorted(df_f["Año"].dropna().unique().astype(int)))
-if años:
-    df_f = df_f[df_f["Año"].isin(años)]
-
+    años = st.multiselect("Año", sorted(df_pedido_completo["Año"].dropna().unique().astype(int)))
 with h3:
-    meses = st.multiselect("Mes", sorted(df_f["Mes"].dropna().unique().astype(int)))
-if meses:
-    df_f = df_f[df_f["Mes"].isin(meses)]
-
+    _base_mes = df_pedido_completo[df_pedido_completo["Año"].isin(años)] if años else df_pedido_completo
+    meses = st.multiselect("Mes", sorted(_base_mes["Mes"].dropna().unique().astype(int)))
 with h4:
-    dias = st.multiselect("Día", sorted(df_f["Día"].dropna().unique().astype(int)))
-if dias:
-    df_f = df_f[df_f["Día"].isin(dias)]
+    _base_dia = _base_mes[_base_mes["Mes"].isin(meses)] if meses else _base_mes
+    dias = st.multiselect("Día", sorted(_base_dia["Día"].dropna().unique().astype(int)))
+
+if años or meses or dias:
+    es_pedido_completo = df_f["Estado Solped"] == "Pedido completo"
+    cond_fecha = pd.Series(True, index=df_f.index)
+    if años:
+        cond_fecha &= df_f["Año"].isin(años)
+    if meses:
+        cond_fecha &= df_f["Mes"].isin(meses)
+    if dias:
+        cond_fecha &= df_f["Día"].isin(dias)
+    # Se mantienen: filas que NO son "Pedido completo" (intactas) + las que
+    # SÍ son "Pedido completo" y además cumplen la fecha seleccionada.
+    df_f = df_f[~es_pedido_completo | (es_pedido_completo & cond_fecha)]
 
 c3, c4 = st.columns(2)
 with c3:
