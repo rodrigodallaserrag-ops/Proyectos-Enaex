@@ -240,7 +240,6 @@ def calcular_metricas_por_grupo(df: pd.DataFrame, group_cols: list[str]) -> pd.D
                 "Promedio días de gestión": g["Nivel de Servicio"].mean(),
                 "% Cumplimiento": (g["Cumple"] == "Cumple").sum() / max(len(g), 1) * 100,
                 "Pos. OC generadas": g["Pedido"].notna().sum(),
-                "Líneas": len(g),
             }
         )
 
@@ -267,8 +266,6 @@ def agregar_fila_total(tabla: pd.DataFrame, df_completo: pd.DataFrame, group_col
     total["Promedio días de gestión"] = df_completo["Nivel de Servicio"].mean() if n else float("nan")
     total["% Cumplimiento"] = (df_completo["Cumple"] == "Cumple").sum() / n * 100 if n else 0
     total["Pos. OC generadas"] = tabla["Pos. OC generadas"].sum()
-    if "Líneas" in tabla.columns:
-        total["Líneas"] = n
 
     return pd.concat([tabla, pd.DataFrame([total])], ignore_index=True)
 
@@ -301,6 +298,4 @@ def tabla_centros_fija(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
     tabla["Pos. OC generadas"] = tabla["Pos. OC generadas"].fillna(0)
-    if "Líneas" in tabla.columns:
-        tabla["Líneas"] = tabla["Líneas"].fillna(0)
     return agregar_fila_total(tabla, d, ["Centro"])
