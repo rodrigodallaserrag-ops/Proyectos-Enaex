@@ -225,17 +225,49 @@ with st.expander("🔍 Diagnóstico de filtrado (para comparar contra el pbix)")
     csv = df_f.to_csv(index=False).encode("utf-8")
     st.download_button("Descargar detalle filtrado (CSV)", csv, "detalle_filtrado.csv", "text/csv")
 
-# ---- Tarjetas ----
-c1, c2, c3 = st.columns(3)
+# ---- Tarjetas con semáforo ----
+VERDE = "rgba(35, 145, 75, 0.16)"
+VERDE_BORDE = "rgba(35, 145, 75, 0.55)"
+ROJO = "rgba(204, 0, 0, 0.14)"
+ROJO_BORDE = "rgba(204, 0, 0, 0.55)"
+
 pct_cumplimiento = (df_f["Cumple"] == "Cumple").sum() / max(len(df_f), 1) * 100
 promedio_dias = df_f["Nivel de Servicio"].mean()
-# Réplica de DISTINCTCOUNT de DAX: cuenta valores distintos e incluye el BLANK
-# como uno más cuando existen filas sin pedido (pandas lo excluye por defecto).
 pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
-c1.metric("% Cumplimiento", f"{pct_cumplimiento:.0f}%")
-c2.metric("Promedio días de gestión", f"{promedio_dias:.0f}" if pd.notna(promedio_dias) else "-")
-c3.metric("OC generadas", f"{pedidos_distintos:,}", help="Órdenes de compra distintas (sin duplicados)")
+
+def tarjeta(titulo: str, valor: str, fondo: str = "rgba(64,75,85,0.07)", borde: str = "rgba(64,75,85,0.35)") -> str:
+    return (
+        f'<div style="background:{fondo};border:1.5px solid {borde};border-radius:8px;'
+        f'padding:14px 18px;text-align:center;">'
+        f'<div style="font-size:0.78rem;color:#404B55;font-weight:600;letter-spacing:.03em;'
+        f'text-transform:uppercase;opacity:.85;margin-bottom:4px;">{titulo}</div>'
+        f'<div style="font-size:2rem;font-weight:700;color:#404B55;line-height:1.1;">{valor}</div>'
+        f"</div>"
+    )
+
+
+# Semáforo: días de gestión <= 10 verde, > 10 rojo
+if pd.isna(promedio_dias):
+    f_dias, b_dias, txt_dias = "rgba(64,75,85,0.07)", "rgba(64,75,85,0.35)", "-"
+elif promedio_dias > 10:
+    f_dias, b_dias, txt_dias = ROJO, ROJO_BORDE, f"{promedio_dias:.0f}"
+else:
+    f_dias, b_dias, txt_dias = VERDE, VERDE_BORDE, f"{promedio_dias:.0f}"
+
+# Semáforo: % cumplimiento >= 85 verde, < 85 rojo
+if pct_cumplimiento >= 85:
+    f_pct, b_pct = VERDE, VERDE_BORDE
+else:
+    f_pct, b_pct = ROJO, ROJO_BORDE
+
+t1, t2, t3 = st.columns(3)
+with t1:
+    st.markdown(tarjeta("Promedio días de gestión", txt_dias, f_dias, b_dias), unsafe_allow_html=True)
+with t2:
+    st.markdown(tarjeta("% Cumplimiento", f"{pct_cumplimiento:.0f}%", f_pct, b_pct), unsafe_allow_html=True)
+with t3:
+    st.markdown(tarjeta("OC generadas", f"{pedidos_distintos:,}"), unsafe_allow_html=True)
 
 st.divider()
 
@@ -244,7 +276,7 @@ ENAEX_GRIS = "#404B55"
 ENAEX_ROJO = "#CC0000"
 
 
-def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None) -> str:
+def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bool = False) -> str:
     """
     Renderiza la tabla como HTML con la paleta corporativa: encabezado gris
     oscuro, filas alternadas, y la fila TOTAL destacada en rojo.
@@ -259,9 +291,14 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None) -> str:
             return f"{val:,.0f}"
         if col == "% Cumplimiento":
             return f"{val:,.0f}%"
-        if col == "Pos. OC generadas":
+        if col in ("Pos. OC generadas", "Líneas"):
             return f"{val:,.0f}"
         return str(val)
+
+    pad = "4px 8px" if compacta else "7px 12px"
+    pad_th = "6px 8px" if compacta else "9px 12px"
+    fuente = "0.78rem" if compacta else "0.86rem"
+    fuente_th = "0.72rem" if compacta else "0.82rem"
 
     filas = []
     for i, (_, r) in enumerate(tabla.iterrows()):
@@ -275,20 +312,20 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None) -> str:
         for j, c in enumerate(cols):
             align = "left" if j == 0 else "right"
             celdas.append(
-                f'<td style="padding:7px 12px;text-align:{align};'
+                f'<td style="padding:{pad};text-align:{align};'
                 f'border-bottom:1px solid #e3e5e8;white-space:nowrap;">{_fmt(c, r[c])}</td>'
             )
         filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
     encabezados = "".join(
-        f'<th style="padding:9px 12px;text-align:{"left" if j == 0 else "right"};'
-        f'background:{ENAEX_GRIS};color:#fff;font-weight:600;font-size:0.82rem;'
+        f'<th style="padding:{pad_th};text-align:{"left" if j == 0 else "right"};'
+        f'background:{ENAEX_GRIS};color:#fff;font-weight:600;font-size:{fuente_th};'
         f'letter-spacing:.02em;position:sticky;top:0;z-index:2;white-space:nowrap;">{c}</th>'
         for j, c in enumerate(cols)
     )
 
     tabla_html = (
-        f'<table style="width:100%;border-collapse:collapse;font-size:0.86rem;'
+        f'<table style="width:100%;border-collapse:collapse;font-size:{fuente};'
         f'font-family:inherit;border:1px solid #d8dbdf;">'
         f"<thead><tr>{encabezados}</tr></thead><tbody>{''.join(filas)}</tbody></table>"
     )
@@ -325,7 +362,7 @@ with vc1:
     st.subheader("Por centro logístico")
     st.caption("Vista fija — el total calza con la vista por comprador.")
     tabla_fija = transform.tabla_centros_fija(df_f)
-    st.markdown(tabla_enaex(tabla_fija), unsafe_allow_html=True)
+    st.markdown(tabla_enaex(tabla_fija, compacta=True), unsafe_allow_html=True)
 
 with vc2:
     st.subheader("Detalle por centro")
@@ -334,7 +371,7 @@ with vc2:
     tabla_detalle = transform.calcular_metricas_por_grupo(df_f, cols_detalle)
     tabla_detalle = tabla_detalle.sort_values("Pos. OC generadas", ascending=False)
     tabla_detalle = transform.agregar_fila_total(tabla_detalle, df_f, cols_detalle)
-    st.markdown(tabla_enaex(tabla_detalle, max_height=340), unsafe_allow_html=True)
+    st.markdown(tabla_enaex(tabla_detalle, max_height=300, compacta=True), unsafe_allow_html=True)
 
 with st.expander("Ver detalle de solicitudes"):
     st.dataframe(df_f, use_container_width=True)
