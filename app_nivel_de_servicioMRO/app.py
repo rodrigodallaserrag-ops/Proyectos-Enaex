@@ -239,6 +239,68 @@ c3.metric("OC generadas", f"{pedidos_distintos:,}", help="Órdenes de compra dis
 
 st.divider()
 
+# ---- Estilo corporativo Enaex para las tablas ----
+ENAEX_GRIS = "#404B55"
+ENAEX_ROJO = "#CC0000"
+
+
+def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None) -> str:
+    """
+    Renderiza la tabla como HTML con la paleta corporativa: encabezado gris
+    oscuro, filas alternadas, y la fila TOTAL destacada en rojo.
+    max_height (px) activa el scroll vertical con encabezado fijo.
+    """
+    cols = list(tabla.columns)
+
+    def _fmt(col, val):
+        if pd.isna(val):
+            return "-"
+        if col == "Promedio días de gestión":
+            return f"{val:,.0f}"
+        if col == "% Cumplimiento":
+            return f"{val:,.0f}%"
+        if col == "Pos. OC generadas":
+            return f"{val:,.0f}"
+        return str(val)
+
+    filas = []
+    for i, (_, r) in enumerate(tabla.iterrows()):
+        es_total = str(r.iloc[0]) == "TOTAL"
+        if es_total:
+            estilo_fila = f"background:{ENAEX_GRIS};color:#fff;font-weight:700;border-top:2px solid {ENAEX_ROJO};"
+        else:
+            fondo = "#ffffff" if i % 2 == 0 else "#f4f5f7"
+            estilo_fila = f"background:{fondo};color:{ENAEX_GRIS};"
+        celdas = []
+        for j, c in enumerate(cols):
+            align = "left" if j == 0 else "right"
+            celdas.append(
+                f'<td style="padding:7px 12px;text-align:{align};'
+                f'border-bottom:1px solid #e3e5e8;white-space:nowrap;">{_fmt(c, r[c])}</td>'
+            )
+        filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
+
+    encabezados = "".join(
+        f'<th style="padding:9px 12px;text-align:{"left" if j == 0 else "right"};'
+        f'background:{ENAEX_GRIS};color:#fff;font-weight:600;font-size:0.82rem;'
+        f'letter-spacing:.02em;position:sticky;top:0;z-index:2;white-space:nowrap;">{c}</th>'
+        for j, c in enumerate(cols)
+    )
+
+    tabla_html = (
+        f'<table style="width:100%;border-collapse:collapse;font-size:0.86rem;'
+        f'font-family:inherit;border:1px solid #d8dbdf;">'
+        f"<thead><tr>{encabezados}</tr></thead><tbody>{''.join(filas)}</tbody></table>"
+    )
+
+    if max_height:
+        return (
+            f'<div style="max-height:{max_height}px;overflow-y:auto;'
+            f'border:1px solid #d8dbdf;border-radius:4px;">{tabla_html}</div>'
+        )
+    return f'<div style="border-radius:4px;overflow:hidden;">{tabla_html}</div>'
+
+
 # ---- Tabla por Comprador ----
 st.subheader("Por comprador")
 st.caption(
@@ -252,34 +314,27 @@ col_comprador = (
 )
 tabla_comprador = transform.calcular_metricas_por_grupo(df_f, [col_comprador])
 tabla_comprador = transform.agregar_fila_total(tabla_comprador, df_f, [col_comprador])
+st.markdown(tabla_enaex(tabla_comprador), unsafe_allow_html=True)
 
-_formato = {
-    "Promedio días de gestión": "{:.0f}",
-    "% Cumplimiento": "{:.0f}%",
-    "Pos. OC generadas": "{:,.0f}",
-}
+st.write("")
 
+# ---- Dos vistas por centro, en paralelo ----
+vc1, vc2 = st.columns(2)
 
-def _resaltar_total(fila):
-    """Deja la fila TOTAL en negrita y con fondo, como en una planilla."""
-    es_total = str(fila.iloc[0]) == "TOTAL"
-    return ["font-weight: bold; background-color: rgba(128,128,128,0.15)" if es_total else "" for _ in fila]
+with vc1:
+    st.subheader("Por centro logístico")
+    st.caption("Vista fija — el total calza con la vista por comprador.")
+    tabla_fija = transform.tabla_centros_fija(df_f)
+    st.markdown(tabla_enaex(tabla_fija), unsafe_allow_html=True)
 
-
-st.dataframe(
-    tabla_comprador.style.format(_formato).apply(_resaltar_total, axis=1),
-    use_container_width=True,
-)
-
-# ---- Tabla por Centro ----
-st.subheader("Por centro")
-group_cols_centro = [c for c in ["Centro", "Nombre Centro"] if c in df_f.columns]
-tabla_centro = transform.calcular_metricas_por_grupo(df_f, group_cols_centro)
-tabla_centro = transform.agregar_fila_total(tabla_centro, df_f, group_cols_centro)
-st.dataframe(
-    tabla_centro.style.format(_formato).apply(_resaltar_total, axis=1),
-    use_container_width=True,
-)
+with vc2:
+    st.subheader("Detalle por centro")
+    st.caption("Centros activos según los filtros aplicados.")
+    cols_detalle = [c for c in ["Centro", "Nombre Centro 2"] if c in df_f.columns]
+    tabla_detalle = transform.calcular_metricas_por_grupo(df_f, cols_detalle)
+    tabla_detalle = tabla_detalle.sort_values("Pos. OC generadas", ascending=False)
+    tabla_detalle = transform.agregar_fila_total(tabla_detalle, df_f, cols_detalle)
+    st.markdown(tabla_enaex(tabla_detalle, max_height=340), unsafe_allow_html=True)
 
 with st.expander("Ver detalle de solicitudes"):
     st.dataframe(df_f, use_container_width=True)
