@@ -268,3 +268,34 @@ def agregar_fila_total(tabla: pd.DataFrame, df_completo: pd.DataFrame, group_col
     total["Pos. OC generadas"] = tabla["Pos. OC generadas"].sum()
 
     return pd.concat([tabla, pd.DataFrame([total])], ignore_index=True)
+
+
+# Centros logísticos que se muestran como fila fija propia. Todo lo demás
+# (Casa Matriz, Enaex SKC ING, Nittra, Explonum, sin match, etc.) se pliega
+# en "Plantas de Servicio" para que el total calce con la vista por comprador.
+CENTROS_FIJOS = ["Planta Prillex", "Planta Rio Loa", "Planta Punta Teatinos", "Plantas de Servicio"]
+
+
+def agregar_grupo_centro(df: pd.DataFrame) -> pd.DataFrame:
+    """Crea la columna 'Grupo Centro' con las 4 categorías fijas."""
+    df = df.copy()
+    nombre = df["Nombre Centro"] if "Nombre Centro" in df.columns else pd.Series(index=df.index, dtype=object)
+    df["Grupo Centro"] = nombre.where(nombre.isin(CENTROS_FIJOS[:3]), "Plantas de Servicio")
+    return df
+
+
+def tabla_centros_fija(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Vista fija: siempre las 4 filas de centro logístico, en orden, aunque
+    alguna quede sin datos tras los filtros.
+    """
+    d = agregar_grupo_centro(df)
+    tabla = calcular_metricas_por_grupo(d, ["Grupo Centro"])
+    tabla = (
+        tabla.set_index("Grupo Centro")
+        .reindex(CENTROS_FIJOS)
+        .rename_axis("Centro")
+        .reset_index()
+    )
+    tabla["Pos. OC generadas"] = tabla["Pos. OC generadas"].fillna(0)
+    return agregar_fila_total(tabla, d, ["Centro"])
