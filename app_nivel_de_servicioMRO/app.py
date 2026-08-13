@@ -295,10 +295,10 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
             return f"{val:,.0f}"
         return str(val)
 
-    pad = "4px 8px" if compacta else "7px 12px"
-    pad_th = "6px 8px" if compacta else "9px 12px"
-    fuente = "0.78rem" if compacta else "0.86rem"
-    fuente_th = "0.72rem" if compacta else "0.82rem"
+    pad = "4px 6px" if compacta else "7px 12px"
+    pad_th = "5px 6px" if compacta else "9px 12px"
+    fuente = "0.72rem" if compacta else "0.86rem"
+    fuente_th = "0.66rem" if compacta else "0.82rem"
 
     filas = []
     for i, (_, r) in enumerate(tabla.iterrows()):
@@ -317,25 +317,34 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
             )
         filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
+    # En modo compacto los títulos largos se abrevian: son los que hacen que la
+    # tabla se salga del recuadro cuando va en media pantalla.
+    abrev = {
+        "Promedio días de gestión": "Días gest.",
+        "% Cumplimiento": "% Cumpl.",
+        "Pos. OC generadas": "Pos. OC",
+    }
     encabezados = "".join(
         f'<th style="padding:{pad_th};text-align:{"left" if j == 0 else "right"};'
         f'background:{ENAEX_GRIS};color:#fff;font-weight:600;font-size:{fuente_th};'
-        f'letter-spacing:.02em;position:sticky;top:0;z-index:2;white-space:nowrap;">{c}</th>'
+        f'letter-spacing:.02em;position:sticky;top:0;z-index:2;white-space:nowrap;">'
+        f"{abrev.get(c, c) if compacta else c}</th>"
         for j, c in enumerate(cols)
     )
 
     tabla_html = (
-        f'<table style="width:100%;border-collapse:collapse;font-size:{fuente};'
+        f'<table style="width:100%;min-width:{"420px" if compacta else "auto"};border-collapse:collapse;font-size:{fuente};'
         f'font-family:inherit;border:1px solid #d8dbdf;">'
         f"<thead><tr>{encabezados}</tr></thead><tbody>{''.join(filas)}</tbody></table>"
     )
 
-    if max_height:
-        return (
-            f'<div style="max-height:{max_height}px;overflow-y:auto;'
-            f'border:1px solid #d8dbdf;border-radius:4px;">{tabla_html}</div>'
-        )
-    return f'<div style="border-radius:4px;overflow:hidden;">{tabla_html}</div>'
+    # Scroll horizontal siempre disponible (para tablas angostas en dos columnas),
+    # y vertical solo si se pidió max_height.
+    alto = f"max-height:{max_height}px;overflow-y:auto;" if max_height else ""
+    return (
+        f'<div style="{alto}overflow-x:auto;border:1px solid #d8dbdf;'
+        f'border-radius:4px;">{tabla_html}</div>'
+    )
 
 
 # ---- Tabla por Comprador ----
