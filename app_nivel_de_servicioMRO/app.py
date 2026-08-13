@@ -291,7 +291,7 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
             return f"{val:,.0f}"
         if col == "% Cumplimiento":
             return f"{val:,.0f}%"
-        if col in ("Pos. OC generadas", "Líneas"):
+        if col == "Pos. OC generadas":
             return f"{val:,.0f}"
         return str(val)
 
@@ -333,7 +333,7 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
     )
 
     tabla_html = (
-        f'<table style="width:100%;min-width:{"420px" if compacta else "auto"};border-collapse:collapse;font-size:{fuente};'
+        f'<table style="width:100%;min-width:{"340px" if compacta else "auto"};border-collapse:collapse;font-size:{fuente};'
         f'font-family:inherit;border:1px solid #d8dbdf;">'
         f"<thead><tr>{encabezados}</tr></thead><tbody>{''.join(filas)}</tbody></table>"
     )
