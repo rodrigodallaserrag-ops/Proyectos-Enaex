@@ -382,5 +382,168 @@ with vc2:
     tabla_detalle = transform.agregar_fila_total(tabla_detalle, df_f, cols_detalle)
     st.markdown(tabla_enaex(tabla_detalle, max_height=300, compacta=True), unsafe_allow_html=True)
 
-with st.expander("Ver detalle de solicitudes"):
-    st.dataframe(df_f, use_container_width=True)
+st.divider()
+
+# ---- Detalle de solicitudes con columna de comentario editable ----
+COLUMNAS_DETALLE = [
+    "Centro",
+    "Material",
+    "Texto breve",
+    "Solicitud de pedido",
+    "Fecha de solicitud",
+    "Fecha modificación",
+    "Grupo de compras",
+    "Cantidad pedida",
+    "Pedido",
+    "Fecha de pedido",
+    "Posición de pedido",
+    "Comprador (Grupo de compras)",
+    "Solped MRP",
+    "Nombre Centro 2",
+    "Nombre Centro",
+    "Estado Solped",
+    "Nivel de Servicio",
+    "Comentario",
+    "Cumple",
+]
+
+
+def preparar_detalle(d: pd.DataFrame) -> pd.DataFrame:
+    """Ordena columnas, quita las auxiliares y deja las fechas sin hora."""
+    d = d.copy()
+    for col_fecha in ["Fecha de solicitud", "Fecha modificación", "Fecha de pedido"]:
+        if col_fecha in d.columns:
+            d[col_fecha] = pd.to_datetime(d[col_fecha], errors="coerce").dt.date
+    if "Comentario" not in d.columns:
+        d["Comentario"] = ""
+    return d[[c for c in COLUMNAS_DETALLE if c in d.columns]]
+
+
+detalle = preparar_detalle(df_f)
+
+with st.expander("Ver detalle de solicitudes", expanded=False):
+    st.caption("La columna **Comentario** es editable: escribe ahí y se incluirá en el Excel de registro.")
+    detalle_editado = st.data_editor(
+        detalle,
+        use_container_width=True,
+        num_rows="fixed",
+        key="editor_detalle",
+        column_config={
+            "Comentario": st.column_config.TextColumn(
+                "Comentario", help="Anotación libre para el registro semanal", width="medium"
+            )
+        },
+        disabled=[c for c in detalle.columns if c != "Comentario"],
+    )
+
+# ---- Exportación del registro semanal a Excel ----
+semana_ref = pd.Timestamp(fecha_corte) - pd.Timedelta(days=7)
+num_semana = semana_ref.isocalendar()[1]
+nombre_archivo = f"Sem{num_semana:02d}-{semana_ref.year}.xlsx"
+
+
+def generar_excel(detalle_df: pd.DataFrame) -> bytes:
+    """Arma el registro semanal: resumen, tablas por comprador/centro y detalle."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    gris = "FF404B55"
+    rojo = "FFCC0000"
+    fuente_base = "Arial"
+
+    wb = Workbook()
+    borde = Border(bottom=Side(style="thin", color="FFD8DBDF"))
+
+    def escribir_hoja(ws, titulo, tabla, col_inicio=1, fila_inicio=1):
+        ws.cell(row=fila_inicio, column=col_inicio, value=titulo).font = Font(
+            name=fuente_base, bold=True, size=12, color=gris
+        )
+        fila = fila_inicio + 1
+        for j, col in enumerate(tabla.columns):
+            c = ws.cell(row=fila, column=col_inicio + j, value=str(col))
+            c.font = Font(name=fuente_base, bold=True, color="FFFFFFFF", size=10)
+            c.fill = PatternFill("solid", fgColor=gris)
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        for i, (_, r) in enumerate(tabla.iterrows()):
+            es_total = str(r.iloc[0]) == "TOTAL"
+            for j, col in enumerate(tabla.columns):
+                val = r[col]
+                if pd.isna(val):
+                    val = None
+                elif isinstance(val, (int, float)) and col in (
+                    "Promedio días de gestión",
+                    "% Cumplimiento",
+                    "Pos. OC generadas",
+                ):
+                    val = round(float(val))
+                c = ws.cell(row=fila + 1 + i, column=col_inicio + j, value=val)
+                c.font = Font(name=fuente_base, size=10, bold=es_total, color=gris)
+                c.border = borde
+                if es_total:
+                    c.fill = PatternFill("solid", fgColor="FFEFF0F2")
+                if col == "% Cumplimiento" and val is not None:
+                    c.number_format = '0"%"'
+                if col in ("Fecha de solicitud", "Fecha modificación", "Fecha de pedido"):
+                    c.number_format = "DD-MM-YYYY"
+        return fila + 1 + len(tabla)
+
+    def ajustar_ancho(ws, tabla, col_inicio=1, extra=3):
+        for j, col in enumerate(tabla.columns):
+            largo = max([len(str(col))] + [len(str(v)) for v in tabla[col].head(200).fillna("")])
+            ws.column_dimensions[get_column_letter(col_inicio + j)].width = min(largo + extra, 45)
+
+    # --- Hoja 1: Resumen ---
+    ws = wb.active
+    ws.title = "Resumen"
+    ws["A1"] = f"Nivel de Servicio MRO — Registro semana {num_semana:02d}/{semana_ref.year}"
+    ws["A1"].font = Font(name=fuente_base, bold=True, size=14, color=gris)
+    ws["A2"] = f"Fecha de corte del reporte: {pd.Timestamp(fecha_corte).date()}"
+    ws["A2"].font = Font(name=fuente_base, size=10, italic=True, color=gris)
+    ws["A3"] = f"Generado: {pd.Timestamp.today().date()}"
+    ws["A3"].font = Font(name=fuente_base, size=10, italic=True, color=gris)
+
+    resumen = pd.DataFrame(
+        {
+            "Indicador": ["Promedio días de gestión", "% Cumplimiento", "OC generadas", "Líneas consideradas"],
+            "Valor": [
+                round(promedio_dias) if pd.notna(promedio_dias) else None,
+                round(pct_cumplimiento),
+                pedidos_distintos,
+                len(df_f),
+            ],
+        }
+    )
+    fila = escribir_hoja(ws, "Indicadores generales", resumen, fila_inicio=5)
+    ws.cell(row=5, column=1).font = Font(name=fuente_base, bold=True, size=12, color=rojo)
+    ajustar_ancho(ws, resumen)
+
+    fila = escribir_hoja(ws, "Por comprador", tabla_comprador, fila_inicio=fila + 2)
+    fila = escribir_hoja(ws, "Por centro logístico", tabla_fija, fila_inicio=fila + 2)
+    escribir_hoja(ws, "Detalle por centro", tabla_detalle, fila_inicio=fila + 2)
+
+    # --- Hoja 2: Detalle de solicitudes (con comentarios) ---
+    ws2 = wb.create_sheet("Detalle solicitudes")
+    escribir_hoja(ws2, "Detalle de solicitudes", detalle_df)
+    ajustar_ancho(ws2, detalle_df)
+    ws2.freeze_panes = "A3"
+
+    from io import BytesIO
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+st.subheader("Registro semanal")
+st.caption(f"Descarga el reporte completo (indicadores, tablas y detalle con comentarios) como **{nombre_archivo}**.")
+try:
+    st.download_button(
+        f"⬇ Descargar {nombre_archivo}",
+        data=generar_excel(detalle_editado),
+        file_name=nombre_archivo,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=False,
+    )
+except Exception as e:
+    st.error(f"No se pudo generar el Excel: {e}")
