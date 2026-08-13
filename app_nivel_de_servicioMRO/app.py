@@ -477,6 +477,9 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
                     "Pos. OC generadas",
                 ):
                     val = round(float(val))
+                elif hasattr(val, "item"):
+                    # numpy.int64 / numpy.float64 -> tipo nativo de Python
+                    val = val.item()
                 c = ws.cell(row=fila + 1 + i, column=col_inicio + j, value=val)
                 c.font = Font(name=fuente_base, size=10, bold=es_total, color=gris)
                 c.border = borde
@@ -490,8 +493,12 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
 
     def ajustar_ancho(ws, tabla, col_inicio=1, extra=3):
         for j, col in enumerate(tabla.columns):
-            largo = max([len(str(col))] + [len(str(v)) for v in tabla[col].head(200).fillna("")])
-            ws.column_dimensions[get_column_letter(col_inicio + j)].width = min(largo + extra, 45)
+            # Se recorre en Python puro: los métodos de pandas (fillna/replace)
+            # fallan o cambian dtypes en columnas Int64 anulables con vacíos.
+            largos = [len(str(col))]
+            for v in tabla[col].head(200):
+                largos.append(0 if pd.isna(v) else len(str(v)))
+            ws.column_dimensions[get_column_letter(col_inicio + j)].width = min(max(largos) + extra, 45)
 
     # --- Hoja 1: Resumen ---
     ws = wb.active
