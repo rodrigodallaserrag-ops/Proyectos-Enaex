@@ -39,6 +39,12 @@ COL_SOLICITANTE = "[SOCC]Solicitante (Usuario)"
 COL_PROVEEDOR = "[SOCC]Proveedor (Nombre del proveedor (L1))"
 COL_CECO = "[SOCC]Centro de costes (Centro de costes)"
 COL_GRUPO_COMPRA = "[SOCC]Grupo de compra (ID de organización compradora)"
+COL_LINEA = "[SOCC] Número de línea de la solicitud de compra"
+COL_LINEA_ORIG = "[SOCC] Número de línea de la solicitud de compra original"
+COL_LINEA_AGR = "[SOCC] Número de línea de la solicitud de compra agregada"
+
+# En SAP la línea 1 corresponde a la posición 10, la 2 a la 20, etc.
+FACTOR_POSICION = 10
 
 EMPRESA_POR_DEFECTO = "CEN1"
 
@@ -46,6 +52,7 @@ EMPRESA_POR_DEFECTO = "CEN1"
 COLUMNAS_CADENA = [
     # --- PR inicial ---
     "PR inicial",
+    "Posición PR inicial",
     "Fecha creación PR inicial",
     "Fecha liberación PR inicial",
     "Fecha envío PR inicial",
@@ -54,6 +61,7 @@ COLUMNAS_CADENA = [
     "Fecha asignada al comprador",
     # --- PR agregada ---
     "PR agregada",
+    "Posición PR agregada",
     "Fecha creación PR agregada",
     "Fecha envío PR agregada",
     "Fecha liberación PR agregada",
@@ -68,7 +76,6 @@ COLUMNAS_CADENA = [
     "Días gestión total",
     # --- Contexto ---
     "Cadena completa",
-    "Líneas PR inicial",
     "Solicitante",
     "Grupo de compra",
     "Centro de costes",
@@ -102,72 +109,85 @@ def empresas_disponibles(archivo) -> list:
     return sorted(df[COL_EMPRESA].dropna().astype(str).str.strip().unique())
 
 
+def _posicion(serie: pd.Series) -> pd.Series:
+    """Convierte el número de línea de Ariba a la posición como se ve en SAP
+    (línea 1 -> posición 10, línea 2 -> 20, ...)."""
+    return (pd.to_numeric(serie, errors="coerce") * FACTOR_POSICION).astype("Int64")
+
+
 def construir_cadena(d: pd.DataFrame) -> pd.DataFrame:
     """
-    Devuelve una fila por PR inicial, con su PR agregada y la salida a SAP
-    dispuestas hacia la derecha en orden cronológico.
+    Devuelve UNA FILA POR LÍNEA de PR inicial, con su línea correspondiente en
+    la PR agregada y la salida a SAP, dispuestas hacia la derecha en orden
+    cronológico.
     """
     d = d.copy()
     d["_agregada"] = _limpiar(d[COL_AGREGADA])
     d["_erp"] = _limpiar(d[COL_ERP])
 
-    # ---------- Bloque A: PR iniciales (se agrupan sus líneas) ----------
+    # ---------- Bloque A: líneas de PR inicial ----------
     a = d[d[COL_ORIGINAL].notna()].copy()
-    a["_f_creacion"] = _fecha(a[COL_F_SOLICITUD])
-    a["_f_aprob"] = _fecha(a[COL_F_APROB])
-    a["_f_envio"] = _fecha(a[COL_F_ENVIO_ORIG], dayfirst=False)
-    a["_f_envio_agr"] = _fecha(a[COL_F_ENVIO_AGR], dayfirst=False)
-    a["_f_asignada"] = _fecha(a[COL_F_ASIGNADA], dayfirst=False)
 
-    def _primero(s):
-        s = s.dropna()
-        return s.iloc[0] if len(s) else np.nan
-
-    iniciales = (
-        a.groupby(COL_ORIGINAL)
-        .agg(
-            **{
-                "Fecha creación PR inicial": ("_f_creacion", "min"),
-                "Fecha liberación PR inicial": ("_f_aprob", "min"),
-                "Fecha envío PR inicial": ("_f_envio", "min"),
-                "Fecha asignada al comprador": ("_f_asignada", "min"),
-                "Fecha envío PR agregada": ("_f_envio_agr", "min"),
-                "PR agregada": ("_agregada", _primero),
-                "Estado de agregación": (COL_ESTADO_AGR, _primero),
-                "Líneas PR inicial": (COL_ORIGINAL, "size"),
-                "Solicitante": (COL_SOLICITANTE, _primero),
-                "Grupo de compra": (COL_GRUPO_COMPRA, _primero),
-                "Centro de costes": (COL_CECO, _primero),
-                "Proveedor": (COL_PROVEEDOR, _primero),
-            }
-        )
-        .reset_index()
-        .rename(columns={COL_ORIGINAL: "PR inicial"})
+    inicial = pd.DataFrame(
+        {
+            "PR inicial": a[COL_ORIGINAL],
+            "Posición PR inicial": _posicion(a[COL_LINEA_ORIG]),
+            "Fecha creación PR inicial": _fecha(a[COL_F_SOLICITUD]),
+            "Fecha liberación PR inicial": _fecha(a[COL_F_APROB]),
+            "Fecha envío PR inicial": _fecha(a[COL_F_ENVIO_ORIG], dayfirst=False),
+            "Estado de agregación": a[COL_ESTADO_AGR],
+            "Fecha asignada al comprador": _fecha(a[COL_F_ASIGNADA], dayfirst=False),
+            "PR agregada": a["_agregada"],
+            "Posición PR agregada": _posicion(a[COL_LINEA_AGR]),
+            "Fecha envío PR agregada": _fecha(a[COL_F_ENVIO_AGR], dayfirst=False),
+            "Solicitante": a[COL_SOLICITANTE],
+            "Grupo de compra": a[COL_GRUPO_COMPRA],
+            "Centro de costes": a[COL_CECO],
+            "Proveedor": a[COL_PROVEEDOR],
+        }
     )
 
-    # ---------- Bloque B: PR agregadas (una fila por PR) ----------
+    # ---------- Bloque B: líneas de PR agregada (traen el 600 y la PO) ----------
     b = d[d["_erp"].notna()].copy()
-    b["_f_creacion"] = _fecha(b[COL_F_SOLICITUD])
-    b["_f_aprob"] = _fecha(b[COL_F_APROB])
-    b["_f_po"] = _fecha(b[COL_F_PEDIDO])
+    b_lineas = pd.DataFrame(
+        {
+            "PR agregada": b[COL_ID],
+            "Posición PR agregada": _posicion(b[COL_LINEA]),
+            "Fecha creación PR agregada": _fecha(b[COL_F_SOLICITUD]),
+            "Fecha liberación PR agregada": _fecha(b[COL_F_APROB]),
+            "Solped SAP (600)": b["_erp"],
+            "PO": b[COL_PO],
+            "Fecha PO": _fecha(b[COL_F_PEDIDO]),
+        }
+    ).drop_duplicates(subset=["PR agregada", "Posición PR agregada"])
 
-    agregadas = (
-        b.groupby(COL_ID)
+    # Cabecera de la PR agregada: respaldo cuando la línea no calza
+    b_cabecera = (
+        b_lineas.groupby("PR agregada")
         .agg(
             **{
-                "Fecha creación PR agregada": ("_f_creacion", "min"),
-                "Fecha liberación PR agregada": ("_f_aprob", "min"),
-                "Solped SAP (600)": ("_erp", "first"),
-                "PO": (COL_PO, "first"),
-                "Fecha PO": ("_f_po", "min"),
+                "Fecha creación PR agregada_h": ("Fecha creación PR agregada", "min"),
+                "Fecha liberación PR agregada_h": ("Fecha liberación PR agregada", "min"),
+                "Solped SAP (600)_h": ("Solped SAP (600)", "first"),
+                "PO_h": ("PO", "first"),
+                "Fecha PO_h": ("Fecha PO", "min"),
             }
         )
         .reset_index()
-        .rename(columns={COL_ID: "PR agregada"})
     )
 
-    # ---------- Auto-cruce ----------
-    out = iniciales.merge(agregadas, on="PR agregada", how="left")
+    # ---------- Auto-cruce: primero por línea, con respaldo por cabecera ----------
+    out = inicial.merge(b_lineas, on=["PR agregada", "Posición PR agregada"], how="left")
+    out = out.merge(b_cabecera, on="PR agregada", how="left")
+    for col in [
+        "Fecha creación PR agregada",
+        "Fecha liberación PR agregada",
+        "Solped SAP (600)",
+        "PO",
+        "Fecha PO",
+    ]:
+        out[col] = out[col].fillna(out[f"{col}_h"])
+        out = out.drop(columns=[f"{col}_h"])
 
     # ---------- Tiempos de cada tramo ----------
     def _dias(fin, ini):
@@ -181,7 +201,9 @@ def construir_cadena(d: pd.DataFrame) -> pd.DataFrame:
     out["Cadena completa"] = np.where(out["Solped SAP (600)"].notna(), "Sí", "No")
 
     out = out[[c for c in COLUMNAS_CADENA if c in out.columns]]
-    return out.sort_values("Fecha creación PR inicial", ascending=False).reset_index(drop=True)
+    return out.sort_values(
+        ["Fecha creación PR inicial", "PR inicial", "Posición PR inicial"], ascending=[False, True, True]
+    ).reset_index(drop=True)
 
 
 def resumen_por_solped(cadena: pd.DataFrame) -> pd.DataFrame:
