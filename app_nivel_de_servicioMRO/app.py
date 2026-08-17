@@ -4,7 +4,14 @@ Réplica del pbix "Nivel_de_servicio_BI.pbix", página "Dx Compradores".
 
 Correr local:  streamlit run app.py
 """
-import os
+import sys
+from pathlib import Path
+
+# Fuerza a Python a buscar primero en el directorio del proyecto
+directorio_actual = Path(__file__).parent.resolve()
+if str(directorio_actual) not in sys.path:
+    sys.path.insert(0, str(directorio_actual))
+
 import streamlit as st
 import pandas as pd
 
@@ -21,26 +28,13 @@ with st.sidebar:
 
     archivo_data = archivo_resp_grupo = archivo_centro = archivo_mrp = None
     if modo == "Subir archivos":
-        archivo_data = st.file_uploader("ME5A_con_Ariba (.parquet o .xlsx)", type=["parquet", "xlsx"])
-        archivo_resp_grupo = st.file_uploader("Responsable_Grupo_Compras (.parquet o .xlsx)", type=["parquet", "xlsx"])
-        archivo_centro = st.file_uploader("Centro_Sociedad_MRO (.parquet o .xlsx)", type=["parquet", "xlsx"])
-        archivo_mrp = st.file_uploader("Responsable_MRP (.parquet o .xlsx)", type=["parquet", "xlsx"])
+        archivo_data = st.file_uploader("ME5A_con_Ariba.xlsx", type="xlsx")
+        archivo_resp_grupo = st.file_uploader("Responsable_Grupo_Compras.xlsx", type="xlsx")
+        archivo_centro = st.file_uploader("Centro_Sociedad_MRO.xlsx", type="xlsx")
+        archivo_mrp = st.file_uploader("Responsable_MRP.xlsx", type="xlsx")
         if not all([archivo_data, archivo_resp_grupo, archivo_centro, archivo_mrp]):
             st.info("Sube los 4 archivos para generar el reporte.")
             st.stop()
-    else:
-        def _obtener_ruta_local(ruta_config_base):
-            """Prioriza archivo .parquet local si existe para ahorrar RAM; de lo contrario usa .xlsx"""
-            base_sin_ext = os.path.splitext(ruta_config_base)[0]
-            ruta_parquet = f"{base_sin_ext}.parquet"
-            if os.path.exists(ruta_parquet):
-                return ruta_parquet
-            return ruta_config_base
-
-        archivo_data = _obtener_ruta_local(config.RUTA_DATA_ME5A)
-        archivo_resp_grupo = _obtener_ruta_local(config.RUTA_RESP_GRUPO_COMPRAS)
-        archivo_centro = _obtener_ruta_local(config.RUTA_CENTRO_SOCIEDAD)
-        archivo_mrp = _obtener_ruta_local(config.RUTA_RESP_MRP)
 
 with st.sidebar:
     st.header("Parámetros")
@@ -56,20 +50,9 @@ df_resp_mrp = loaders.cargar_responsable_mrp(archivo_mrp)
 df = transform.pipeline_completo(
     df_data, df_resp_grupo, df_centro_sociedad, df_resp_mrp, fecha_corte=pd.Timestamp(fecha_corte)
 )
-
-# Optimización de dtypes para reducir consumo de RAM
-cols_categoricas = ["Centro", "Aplica?", "Estado Solped", "Solped MRP", "Cumple"]
-for col in cols_categoricas:
-    if col in df.columns:
-        df[col] = df[col].astype("category")
-
 df["Año"] = df["Fecha de pedido"].dt.year
 df["Mes"] = df["Fecha de pedido"].dt.month
 df["Día"] = df["Fecha de pedido"].dt.day
-
-# Valores dinámicos estables para el slider (evita que el widget cambie de límites en cada rerun)
-NS_MIN_GLOBAL = int(df["Nivel de Servicio"].min()) if len(df) and pd.notna(df["Nivel de Servicio"].min()) else 0
-NS_MAX_GLOBAL = int(df["Nivel de Servicio"].max()) if len(df) and pd.notna(df["Nivel de Servicio"].max()) else 100
 
 # Registro de conteos por etapa - para el panel de diagnóstico al final
 checkpoints = [("0. Total tras el pipeline (sin filtros)", len(df))]
@@ -181,6 +164,8 @@ st.divider()
 st.subheader("Filtro por días de gestión (Nivel de Servicio)")
 
 if len(df_f):
+    ns_min_dato = int(df_f["Nivel de Servicio"].min())
+    ns_max_dato = int(df_f["Nivel de Servicio"].max())
     n_negativos = (df_f["Nivel de Servicio"] < 0).sum()
 
     f1, f2 = st.columns([1, 2])
@@ -196,19 +181,18 @@ if len(df_f):
         )
     with f2:
         if excluir_negativos:
-            rango_ns = (0, NS_MAX_GLOBAL)
-            st.caption(f"Rango aplicado: 0 a {NS_MAX_GLOBAL:,} días (negativos excluidos)")
-        elif NS_MIN_GLOBAL < NS_MAX_GLOBAL:
+            rango_ns = (0, ns_max_dato)
+            st.caption(f"Rango aplicado: 0 a {ns_max_dato:,} días (negativos excluidos)")
+        elif ns_min_dato < ns_max_dato:
             rango_ns = st.slider(
                 "Rango de días de gestión",
-                min_value=NS_MIN_GLOBAL,
-                max_value=NS_MAX_GLOBAL,
-                value=(NS_MIN_GLOBAL, NS_MAX_GLOBAL),
-                key="slider_nivel_servicio",
+                min_value=ns_min_dato,
+                max_value=ns_max_dato,
+                value=(ns_min_dato, ns_max_dato),
             )
         else:
-            rango_ns = (NS_MIN_GLOBAL, NS_MAX_GLOBAL)
-            st.caption(f"Todas las filas tienen {NS_MIN_GLOBAL} días")
+            rango_ns = (ns_min_dato, ns_max_dato)
+            st.caption(f"Todas las filas tienen {ns_min_dato} días")
 
     df_f = df_f[df_f["Nivel de Servicio"].between(rango_ns[0], rango_ns[1])]
 
@@ -265,7 +249,6 @@ def tarjeta(titulo: str, valor: str, fondo: str = "rgba(64,75,85,0.07)", borde: 
     )
 
 
-# Semáforo: días de gestión <= 10 verde, > 10 rojo
 if pd.isna(promedio_dias):
     f_dias, b_dias, txt_dias = "rgba(64,75,85,0.07)", "rgba(64,75,85,0.35)", "-"
 elif promedio_dias > 10:
@@ -273,7 +256,6 @@ elif promedio_dias > 10:
 else:
     f_dias, b_dias, txt_dias = VERDE, VERDE_BORDE, f"{promedio_dias:.0f}"
 
-# Semáforo: % cumplimiento >= 85 verde, < 85 rojo
 if pct_cumplimiento >= 85:
     f_pct, b_pct = VERDE, VERDE_BORDE
 else:
@@ -418,7 +400,6 @@ COLUMNAS_DETALLE = [
 
 
 def preparar_detalle(d: pd.DataFrame) -> pd.DataFrame:
-    """Ordena columnas, quita las auxiliares y deja las fechas sin hora."""
     d = d.copy()
     for col_fecha in ["Fecha de solicitud", "Fecha modificación", "Fecha de pedido"]:
         if col_fecha in d.columns:
@@ -452,7 +433,6 @@ nombre_archivo = f"Sem{num_semana:02d}-{semana_ref.year}.xlsx"
 
 
 def generar_excel(detalle_df: pd.DataFrame) -> bytes:
-    """Arma el registro semanal: resumen, tablas por comprador/centro y detalle."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
@@ -507,7 +487,6 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
                 largos.append(0 if pd.isna(v) else len(str(v)))
             ws.column_dimensions[get_column_letter(col_inicio + j)].width = min(max(largos) + extra, 45)
 
-    # --- Hoja 1: Resumen ---
     ws = wb.active
     ws.title = "Resumen"
     ws["A1"] = f"Nivel de Servicio MRO — Registro semana {num_semana:02d}/{semana_ref.year}"
@@ -536,7 +515,6 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
     fila = escribir_hoja(ws, "Por centro logístico", tabla_fija, fila_inicio=fila + 2)
     escribir_hoja(ws, "Detalle por centro", tabla_detalle, fila_inicio=fila + 2)
 
-    # --- Hoja 2: Detalle de solicitudes (con comentarios) ---
     ws2 = wb.create_sheet("Detalle solicitudes")
     escribir_hoja(ws2, "Detalle de solicitudes", detalle_df)
     ajustar_ancho(ws2, detalle_df)
