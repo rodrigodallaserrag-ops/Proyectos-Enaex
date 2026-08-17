@@ -8,10 +8,7 @@ Carga de datos - equivalente en Python a las queries de Power Query (M) del pbix
     CENTRO_SOCIEDAD Compra MRO            -> cargar_centro_sociedad_mro()
     Responsable de MRP                    -> cargar_responsable_mrp()
 
-Fase actual: todo se lee de archivos locales (Excel).
-Fase Azure: cada función cambia SOLO por dentro (SharePoint -> Graph API,
-Data -> Blob Storage) - las funciones que las consumen (transform.py, app.py)
-no se tocan.
+Fase actual: todo se lee de archivos locales (Excel) o subidos vía Streamlit.
 """
 import pandas as pd
 import streamlit as st
@@ -20,12 +17,14 @@ import config
 
 
 @st.cache_data(show_spinner="Cargando datos de solicitudes de pedido (SAP/Ariba)...")
-def cargar_data_pr(ruta: str = None) -> pd.DataFrame:
+def cargar_data_pr(_ruta=None) -> pd.DataFrame:
     """
     Equivalente a la query 'Data (2)' del pbix (solo la carga + tipado,
     el resto de la lógica vive en transform.pipeline_completo).
     """
-    ruta = ruta or config.RUTA_DATA_ME5A
+    ruta = _ruta or config.RUTA_DATA_ME5A
+    if hasattr(ruta, "seek"):
+        ruta.seek(0)
     df = pd.read_excel(ruta, sheet_name="Data")
 
     # Tipado equivalente al "Tipo cambiado" del M
@@ -52,15 +51,14 @@ def cargar_data_pr(ruta: str = None) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner="Cargando responsables por grupo de compras...")
-def cargar_responsable_grupo_compras(ruta: str = None) -> pd.DataFrame:
+def cargar_responsable_grupo_compras(_ruta=None) -> pd.DataFrame:
     """
     Equivalente a 'Responsable por Grupo de Compras' (lista de SharePoint).
     Columnas esperadas (según el M): "Grupo de Compras", "Responsable.title"
-    (el ".title" es el nombre a mostrar de una columna Persona/Grupo de SharePoint).
-    Si tu export trae la columna Persona con otro nombre (ej. "Responsable"),
-    ajusta el rename de más abajo.
     """
-    ruta = ruta or config.RUTA_RESP_GRUPO_COMPRAS
+    ruta = _ruta or config.RUTA_RESP_GRUPO_COMPRAS
+    if hasattr(ruta, "seek"):
+        ruta.seek(0)
     df = pd.read_excel(ruta)
     df = df.rename(columns={"Responsable.title": "Comprador por Grupo Compras"})
     df["Grupo de Compras"] = df["Grupo de Compras"].astype(str).str.strip()
@@ -68,29 +66,30 @@ def cargar_responsable_grupo_compras(ruta: str = None) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner="Cargando centros y sociedades MRO...")
-def cargar_centro_sociedad_mro(ruta: str = None) -> pd.DataFrame:
+def cargar_centro_sociedad_mro(_ruta=None) -> pd.DataFrame:
     """
     Equivalente a 'CENTRO_SOCIEDAD Compras MRO'.
     Columnas esperadas (según el M): "Título" (clave = Centro SAP),
     "Nombre Centro", "Nombre Centro 2".
-    OJO: el M original intercambia los nombres al expandir (posible
-    inconsistencia de origen) - se replica tal cual para que el resultado
-    calce con el pbix.
     """
-    ruta = ruta or config.RUTA_CENTRO_SOCIEDAD
+    ruta = _ruta or config.RUTA_CENTRO_SOCIEDAD
+    if hasattr(ruta, "seek"):
+        ruta.seek(0)
     df = pd.read_excel(ruta)
     df["Título"] = df["Título"].astype(str).str.strip()
     return df[["Título", "Nombre Centro", "Nombre Centro 2"]]
 
 
 @st.cache_data(show_spinner="Cargando responsables MRP...")
-def cargar_responsable_mrp(ruta: str = None) -> pd.DataFrame:
+def cargar_responsable_mrp(_ruta=None) -> pd.DataFrame:
     """
     Equivalente a 'Responsable de MRP'.
     Columnas esperadas (según el M): "Title" (clave = usuario SAP = campo
     "Autor" en Data), "Responsable Compra.title".
     """
-    ruta = ruta or config.RUTA_RESP_MRP
+    ruta = _ruta or config.RUTA_RESP_MRP
+    if hasattr(ruta, "seek"):
+        ruta.seek(0)
     df = pd.read_excel(ruta)
     df = df.rename(columns={"Responsable Compra.title": "Responsable de MRP.Responsable Compra.title"})
     df["Title"] = df["Title"].astype(str).str.strip()
