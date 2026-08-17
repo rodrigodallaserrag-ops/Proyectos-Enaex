@@ -8,6 +8,8 @@ intermedias que después se descartan (igual que en el M).
 """
 import numpy as np
 import pandas as pd
+import streamlit as st
+
 import config
 
 
@@ -165,6 +167,7 @@ def calcular_cumple(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+@st.cache_data(show_spinner="Calculando nivel de servicio...")
 def pipeline_completo(
     df_data: pd.DataFrame,
     df_resp_grupo: pd.DataFrame,
@@ -234,16 +237,28 @@ def calcular_metricas_por_grupo(df: pd.DataFrame, group_cols: list[str]) -> pd.D
     ahí interesa cuántas OC distintas se generaron. Acá interesa cuántas
     posiciones gestionó cada comprador, así que se cuentan todas las líneas.
     """
-    def _agg(g):
-        return pd.Series(
-            {
-                "Promedio días de gestión": g["Nivel de Servicio"].mean(),
-                "% Cumplimiento": (g["Cumple"] == "Cumple").sum() / max(len(g), 1) * 100,
-                "Pos. OC generadas": g["Pedido"].notna().sum(),
+    # OPTIMIZACIÓN: antes esto era groupby().apply(func) — pandas ejecuta func
+    # en Python puro, una vez por cada grupo. Reemplazado por groupby().agg()
+    # con "mean"/"sum" nativos (vectorizados en C), armando de antemano dos
+    # columnas auxiliares 0/1 para poder promediar/sumar en vez de contar.
+    # Resultado idéntico, validado contra la versión anterior.
+    d = df.assign(
+        _cumple_num=(df["Cumple"] == "Cumple").astype(int),
+        _pedido_notna=df["Pedido"].notna().astype(int),
+    )
+    tabla = (
+        d.groupby(group_cols)
+        .agg(
+            **{
+                "Promedio días de gestión": ("Nivel de Servicio", "mean"),
+                "% Cumplimiento": ("_cumple_num", "mean"),
+                "Pos. OC generadas": ("_pedido_notna", "sum"),
             }
         )
-
-    return df.groupby(group_cols).apply(_agg, include_groups=False).reset_index()
+        .reset_index()
+    )
+    tabla["% Cumplimiento"] = tabla["% Cumplimiento"] * 100
+    return tabla
 
 
 def agregar_fila_total(tabla: pd.DataFrame, df_completo: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
