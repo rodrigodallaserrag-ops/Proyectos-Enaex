@@ -4,14 +4,6 @@ Réplica del pbix "Nivel_de_servicio_BI.pbix", página "Dx Compradores".
 
 Correr local:  streamlit run app.py
 """
-import sys
-from pathlib import Path
-
-# Fuerza a Python a buscar primero en el directorio del proyecto
-directorio_actual = Path(__file__).parent.resolve()
-if str(directorio_actual) not in sys.path:
-    sys.path.insert(0, str(directorio_actual))
-
 import streamlit as st
 import pandas as pd
 
@@ -35,6 +27,12 @@ with st.sidebar:
         if not all([archivo_data, archivo_resp_grupo, archivo_centro, archivo_mrp]):
             st.info("Sube los 4 archivos para generar el reporte.")
             st.stop()
+    else:
+        # Rutas locales por defecto cuando no se suben archivos manualmente.
+        archivo_data = "data/ME5A_con_Ariba.xlsx"
+        archivo_resp_grupo = "data/Responsable_Grupo_Compras.xlsx"
+        archivo_centro = "data/Centro_Sociedad_MRO.xlsx"
+        archivo_mrp = "data/Responsable_MRP.xlsx"
 
 with st.sidebar:
     st.header("Parámetros")
@@ -54,10 +52,12 @@ df["Año"] = df["Fecha de pedido"].dt.year
 df["Mes"] = df["Fecha de pedido"].dt.month
 df["Día"] = df["Fecha de pedido"].dt.day
 
-# Registro de conteos por etapa - para el panel de diagnóstico al final
-checkpoints = [("0. Total tras el pipeline (sin filtros)", len(df))]
+# Min/max globales sobre el dataframe COMPLETO (sin filtrar)
+NS_MIN_GLOBAL = int(df["Nivel de Servicio"].min()) if len(df) and pd.notna(df["Nivel de Servicio"].min()) else 0
+NS_MAX_GLOBAL = int(df["Nivel de Servicio"].max()) if len(df) and pd.notna(df["Nivel de Servicio"].max()) else 100
 
-# Registro de las 3 métricas en cada etapa, para localizar dónde diverge del pbix
+# Registro de conteos por etapa
+checkpoints = [("0. Total tras el pipeline (sin filtros)", len(df))]
 metricas_por_etapa = []
 
 
@@ -106,11 +106,7 @@ checkpoints.append(("3b. Pedido incompleto (antes de jerarquía)", (df_f["Estado
 checkpoints.append(("3c. Pedido completo (antes de jerarquía)", (df_f["Estado Solped"] == "Pedido completo").sum()))
 _snapshot("3. Tras Estado Solped", df_f)
 
-conteo_sin_pedido_antes = (df_f["Estado Solped"] == "Sin pedido").sum()
-conteo_incompleto_antes = (df_f["Estado Solped"] == "Pedido incompleto").sum()
-conteo_completo_antes = (df_f["Estado Solped"] == "Pedido completo").sum()
-
-# ---- Jerarquía Año / Mes / Día (opciones calculadas solo sobre "Pedido completo") ----
+# ---- Jerarquía Año / Mes / Día ----
 df_pedido_completo = df_f[df_f["Estado Solped"] == "Pedido completo"]
 
 with h2:
@@ -164,8 +160,6 @@ st.divider()
 st.subheader("Filtro por días de gestión (Nivel de Servicio)")
 
 if len(df_f):
-    ns_min_dato = int(df_f["Nivel de Servicio"].min())
-    ns_max_dato = int(df_f["Nivel de Servicio"].max())
     n_negativos = (df_f["Nivel de Servicio"] < 0).sum()
 
     f1, f2 = st.columns([1, 2])
@@ -181,18 +175,19 @@ if len(df_f):
         )
     with f2:
         if excluir_negativos:
-            rango_ns = (0, ns_max_dato)
-            st.caption(f"Rango aplicado: 0 a {ns_max_dato:,} días (negativos excluidos)")
-        elif ns_min_dato < ns_max_dato:
+            rango_ns = (0, NS_MAX_GLOBAL)
+            st.caption(f"Rango aplicado: 0 a {NS_MAX_GLOBAL:,} días (negativos excluidos)")
+        elif NS_MIN_GLOBAL < NS_MAX_GLOBAL:
             rango_ns = st.slider(
                 "Rango de días de gestión",
-                min_value=ns_min_dato,
-                max_value=ns_max_dato,
-                value=(ns_min_dato, ns_max_dato),
+                min_value=NS_MIN_GLOBAL,
+                max_value=NS_MAX_GLOBAL,
+                value=(NS_MIN_GLOBAL, NS_MAX_GLOBAL),
+                key="slider_rango_dias",
             )
         else:
-            rango_ns = (ns_min_dato, ns_max_dato)
-            st.caption(f"Todas las filas tienen {ns_min_dato} días")
+            rango_ns = (NS_MIN_GLOBAL, NS_MAX_GLOBAL)
+            st.caption(f"Todas las filas tienen {NS_MIN_GLOBAL} días")
 
     df_f = df_f[df_f["Nivel de Servicio"].between(rango_ns[0], rango_ns[1])]
 
@@ -209,16 +204,14 @@ _snapshot("7. RESULTADO FINAL", df_f)
 with st.expander("🔍 Diagnóstico de filtrado (para comparar contra el pbix)"):
     st.write(
         "Filas en cada etapa. Los pasos 4a y 4b deben quedar IGUAL al paso 3 "
-        "(la jerarquía de fecha no debe tocar 'Sin pedido' ni 'Pedido incompleto'). "
-        "Si en el pbix ves un número distinto, compara etapa por etapa hasta encontrar "
-        "en cuál empiezan a diferir."
+        "(la jerarquía de fecha no debe tocar 'Sin pedido' ni 'Pedido incompleto')."
     )
     st.table(pd.DataFrame(checkpoints, columns=["Etapa", "Filas"]))
 
-    st.write("**Las 3 métricas en cada etapa del filtro** — compara contra el pbix aplicando los mismos slicers, uno a uno, para ver en cuál se separan:")
+    st.write("**Las 3 métricas en cada etapa del filtro**:")
     st.table(pd.DataFrame(metricas_por_etapa, columns=["Etapa", "Filas", "% Cumplimiento", "Prom. días", "Pos. OC"]))
 
-    st.write("Detalle de las solicitudes en el resultado final, para cruzar 1 a 1 contra el export del pbix:")
+    st.write("Detalle de las solicitudes en el resultado final:")
     st.dataframe(
         df_f[["Solicitud de pedido", "Centro", "Estado Solped", "Fecha de pedido", "Nivel de Servicio", "Cumple", "Solped MRP"]]
         .sort_values("Solicitud de pedido"),
