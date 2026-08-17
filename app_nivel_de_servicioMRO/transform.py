@@ -167,7 +167,7 @@ def calcular_cumple(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(show_spinner="Calculando nivel de servicio...")
+@st.cache_data(show_spinner="Calculando nivel de servicio...", max_entries=3, ttl=3600)
 def pipeline_completo(
     df_data: pd.DataFrame,
     df_resp_grupo: pd.DataFrame,
