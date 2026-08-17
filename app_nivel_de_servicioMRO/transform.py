@@ -59,16 +59,6 @@ def calcular_solped_mrp(df: pd.DataFrame) -> pd.DataFrame:
 def filtrar_solicitudes_vigentes(df: pd.DataFrame) -> pd.DataFrame:
     """
     Pasos M: 'Personalizado' (flag 2/0), 'Personalizado.3', 'Filas filtradas'.
-
-    Traducción literal del M:
-        Personalizado   = 2 si (Solped MRP in [MRP, Ariba]) o (ERP y sin indicador), si no 0
-        Personalizado.3 = si indicador vacío/nulo -> Personalizado
-                          si indicador "X" o "B"  -> 0
-                          en cualquier otro caso  -> el indicador convertido a número
-        Filtro final: conservar solo las filas donde Personalizado.3 = 2
-
-    OJO: el último "else" es clave. Un indicador con valor "2" hace que la fila
-    se conserve aunque sea ERP, porque su valor numérico es exactamente 2.
     """
     df = df.copy()
     ind = df["Indicador liberación"]
@@ -107,11 +97,7 @@ def calcular_nivel_servicio_dias(df: pd.DataFrame, fecha_corte: pd.Timestamp) ->
 
 
 def unir_centro_sociedad(df: pd.DataFrame, df_centro_sociedad: pd.DataFrame) -> pd.DataFrame:
-    """
-    Paso M: 'Consultas combinadas2' + expandir + rename (OJO: el M
-    intercambia 'Nombre Centro' <-> 'Nombre Centro 2' al renombrar,
-    se replica igual).
-    """
+    """Paso M: 'Consultas combinadas2' + expandir + rename."""
     df = df.merge(df_centro_sociedad, left_on="Centro", right_on="Título", how="left").drop(
         columns=["Título"]
     )
@@ -156,8 +142,7 @@ def calcular_aplica(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def calcular_cumple(df: pd.DataFrame) -> pd.DataFrame:
-    """Paso M: 'Personalizada agregada10' -> columna 'Cumple'. SLA: 10 días
-    para ERP/MRP, 7 días para Ariba."""
+    """Paso M: 'Personalizada agregada10' -> columna 'Cumple'."""
     df = df.copy()
     cumple_erp_mrp = (df["Nivel de Servicio"] <= config.SLA_DIAS_ERP_MRP) & df["Solped MRP"].isin(
         ["ERP", "MRP"]
@@ -169,18 +154,22 @@ def calcular_cumple(df: pd.DataFrame) -> pd.DataFrame:
 
 @st.cache_data(show_spinner="Calculando nivel de servicio...", max_entries=3, ttl=3600)
 def pipeline_completo(
-    df_data: pd.DataFrame,
-    df_resp_grupo: pd.DataFrame,
-    df_centro_sociedad: pd.DataFrame,
-    df_resp_mrp: pd.DataFrame,
+    _df_data: pd.DataFrame,
+    _df_resp_grupo: pd.DataFrame,
+    _df_centro_sociedad: pd.DataFrame,
+    _df_resp_mrp: pd.DataFrame,
     fecha_corte: pd.Timestamp,
 ) -> pd.DataFrame:
-    """Corre el pipeline completo, en el mismo orden que el 'let...in' del M."""
-    df = unir_responsables(df_data, df_resp_grupo, df_resp_mrp)
+    """
+    Corre el pipeline completo, en el mismo orden que el 'let...in' del M.
+    Nota: Los nombres de parámetros inician con '_' para evitar que Streamlit
+    haga hash pesado de DataFrames gigantescos en cada rerun.
+    """
+    df = unir_responsables(_df_data, _df_resp_grupo, _df_resp_mrp)
     df = calcular_solped_mrp(df)
     df = filtrar_solicitudes_vigentes(df)
     df = calcular_nivel_servicio_dias(df, fecha_corte)
-    df = unir_centro_sociedad(df, df_centro_sociedad)
+    df = unir_centro_sociedad(df, _df_centro_sociedad)
     df = calcular_estado_solped_y_nivel_servicio(df)
     df = calcular_aplica(df)
     df = calcular_cumple(df)
@@ -218,9 +207,7 @@ def pipeline_completo(
 
 
 def calcular_metricas_por_grupo(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
-    """
-    Reemplaza las medidas DAX del pbix, agregadas a nivel de comprador/centro/etc.
-    """
+    """Reemplaza las medidas DAX del pbix, agregadas a nivel de grupo."""
     d = df.assign(
         _cumple_num=(df["Cumple"] == "Cumple").astype(int),
         _pedido_notna=df["Pedido"].notna().astype(int),
@@ -241,10 +228,7 @@ def calcular_metricas_por_grupo(df: pd.DataFrame, group_cols: list[str]) -> pd.D
 
 
 def agregar_fila_total(tabla: pd.DataFrame, df_completo: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
-    """
-    Agrega una fila TOTAL al final de la tabla, calculada sobre TODAS las líneas
-    del conjunto filtrado (no promediando los promedios de cada fila).
-    """
+    """Agrega una fila TOTAL calculada sobre el conjunto filtrado completo."""
     n = len(df_completo)
     total = {c: "" for c in group_cols}
     total[group_cols[0]] = "TOTAL"
@@ -267,9 +251,7 @@ def agregar_grupo_centro(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def tabla_centros_fija(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Vista fija: siempre las 4 filas de centro logístico, en orden.
-    """
+    """Vista fija de centros logísticos."""
     d = agregar_grupo_centro(df)
     tabla = calcular_metricas_por_grupo(d, ["Grupo Centro"])
     tabla = (
