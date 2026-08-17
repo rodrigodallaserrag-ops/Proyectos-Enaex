@@ -34,6 +34,12 @@ with st.sidebar:
     st.caption(f"SLA: {config.SLA_DIAS_ERP_MRP} días ERP/MRP · {config.SLA_DIAS_ARIBA} días Ariba")
 
 # ---- Carga de datos ----
+# NOTA DE OPTIMIZACIÓN: si loaders.cargar_data_pr / cargar_responsable_grupo_compras /
+# cargar_centro_sociedad_mro / cargar_responsable_mrp y transform.pipeline_completo
+# todavía NO tienen el decorador @st.cache_data, agrégalo ahí. Streamlit re-ejecuta
+# este script completo cada vez que tocas un filtro, así que sin cache_data estás
+# releyendo los 4 Excel y corriendo todo el pipeline en cada interacción. Ese es el
+# mayor costo al "filtrar" — mucho más que cualquier isin()/between() de acá abajo.
 df_data = loaders.cargar_data_pr(archivo_data)
 df_resp_grupo = loaders.cargar_responsable_grupo_compras(archivo_resp_grupo)
 df_centro_sociedad = loaders.cargar_centro_sociedad_mro(archivo_centro)
@@ -300,9 +306,13 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
     fuente = "0.72rem" if compacta else "0.86rem"
     fuente_th = "0.66rem" if compacta else "0.82rem"
 
+    # OPTIMIZACIÓN: itertuples() en vez de iterrows(). Con listas de miles de
+    # filas, iterrows() reconstruye una Series por fila (~30x más lento acá
+    # en benchmark local); itertuples() entrega tuplas planas, mucho más rápido
+    # para solo leer valores como hacemos en este loop.
     filas = []
-    for i, (_, r) in enumerate(tabla.iterrows()):
-        es_total = str(r.iloc[0]) == "TOTAL"
+    for i, r in enumerate(tabla.itertuples(index=False)):
+        es_total = str(r[0]) == "TOTAL"
         if es_total:
             estilo_fila = f"background:{ENAEX_GRIS};color:#fff;font-weight:700;border-top:2px solid {ENAEX_ROJO};"
         else:
@@ -313,7 +323,7 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
             align = "left" if j == 0 else "right"
             celdas.append(
                 f'<td style="padding:{pad};text-align:{align};'
-                f'border-bottom:1px solid #e3e5e8;white-space:nowrap;">{_fmt(c, r[c])}</td>'
+                f'border-bottom:1px solid #e3e5e8;white-space:nowrap;">{_fmt(c, r[j])}</td>'
             )
         filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
@@ -465,10 +475,14 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
             c.font = Font(name=fuente_base, bold=True, color="FFFFFFFF", size=10)
             c.fill = PatternFill("solid", fgColor=gris)
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        for i, (_, r) in enumerate(tabla.iterrows()):
-            es_total = str(r.iloc[0]) == "TOTAL"
+        # OPTIMIZACIÓN: itertuples() en vez de iterrows() — mismo motivo que en
+        # tabla_enaex. Acá además necesitamos los nombres de columna, así que
+        # usamos itertuples(name=None) para tuplas planas y las emparejamos con
+        # tabla.columns por índice.
+        for i, r in enumerate(tabla.itertuples(index=False, name=None)):
+            es_total = str(r[0]) == "TOTAL"
             for j, col in enumerate(tabla.columns):
-                val = r[col]
+                val = r[j]
                 if pd.isna(val):
                     val = None
                 elif isinstance(val, (int, float)) and col in (
