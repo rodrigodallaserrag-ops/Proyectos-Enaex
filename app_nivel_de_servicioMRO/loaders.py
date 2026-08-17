@@ -1,3 +1,4 @@
+"""
 Configuración central del reporte Dx Compradores.
 
 Hoy lee archivos locales. Cuando se migre a Azure, solo cambian
