@@ -4,6 +4,7 @@ Réplica del pbix "Nivel_de_servicio_BI.pbix", página "Dx Compradores".
 
 Correr local:  streamlit run app.py
 """
+import os
 import streamlit as st
 import pandas as pd
 
@@ -20,13 +21,26 @@ with st.sidebar:
 
     archivo_data = archivo_resp_grupo = archivo_centro = archivo_mrp = None
     if modo == "Subir archivos":
-        archivo_data = st.file_uploader("ME5A_con_Ariba.xlsx", type="xlsx")
-        archivo_resp_grupo = st.file_uploader("Responsable_Grupo_Compras.xlsx", type="xlsx")
-        archivo_centro = st.file_uploader("Centro_Sociedad_MRO.xlsx", type="xlsx")
-        archivo_mrp = st.file_uploader("Responsable_MRP.xlsx", type="xlsx")
+        archivo_data = st.file_uploader("ME5A_con_Ariba (.parquet o .xlsx)", type=["parquet", "xlsx"])
+        archivo_resp_grupo = st.file_uploader("Responsable_Grupo_Compras (.parquet o .xlsx)", type=["parquet", "xlsx"])
+        archivo_centro = st.file_uploader("Centro_Sociedad_MRO (.parquet o .xlsx)", type=["parquet", "xlsx"])
+        archivo_mrp = st.file_uploader("Responsable_MRP (.parquet o .xlsx)", type=["parquet", "xlsx"])
         if not all([archivo_data, archivo_resp_grupo, archivo_centro, archivo_mrp]):
             st.info("Sube los 4 archivos para generar el reporte.")
             st.stop()
+    else:
+        def _obtener_ruta_local(ruta_config_base):
+            """Prioriza archivo .parquet local si existe para ahorrar RAM; de lo contrario usa .xlsx"""
+            base_sin_ext = os.path.splitext(ruta_config_base)[0]
+            ruta_parquet = f"{base_sin_ext}.parquet"
+            if os.path.exists(ruta_parquet):
+                return ruta_parquet
+            return ruta_config_base
+
+        archivo_data = _obtener_ruta_local(config.RUTA_DATA_ME5A)
+        archivo_resp_grupo = _obtener_ruta_local(config.RUTA_RESP_GRUPO_COMPRAS)
+        archivo_centro = _obtener_ruta_local(config.RUTA_CENTRO_SOCIEDAD)
+        archivo_mrp = _obtener_ruta_local(config.RUTA_RESP_MRP)
 
 with st.sidebar:
     st.header("Parámetros")
@@ -34,12 +48,6 @@ with st.sidebar:
     st.caption(f"SLA: {config.SLA_DIAS_ERP_MRP} días ERP/MRP · {config.SLA_DIAS_ARIBA} días Ariba")
 
 # ---- Carga de datos ----
-# NOTA DE OPTIMIZACIÓN: si loaders.cargar_data_pr / cargar_responsable_grupo_compras /
-# cargar_centro_sociedad_mro / cargar_responsable_mrp y transform.pipeline_completo
-# todavía NO tienen el decorador @st.cache_data, agrégalo ahí. Streamlit re-ejecuta
-# este script completo cada vez que tocas un filtro, así que sin cache_data estás
-# releyendo los 4 Excel y corriendo todo el pipeline en cada interacción. Ese es el
-# mayor costo al "filtrar" — mucho más que cualquier isin()/between() de acá abajo.
 df_data = loaders.cargar_data_pr(archivo_data)
 df_resp_grupo = loaders.cargar_responsable_grupo_compras(archivo_resp_grupo)
 df_centro_sociedad = loaders.cargar_centro_sociedad_mro(archivo_centro)
@@ -48,9 +56,20 @@ df_resp_mrp = loaders.cargar_responsable_mrp(archivo_mrp)
 df = transform.pipeline_completo(
     df_data, df_resp_grupo, df_centro_sociedad, df_resp_mrp, fecha_corte=pd.Timestamp(fecha_corte)
 )
+
+# Optimización de dtypes para reducir consumo de RAM
+cols_categoricas = ["Centro", "Aplica?", "Estado Solped", "Solped MRP", "Cumple"]
+for col in cols_categoricas:
+    if col in df.columns:
+        df[col] = df[col].astype("category")
+
 df["Año"] = df["Fecha de pedido"].dt.year
 df["Mes"] = df["Fecha de pedido"].dt.month
 df["Día"] = df["Fecha de pedido"].dt.day
+
+# Valores dinámicos estables para el slider (evita que el widget cambie de límites en cada rerun)
+NS_MIN_GLOBAL = int(df["Nivel de Servicio"].min()) if len(df) and pd.notna(df["Nivel de Servicio"].min()) else 0
+NS_MAX_GLOBAL = int(df["Nivel de Servicio"].max()) if len(df) and pd.notna(df["Nivel de Servicio"].max()) else 100
 
 # Registro de conteos por etapa - para el panel de diagnóstico al final
 checkpoints = [("0. Total tras el pipeline (sin filtros)", len(df))]
@@ -118,8 +137,6 @@ with h3:
     meses = st.multiselect("Mes", sorted(_base_mes["Mes"].dropna().unique().astype(int)))
 with h4:
     _base_dia = _base_mes[_base_mes["Mes"].isin(meses)] if meses else _base_mes
-    # Fechas completas (no solo el número de día) para no mezclar, por ejemplo,
-    # el 30 de julio con el 30 de agosto si se seleccionan ambos meses.
     fechas_disponibles = sorted(_base_dia["Fecha de pedido"].dt.date.dropna().unique())
     fechas = st.multiselect(
         "Día", fechas_disponibles, format_func=lambda f: f.strftime("%d-%m-%Y")
@@ -160,16 +177,10 @@ checkpoints.append(("6. Tras filtro Cumple", len(df_f)))
 _snapshot("6. Tras Cumple", df_f)
 
 # ---- Segunda capa: filtro por rango de Nivel de Servicio (días) ----
-# Los valores negativos aparecen cuando la solped se modificó DESPUÉS de que
-# ya existía la OC (Fecha modificación > Fecha de pedido). No representan
-# gestión real y, por la regla de Cumple (<=10 o <=7), siempre puntúan como
-# "Cumple", lo que infla el indicador.
 st.divider()
 st.subheader("Filtro por días de gestión (Nivel de Servicio)")
 
 if len(df_f):
-    ns_min_dato = int(df_f["Nivel de Servicio"].min())
-    ns_max_dato = int(df_f["Nivel de Servicio"].max())
     n_negativos = (df_f["Nivel de Servicio"] < 0).sum()
 
     f1, f2 = st.columns([1, 2])
@@ -185,18 +196,19 @@ if len(df_f):
         )
     with f2:
         if excluir_negativos:
-            rango_ns = (0, ns_max_dato)
-            st.caption(f"Rango aplicado: 0 a {ns_max_dato:,} días (negativos excluidos)")
-        elif ns_min_dato < ns_max_dato:
+            rango_ns = (0, NS_MAX_GLOBAL)
+            st.caption(f"Rango aplicado: 0 a {NS_MAX_GLOBAL:,} días (negativos excluidos)")
+        elif NS_MIN_GLOBAL < NS_MAX_GLOBAL:
             rango_ns = st.slider(
                 "Rango de días de gestión",
-                min_value=ns_min_dato,
-                max_value=ns_max_dato,
-                value=(ns_min_dato, ns_max_dato),
+                min_value=NS_MIN_GLOBAL,
+                max_value=NS_MAX_GLOBAL,
+                value=(NS_MIN_GLOBAL, NS_MAX_GLOBAL),
+                key="slider_nivel_servicio",
             )
         else:
-            rango_ns = (ns_min_dato, ns_max_dato)
-            st.caption(f"Todas las filas tienen {ns_min_dato} días")
+            rango_ns = (NS_MIN_GLOBAL, NS_MAX_GLOBAL)
+            st.caption(f"Todas las filas tienen {NS_MIN_GLOBAL} días")
 
     df_f = df_f[df_f["Nivel de Servicio"].between(rango_ns[0], rango_ns[1])]
 
@@ -283,11 +295,6 @@ ENAEX_ROJO = "#CC0000"
 
 
 def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bool = False) -> str:
-    """
-    Renderiza la tabla como HTML con la paleta corporativa: encabezado gris
-    oscuro, filas alternadas, y la fila TOTAL destacada en rojo.
-    max_height (px) activa el scroll vertical con encabezado fijo.
-    """
     cols = list(tabla.columns)
 
     def _fmt(col, val):
@@ -306,10 +313,6 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
     fuente = "0.72rem" if compacta else "0.86rem"
     fuente_th = "0.66rem" if compacta else "0.82rem"
 
-    # OPTIMIZACIÓN: itertuples() en vez de iterrows(). Con listas de miles de
-    # filas, iterrows() reconstruye una Series por fila (~30x más lento acá
-    # en benchmark local); itertuples() entrega tuplas planas, mucho más rápido
-    # para solo leer valores como hacemos en este loop.
     filas = []
     for i, r in enumerate(tabla.itertuples(index=False)):
         es_total = str(r[0]) == "TOTAL"
@@ -327,8 +330,6 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
             )
         filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
-    # En modo compacto los títulos largos se abrevian: son los que hacen que la
-    # tabla se salga del recuadro cuando va en media pantalla.
     abrev = {
         "Promedio días de gestión": "Días gest.",
         "% Cumplimiento": "% Cumpl.",
@@ -348,8 +349,6 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
         f"<thead><tr>{encabezados}</tr></thead><tbody>{''.join(filas)}</tbody></table>"
     )
 
-    # Scroll horizontal siempre disponible (para tablas angostas en dos columnas),
-    # y vertical solo si se pidió max_height.
     alto = f"max-height:{max_height}px;overflow-y:auto;" if max_height else ""
     return (
         f'<div style="{alto}overflow-x:auto;border:1px solid #d8dbdf;'
@@ -475,10 +474,7 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
             c.font = Font(name=fuente_base, bold=True, color="FFFFFFFF", size=10)
             c.fill = PatternFill("solid", fgColor=gris)
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        # OPTIMIZACIÓN: itertuples() en vez de iterrows() — mismo motivo que en
-        # tabla_enaex. Acá además necesitamos los nombres de columna, así que
-        # usamos itertuples(name=None) para tuplas planas y las emparejamos con
-        # tabla.columns por índice.
+
         for i, r in enumerate(tabla.itertuples(index=False, name=None)):
             es_total = str(r[0]) == "TOTAL"
             for j, col in enumerate(tabla.columns):
@@ -492,7 +488,6 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
                 ):
                     val = round(float(val))
                 elif hasattr(val, "item"):
-                    # numpy.int64 / numpy.float64 -> tipo nativo de Python
                     val = val.item()
                 c = ws.cell(row=fila + 1 + i, column=col_inicio + j, value=val)
                 c.font = Font(name=fuente_base, size=10, bold=es_total, color=gris)
@@ -507,8 +502,6 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
 
     def ajustar_ancho(ws, tabla, col_inicio=1, extra=3):
         for j, col in enumerate(tabla.columns):
-            # Se recorre en Python puro: los métodos de pandas (fillna/replace)
-            # fallan o cambian dtypes en columnas Int64 anulables con vacíos.
             largos = [len(str(col))]
             for v in tabla[col].head(200):
                 largos.append(0 if pd.isna(v) else len(str(v)))
