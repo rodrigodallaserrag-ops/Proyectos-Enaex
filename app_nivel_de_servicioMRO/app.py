@@ -1,193 +1,17 @@
 """
-Streamlit - Dx Compradores (Versión Monolítica - Todo en 1 solo archivo)
+Streamlit - Dx Compradores
 Réplica del pbix "Nivel_de_servicio_BI.pbix", página "Dx Compradores".
 
-Ejecución local: streamlit run app.py
+Correr local:  streamlit run app.py
 """
-
-import io
-import requests
-import numpy as np
-import pandas as pd
 import streamlit as st
+import pandas as pd
 
-# ==============================================================================
-# 1. CONFIGURACIÓN, SLAs Y PALETA DE COLORES
-# ==============================================================================
-SLA_DIAS_ERP_MRP = 10
-SLA_DIAS_ARIBA = 7
+import config, loaders, transform
 
-# Colores Corporativos Enaex / Semáforos KPI
-ENAEX_GRIS = "#404B55"
-ENAEX_ROJO = "#CC0000"
-
-VERDE = "rgba(35, 145, 75, 0.16)"
-VERDE_BORDE = "rgba(35, 145, 75, 0.55)"
-ROJO = "rgba(204, 0, 0, 0.14)"
-ROJO_BORDE = "rgba(204, 0, 0, 0.55)"
-
-# ==============================================================================
-# 2. CARGA DE DATOS (OneDrive / Archivos locales / Uploaders)
-# ==============================================================================
-@st.cache_data(ttl=3600)
-def _descargar_onedrive(key_secret: str) -> io.BytesIO:
-    """Descarga un archivo desde OneDrive usando la URL guardada en st.secrets."""
-    if "onedrive" not in st.secrets or key_secret not in st.secrets["onedrive"]:
-        raise ValueError(f"No se encontró la clave '{key_secret}' en st.secrets['onedrive'].")
-    
-    url = st.secrets["onedrive"][key_secret]
-    response = requests.get(url)
-    response.raise_for_status()
-    return io.BytesIO(response.content)
-
-
-def _cargar_archivo(fuente):
-    """Auxiliar para leer Parquet o Excel desde OneDrive, UploadedFile o ruta local."""
-    if isinstance(fuente, str) and fuente.startswith("onedrive:"):
-        key = fuente.split("onedrive:")[1]
-        buffer = _descargar_onedrive(key)
-        if "parquet" in key.lower():
-            return pd.read_parquet(buffer)
-        return pd.read_excel(buffer)
-    
-    if hasattr(fuente, "name"):
-        if fuente.name.endswith(".parquet"):
-            return pd.read_parquet(fuente)
-        return pd.read_excel(fuente)
-    
-    if isinstance(fuente, str):
-        if fuente.endswith(".parquet"):
-            return pd.read_parquet(fuente)
-        return pd.read_excel(fuente)
-    
-    return pd.read_excel(fuente)
-
-
-def cargar_data_pr(archivo):
-    return _cargar_archivo(archivo)
-
-
-def cargar_responsable_grupo_compras(archivo):
-    return _cargar_archivo(archivo)
-
-
-def cargar_centro_sociedad_mro(archivo):
-    return _cargar_archivo(archivo)
-
-
-def cargar_responsable_mrp(archivo):
-    return _cargar_archivo(archivo)
-
-
-# ==============================================================================
-# 3. TRANSFORMACIÓN DE DATOS Y LÓGICA DE NEGOCIO
-# ==============================================================================
-def pipeline_completo(df_data, df_resp_grupo, df_centro_sociedad, df_resp_mrp, fecha_corte=None):
-    """Ejecuta el pipeline de joins y cálculo de Nivel de Servicio."""
-    df = df_data.copy()
-
-    # Conversión de fechas
-    for col in ["Fecha de solicitud", "Fecha modificación", "Fecha de pedido"]:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce")
-
-    # Mapeo de Comprador / Grupo de Compras
-    if "Comprador (Grupo de compras)" not in df.columns:
-        if "Grupo de compras" in df.columns:
-            df["Comprador (Grupo de compras)"] = df["Grupo de compras"]
-        else:
-            df["Comprador (Grupo de compras)"] = "Sin Asignar"
-
-    # Mapeo de Solped MRP
-    if "Solped MRP" not in df.columns:
-        df["Solped MRP"] = "No MRP"
-
-    # Clasificación de Estado Solped
-    if "Estado Solped" not in df.columns:
-        tiene_pedido = df["Pedido"].notna() & (df["Pedido"] != "") & (df["Pedido"] != 0)
-        df["Estado Solped"] = np.where(tiene_pedido, "Pedido completo", "Sin pedido")
-
-    # Flag Aplica?
-    if "Aplica?" not in df.columns:
-        df["Aplica?"] = "Si"
-
-    # Cálculo de Nivel de Servicio (Días de gestión)
-    if "Nivel de Servicio" not in df.columns:
-        if "Fecha de pedido" in df.columns and "Fecha de solicitud" in df.columns:
-            df["Nivel de Servicio"] = (df["Fecha de pedido"] - df["Fecha de solicitud"]).dt.days
-        else:
-            df["Nivel de Servicio"] = np.nan
-
-    # Evaluación de Cumple vs SLA
-    df["Cumple"] = np.where(
-        df["Nivel de Servicio"].isna(),
-        "Sin Dato",
-        np.where(df["Nivel de Servicio"] <= SLA_DIAS_ERP_MRP, "Cumple", "No Cumple")
-    )
-
-    return df
-
-
-def calcular_metricas_por_grupo(df, columnas_grupo):
-    """Calcula Promedio de días, % Cumplimiento y Posiciones de OC por agrupación."""
-    if df.empty:
-        columnas = columnas_grupo + ["Promedio días de gestión", "% Cumplimiento", "Pos. OC generadas"]
-        return pd.DataFrame(columns=columnas)
-
-    registros = []
-    for grupo, sub_df in df.groupby(columnas_grupo, dropna=False):
-        if not isinstance(grupo, tuple):
-            grupo = (grupo,)
-        
-        fila = {col: val for col, val in zip(columnas_grupo, grupo)}
-        total = len(sub_df)
-        
-        pct = (sub_df["Cumple"] == "Cumple").sum() / total * 100 if total > 0 else 0
-        prom = sub_df["Nivel de Servicio"].mean() if total > 0 else np.nan
-        pos_oc = sub_df["Pedido"].nunique() + (1 if sub_df["Pedido"].isna().any() else 0)
-
-        fila["Promedio días de gestión"] = prom
-        fila["% Cumplimiento"] = pct
-        fila["Pos. OC generadas"] = pos_oc
-        registros.append(fila)
-
-    return pd.DataFrame(registros)
-
-
-def agregar_fila_total(tabla, df_origen, columnas_grupo):
-    """Agrega la fila 'TOTAL' recalculando indicadores sobre todo el subconjunto."""
-    if tabla.empty or df_origen.empty:
-        return tabla
-
-    total_filas = len(df_origen)
-    pct = (df_origen["Cumple"] == "Cumple").sum() / total_filas * 100 if total_filas > 0 else 0
-    prom = df_origen["Nivel de Servicio"].mean() if total_filas > 0 else np.nan
-    pos_oc = df_origen["Pedido"].nunique() + (1 if df_origen["Pedido"].isna().any() else 0)
-
-    fila_total = {col: "" for col in columnas_grupo}
-    fila_total[columnas_grupo[0]] = "TOTAL"
-    fila_total["Promedio días de gestión"] = prom
-    fila_total["% Cumplimiento"] = pct
-    fila_total["Pos. OC generadas"] = pos_oc
-
-    return pd.concat([tabla, pd.DataFrame([fila_total])], ignore_index=True)
-
-
-def tabla_centros_fija(df):
-    """Genera la vista resumen por centro logístico."""
-    if "Centro" not in df.columns:
-        return pd.DataFrame()
-    
-    tabla = calcular_metricas_por_grupo(df, ["Centro"])
-    return agregar_fila_total(tabla, df, ["Centro"])
-
-
-# ==============================================================================
-# 4. INTERFAZ DE STREAMLIT
-# ==============================================================================
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
-# Control de acceso con contraseña opcional
+# ---- Acceso con contraseña: cada ingreso fuerza datos frescos desde OneDrive ----
 if "app_password" in st.secrets:
     if not st.session_state.get("_autenticado"):
         st.title("Dx Compradores — Nivel de Servicio")
@@ -195,7 +19,7 @@ if "app_password" in st.secrets:
         if st.button("Ingresar"):
             if clave_ingresada == st.secrets["app_password"]:
                 st.session_state["_autenticado"] = True
-                _descargar_onedrive.clear()
+                loaders._descargar_onedrive.clear()
                 st.session_state.pop("_clave_pipeline", None)
                 st.rerun()
             else:
@@ -204,7 +28,7 @@ if "app_password" in st.secrets:
 
 st.title("Dx Compradores — Nivel de Servicio")
 
-# Menú lateral para fuentes de datos
+# ---- Fuente de datos: local (desarrollo), subida manual, u OneDrive automático ----
 with st.sidebar:
     st.header("Datos de entrada")
     modo = st.radio(
@@ -220,17 +44,23 @@ with st.sidebar:
         archivo_centro = "onedrive:centro_sociedad_mro"
         archivo_mrp = "onedrive:responsable_mrp"
 
-        if st.button("🔄 Forzar recarga desde OneDrive"):
-            _descargar_onedrive.clear()
+        if st.button("🔄 Forzar recarga desde OneDrive ahora"):
+            loaders._descargar_onedrive.clear()
             st.session_state.pop("_clave_pipeline", None)
             st.rerun()
 
         if "onedrive" not in st.secrets:
-            st.error("Falta configurar los Secrets de OneDrive en Streamlit Cloud.")
+            st.error(
+                "Falta configurar los Secrets de OneDrive (Settings → Secrets). "
+                "Mientras tanto, usa 'Subir archivos'."
+            )
             st.stop()
 
     elif modo == "Subir archivos":
-        archivo_data = st.file_uploader("ME5A_con_Ariba (.xlsx o .parquet)", type=["xlsx", "parquet"])
+        archivo_data = st.file_uploader(
+            "ME5A_con_Ariba (.xlsx o .parquet)", type=["xlsx", "parquet"],
+            help="Si ya lo convertiste en la pestaña 'Preparar datos', sube el .parquet — carga mucho más rápido y liviano que el .xlsx.",
+        )
         archivo_resp_grupo = st.file_uploader("Responsable_Grupo_Compras.xlsx", type="xlsx")
         archivo_centro = st.file_uploader("Centro_Sociedad_MRO.xlsx", type="xlsx")
         archivo_mrp = st.file_uploader("Responsable_MRP.xlsx", type="xlsx")
@@ -245,9 +75,8 @@ with st.sidebar:
 
 with st.sidebar:
     st.header("Parámetros")
-    fecha_corte = st.date_input("Fecha de corte del reporte", value=pd.Timestamp.today())
-    st.caption(f"SLA: {SLA_DIAS_ERP_MRP} días ERP/MRP · {SLA_DIAS_ARIBA} días Ariba")
-
+    fecha_corte = st.date_input("Fecha de corte del reporte (FechaCorteReporte)", value=pd.Timestamp.today())
+    st.caption(f"SLA: {config.SLA_DIAS_ERP_MRP} días ERP/MRP · {config.SLA_DIAS_ARIBA} días Ariba")
 
 def _clave_archivo(archivo):
     if hasattr(archivo, "name") and hasattr(archivo, "size"):
@@ -263,14 +92,13 @@ clave_actual = (
     pd.Timestamp(fecha_corte),
 )
 
-# Carga y pipeline en caché de sesión
 if st.session_state.get("_clave_pipeline") != clave_actual:
-    df_data = cargar_data_pr(archivo_data)
-    df_resp_grupo = cargar_responsable_grupo_compras(archivo_resp_grupo)
-    df_centro_sociedad = cargar_centro_sociedad_mro(archivo_centro)
-    df_resp_mrp = cargar_responsable_mrp(archivo_mrp)
+    df_data = loaders.cargar_data_pr(archivo_data)
+    df_resp_grupo = loaders.cargar_responsable_grupo_compras(archivo_resp_grupo)
+    df_centro_sociedad = loaders.cargar_centro_sociedad_mro(archivo_centro)
+    df_resp_mrp = loaders.cargar_responsable_mrp(archivo_mrp)
 
-    df_calculado = pipeline_completo(
+    df_calculado = transform.pipeline_completo(
         df_data, df_resp_grupo, df_centro_sociedad, df_resp_mrp, fecha_corte=pd.Timestamp(fecha_corte)
     )
     df_calculado["Año"] = df_calculado["Fecha de pedido"].dt.year
@@ -285,7 +113,23 @@ df = st.session_state["_df_pipeline"]
 NS_MIN_GLOBAL = int(df["Nivel de Servicio"].min()) if len(df) and pd.notna(df["Nivel de Servicio"].min()) else 0
 NS_MAX_GLOBAL = int(df["Nivel de Servicio"].max()) if len(df) and pd.notna(df["Nivel de Servicio"].max()) else 100
 
-# Sección de Filtros Dinámicos
+checkpoints = [("0. Total tras el pipeline (sin filtros)", len(df))]
+metricas_por_etapa = []
+
+
+def _snapshot(nombre, d):
+    n = len(d)
+    pct = (d["Cumple"] == "Cumple").sum() / n * 100 if n else 0
+    prom = d["Nivel de Servicio"].mean() if n else float("nan")
+    pos_oc = d["Pedido"].nunique() + (1 if d["Pedido"].isna().any() else 0)
+    metricas_por_etapa.append(
+        (nombre, f"{n:,}", f"{pct:.0f}%", f"{prom:.0f}" if pd.notna(prom) else "-", f"{pos_oc:,}")
+    )
+
+
+_snapshot("0. Sin filtros", df)
+
+# ---- Filtros: Centro y Aplica? ----
 st.subheader("Filtros")
 c1, c2 = st.columns(2)
 with c1:
@@ -296,18 +140,32 @@ with c2:
 df_f = df.copy()
 if centros:
     df_f = df_f[df_f["Centro"].isin(centros)]
+checkpoints.append(("1. Tras filtro Centro", len(df_f)))
+
 if aplica:
     df_f = df_f[df_f["Aplica?"].isin(aplica)]
+checkpoints.append(("2. Tras filtro Aplica?", len(df_f)))
+_snapshot("2. Tras Centro + Aplica?", df_f)
 
-# Filtro Estado Solped
+# ---- Estado Solped ----
+st.caption("Estado Solped (el filtro de fecha de abajo solo aplica dentro de 'Pedido completo')")
 h1, h2, h3, h4 = st.columns(4)
 with h1:
     estados = st.multiselect("Estado Solped", sorted(df_f["Estado Solped"].dropna().unique()))
 
 if estados:
     df_f = df_f[df_f["Estado Solped"].isin(estados)]
+checkpoints.append(("3. Tras filtro Estado Solped (total)", len(df_f)))
+checkpoints.append(("3a. Sin pedido (antes de jerarquía)", (df_f["Estado Solped"] == "Sin pedido").sum()))
+checkpoints.append(("3b. Pedido incompleto (antes de jerarquía)", (df_f["Estado Solped"] == "Pedido incompleto").sum()))
+checkpoints.append(("3c. Pedido completo (antes de jerarquía)", (df_f["Estado Solped"] == "Pedido completo").sum()))
+_snapshot("3. Tras Estado Solped", df_f)
 
-# Jerarquía Año / Mes / Día
+conteo_sin_pedido_antes = (df_f["Estado Solped"] == "Sin pedido").sum()
+conteo_incompleto_antes = (df_f["Estado Solped"] == "Pedido incompleto").sum()
+conteo_completo_antes = (df_f["Estado Solped"] == "Pedido completo").sum()
+
+# ---- Jerarquía Año / Mes / Día ----
 df_pedido_completo = df_f[df_f["Estado Solped"] == "Pedido completo"]
 
 with h2:
@@ -318,7 +176,9 @@ with h3:
 with h4:
     _base_dia = _base_mes[_base_mes["Mes"].isin(meses)] if meses else _base_mes
     fechas_disponibles = sorted(_base_dia["Fecha de pedido"].dt.date.dropna().unique())
-    fechas = st.multiselect("Día", fechas_disponibles, format_func=lambda f: f.strftime("%d-%m-%Y"))
+    fechas = st.multiselect(
+        "Día", fechas_disponibles, format_func=lambda f: f.strftime("%d-%m-%Y")
+    )
 
 if años or meses or fechas:
     es_pedido_completo = df_f["Estado Solped"] == "Pedido completo"
@@ -331,7 +191,13 @@ if años or meses or fechas:
         cond_fecha &= df_f["Fecha de pedido"].dt.date.isin(fechas)
     df_f = df_f[~es_pedido_completo | (es_pedido_completo & cond_fecha)]
 
-# Solped MRP y Cumple
+checkpoints.append(("4a. Sin pedido tras jerarquía (debe ser IGUAL a 3a)", (df_f["Estado Solped"] == "Sin pedido").sum()))
+checkpoints.append(("4b. Pedido incompleto tras jerarquía (debe ser IGUAL a 3b)", (df_f["Estado Solped"] == "Pedido incompleto").sum()))
+checkpoints.append(("4c. Pedido completo tras jerarquía (debe ser MENOR O IGUAL a 3c)", (df_f["Estado Solped"] == "Pedido completo").sum()))
+checkpoints.append(("4. Total tras jerarquía de fecha", len(df_f)))
+_snapshot("4. Tras jerarquía Año/Mes/Día", df_f)
+
+# ---- Solped MRP y Cumple ----
 c3, c4 = st.columns(2)
 with c3:
     solped_mrp = st.multiselect("Solped MRP", sorted(df_f["Solped MRP"].dropna().unique()))
@@ -340,21 +206,31 @@ with c4:
 
 if solped_mrp:
     df_f = df_f[df_f["Solped MRP"].isin(solped_mrp)]
+checkpoints.append(("5. Tras filtro Solped MRP", len(df_f)))
+_snapshot("5. Tras Solped MRP", df_f)
+
 if cumple:
     df_f = df_f[df_f["Cumple"].isin(cumple)]
+checkpoints.append(("6. Tras filtro Cumple", len(df_f)))
+_snapshot("6. Tras Cumple", df_f)
 
-# Filtro por rango de días de gestión
+# ---- Segunda capa: filtro por rango de Nivel de Servicio ----
 st.divider()
 st.subheader("Filtro por días de gestión (Nivel de Servicio)")
 
 if len(df_f):
     n_negativos = (df_f["Nivel de Servicio"] < 0).sum()
+
     f1, f2 = st.columns([1, 2])
     with f1:
         excluir_negativos = st.checkbox(
-            "Excluir días negativos",
+            "Excluir negativos (solo desde 0)",
             value=False,
-            help=f"Hay {n_negativos:,} filas con días negativos en la selección actual.",
+            help=(
+                f"Hay {n_negativos:,} filas con días negativos en la selección actual. "
+                "Ocurren cuando la solped se modificó después de generada la OC. "
+                "Al excluirlas el promedio deja de estar distorsionado."
+            ),
         )
     with f2:
         if excluir_negativos:
@@ -366,13 +242,51 @@ if len(df_f):
                 min_value=NS_MIN_GLOBAL,
                 max_value=NS_MAX_GLOBAL,
                 value=(NS_MIN_GLOBAL, NS_MAX_GLOBAL),
+                key="slider_rango_dias",
             )
         else:
             rango_ns = (NS_MIN_GLOBAL, NS_MAX_GLOBAL)
+            st.caption(f"Todas las filas tienen {NS_MIN_GLOBAL} días")
 
     df_f = df_f[df_f["Nivel de Servicio"].between(rango_ns[0], rango_ns[1])]
 
-# Tarjetas KPI Principales
+    if n_negativos and not excluir_negativos:
+        st.caption(
+            f"⚠️ La selección incluye {n_negativos:,} filas con días negativos, "
+            "que siempre cuentan como 'Cumple' y bajan el promedio."
+        )
+
+checkpoints.append(("7. Tras filtro Nivel de Servicio (RESULTADO FINAL)", len(df_f)))
+_snapshot("7. RESULTADO FINAL", df_f)
+
+# ---- Panel de diagnóstico ----
+with st.expander("🔍 Diagnóstico de filtrado (para comparar contra el pbix)"):
+    st.write(
+        "Filas en cada etapa. Los pasos 4a y 4b deben quedar IGUAL al paso 3 "
+        "(la jerarquía de fecha no debe tocar 'Sin pedido' ni 'Pedido incompleto'). "
+        "Si en el pbix ves un número distinto, compara etapa por etapa hasta encontrar "
+        "en cuál empiezan a diferir."
+    )
+    st.table(pd.DataFrame(checkpoints, columns=["Etapa", "Filas"]))
+
+    st.write("**Las 3 métricas en cada etapa del filtro** — compara contra el pbix aplicando los mismos slicers, uno a uno, para ver en cuál se separan:")
+    st.table(pd.DataFrame(metricas_por_etapa, columns=["Etapa", "Filas", "% Cumplimiento", "Prom. días", "Pos. OC"]))
+
+    st.write("Detalle de las solicitudes en el resultado final, para cruzar 1 a 1 contra el export del pbix:")
+    st.dataframe(
+        df_f[["Solicitud de pedido", "Centro", "Estado Solped", "Fecha de pedido", "Nivel de Servicio", "Cumple", "Solped MRP"]]
+        .sort_values("Solicitud de pedido"),
+        use_container_width=True,
+    )
+    csv = df_f.to_csv(index=False).encode("utf-8")
+    st.download_button("Descargar detalle filtrado (CSV)", csv, "detalle_filtrado.csv", "text/csv")
+
+# ---- Tarjetas con semáforo ----
+VERDE = "rgba(35, 145, 75, 0.16)"
+VERDE_BORDE = "rgba(35, 145, 75, 0.55)"
+ROJO = "rgba(204, 0, 0, 0.14)"
+ROJO_BORDE = "rgba(204, 0, 0, 0.55)"
+
 pct_cumplimiento = (df_f["Cumple"] == "Cumple").sum() / max(len(df_f), 1) * 100
 promedio_dias = df_f["Nivel de Servicio"].mean()
 pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
@@ -396,7 +310,10 @@ elif promedio_dias > 10:
 else:
     f_dias, b_dias, txt_dias = VERDE, VERDE_BORDE, f"{promedio_dias:.0f}"
 
-f_pct, b_pct = (VERDE, VERDE_BORDE) if pct_cumplimiento >= 85 else (ROJO, ROJO_BORDE)
+if pct_cumplimiento >= 85:
+    f_pct, b_pct = VERDE, VERDE_BORDE
+else:
+    f_pct, b_pct = ROJO, ROJO_BORDE
 
 t1, t2, t3 = st.columns(3)
 with t1:
@@ -408,8 +325,11 @@ with t3:
 
 st.divider()
 
+# ---- Estilo corporativo Enaex para las tablas ----
+ENAEX_GRIS = "#404B55"
+ENAEX_ROJO = "#CC0000"
 
-# Renderizador HTML para tablas con diseño corporativo
+
 def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bool = False) -> str:
     cols = list(tabla.columns)
 
@@ -446,7 +366,11 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
             )
         filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
-    abrev = {"Promedio días de gestión": "Días gest.", "% Cumplimiento": "% Cumpl.", "Pos. OC generadas": "Pos. OC"}
+    abrev = {
+        "Promedio días de gestión": "Días gest.",
+        "% Cumplimiento": "% Cumpl.",
+        "Pos. OC generadas": "Pos. OC",
+    }
     encabezados = "".join(
         f'<th style="padding:{pad_th};text-align:{"left" if j == 0 else "right"};'
         f'background:{ENAEX_GRIS};color:#fff;font-weight:600;font-size:{fuente_th};'
@@ -462,46 +386,101 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
     )
 
     alto = f"max-height:{max_height}px;overflow-y:auto;" if max_height else ""
-    return f'<div style="{alto}overflow-x:auto;border:1px solid #d8dbdf;border-radius:4px;">{tabla_html}</div>'
+    return (
+        f'<div style="{alto}overflow-x:auto;border:1px solid #d8dbdf;'
+        f'border-radius:4px;">{tabla_html}</div>'
+    )
 
 
-# Tabla por Comprador
+# ---- Tabla por Comprador ----
 st.subheader("Por comprador")
-col_comprador = "Comprador (Grupo de compras)" if "Comprador (Grupo de compras)" in df_f.columns else "Comprador por Grupo Compras"
-tabla_comprador = calcular_metricas_por_grupo(df_f, [col_comprador])
-tabla_comprador = agregar_fila_total(tabla_comprador, df_f, [col_comprador])
+st.caption(
+    "Asignación por **grupo de compras**: las líneas MRP se reparten entre los "
+    "compradores responsables de cada grupo, en vez de concentrarse en el responsable de MRP."
+)
+col_comprador = (
+    "Comprador (Grupo de compras)"
+    if "Comprador (Grupo de compras)" in df_f.columns
+    else "Comprador por Grupo Compras"
+)
+tabla_comprador = transform.calcular_metricas_por_grupo(df_f, [col_comprador])
+tabla_comprador = transform.agregar_fila_total(tabla_comprador, df_f, [col_comprador])
 st.markdown(tabla_enaex(tabla_comprador), unsafe_allow_html=True)
 
 st.write("")
 
-# Tablas por Centro Logístico
+# ---- Dos vistas por centro, en paralelo ----
 vc1, vc2 = st.columns(2)
+
 with vc1:
     st.subheader("Por centro logístico")
-    tabla_fija = tabla_centros_fija(df_f)
+    st.caption("Vista fija — el total calza con la vista por comprador.")
+    tabla_fija = transform.tabla_centros_fija(df_f)
     st.markdown(tabla_enaex(tabla_fija, compacta=True), unsafe_allow_html=True)
 
 with vc2:
     st.subheader("Detalle por centro")
+    st.caption("Centros activos según los filtros aplicados.")
     cols_detalle = [c for c in ["Centro", "Nombre Centro 2"] if c in df_f.columns]
-    tabla_detalle = calcular_metricas_por_grupo(df_f, cols_detalle)
+    tabla_detalle = transform.calcular_metricas_por_grupo(df_f, cols_detalle)
     tabla_detalle = tabla_detalle.sort_values("Pos. OC generadas", ascending=False)
-    tabla_detalle = agregar_fila_total(tabla_detalle, df_f, cols_detalle)
+    tabla_detalle = transform.agregar_fila_total(tabla_detalle, df_f, cols_detalle)
     st.markdown(tabla_enaex(tabla_detalle, max_height=300, compacta=True), unsafe_allow_html=True)
 
 st.divider()
 
-# Editor interactivo de comentarios
+# ---- Detalle de solicitudes con columna de comentario editable ----
 COLUMNAS_DETALLE = [
-    "Centro", "Material", "Texto breve", "Solicitud de pedido", "Fecha de solicitud",
-    "Fecha modificación", "Grupo de compras", "Cantidad pedida", "Pedido", "Fecha de pedido",
-    "Posición de pedido", "Comprador (Grupo de compras)", "Solped MRP", "Nombre Centro 2",
-    "Nombre Centro", "Estado Solped", "Nivel de Servicio", "Comentario", "Cumple"
+    "Centro",
+    "Material",
+    "Texto breve",
+    "Solicitud de pedido",
+    "Tipo Ariba",
+    "Fecha de solicitud",
+    "Fecha modificación",
+    "Grupo de compras",
+    "Cantidad pedida",
+    "Pedido",
+    "Fecha de pedido",
+    "Posición de pedido",
+    "Comprador (Grupo de compras)",
+    "Solped MRP",
+    "Nombre Centro 2",
+    "Nombre Centro",
+    "Estado Solped",
+    "Nivel de Servicio",
+    "Comentario",
+    "Cumple",
 ]
 
 
+def determinar_tipo_ariba(row):
+    """Identifica y clasifica la categoría ARIBA respetando datos previos o evaluando el dígito inicial."""
+    for col in ["Tipo Ariba", "Tipo_Ariba", "Ariba", "Origen Ariba"]:
+        if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
+            val = str(row[col]).upper()
+            if "NO CATALOGAD" in val or "NOCATALOGAD" in val:
+                return "🔵 ARIBA NO CATALOGADA"
+            elif "CATALOGAD" in val:
+                return "🟢 ARIBA CATALOGADA"
+            elif "DIRECTA" in val or "DIRECT" in val:
+                return "🟠 ARIBA DIRECTA"
+
+    sol = str(row.get("Solicitud de pedido", "")).strip()
+    if sol.startswith("1"):
+        return "🟢 ARIBA CATALOGADA"
+    elif sol.startswith("6"):
+        return "🔵 ARIBA NO CATALOGADA"
+    elif sol.startswith("2") or sol.startswith("3") or sol.startswith("4"):
+        return "🟠 ARIBA DIRECTA"
+    return "🟢 ARIBA CATALOGADA"
+
+
 def preparar_detalle(d: pd.DataFrame) -> pd.DataFrame:
+    """Ordena columnas, determina categoría ARIBA, quita auxiliares y deja fechas sin hora."""
     d = d.copy()
+    d["Tipo Ariba"] = d.apply(determinar_tipo_ariba, axis=1)
+
     for col_fecha in ["Fecha de solicitud", "Fecha modificación", "Fecha de pedido"]:
         if col_fecha in d.columns:
             d[col_fecha] = pd.to_datetime(d[col_fecha], errors="coerce").dt.date
@@ -513,21 +492,46 @@ def preparar_detalle(d: pd.DataFrame) -> pd.DataFrame:
 detalle = preparar_detalle(df_f)
 
 with st.expander("Ver detalle de solicitudes", expanded=False):
-    st.caption("La columna **Comentario** es editable.")
+    st.caption("La columna **Comentario** es editable: escribe ahí y se incluirá en el Excel de registro.")
+
+    # ---- Extensión visual superior: 3 rectángulos indicativos ----
+    st.markdown(
+        """
+        <div style="display: flex; gap: 15px; margin-top: 5px; margin-bottom: 15px; align-items: center; flex-wrap: wrap;">
+            <div style="background-color: #d4edda; color: #155724; border: 1.5px solid #c3e6cb; padding: 10px 18px; border-radius: 8px; font-weight: bold; font-size: 0.88rem; display: flex; align-items: center; gap: 8px;">
+                <span style="height: 14px; width: 14px; background-color: #28a745; border-radius: 3px; display: inline-block;"></span>
+                🟢 ARIBA CATALOGADA
+            </div>
+            <div style="background-color: #d1ecf1; color: #0c5460; border: 1.5px solid #bee5eb; padding: 10px 18px; border-radius: 8px; font-weight: bold; font-size: 0.88rem; display: flex; align-items: center; gap: 8px;">
+                <span style="height: 14px; width: 14px; background-color: #0d6efd; border-radius: 3px; display: inline-block;"></span>
+                🔵 ARIBA NO CATALOGADA
+            </div>
+            <div style="background-color: #fff3cd; color: #856404; border: 1.5px solid #ffeeba; padding: 10px 18px; border-radius: 8px; font-weight: bold; font-size: 0.88rem; display: flex; align-items: center; gap: 8px;">
+                <span style="height: 14px; width: 14px; background-color: #fd7e14; border-radius: 3px; display: inline-block;"></span>
+                🟠 ARIBA DIRECTA
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     detalle_editado = st.data_editor(
         detalle,
         use_container_width=True,
         num_rows="fixed",
         key="editor_detalle",
         column_config={
+            "Tipo Ariba": st.column_config.TextColumn(
+                "Tipo Ariba", help="Categoría Ariba identificada por dígito o datos", width="medium"
+            ),
             "Comentario": st.column_config.TextColumn(
                 "Comentario", help="Anotación libre para el registro semanal", width="medium"
-            )
+            ),
         },
         disabled=[c for c in detalle.columns if c != "Comentario"],
     )
 
-# Generación del reporte Excel
+# ---- Exportación del registro semanal a Excel ----
 semana_ref = pd.Timestamp(fecha_corte) - pd.Timedelta(days=7)
 num_semana = semana_ref.isocalendar()[1]
 nombre_archivo = f"Sem{num_semana:02d}-{semana_ref.year}.xlsx"
@@ -562,7 +566,11 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
                 val = r[j]
                 if pd.isna(val):
                     val = None
-                elif isinstance(val, (int, float)) and col in ("Promedio días de gestión", "% Cumplimiento", "Pos. OC generadas"):
+                elif isinstance(val, (int, float)) and col in (
+                    "Promedio días de gestión",
+                    "% Cumplimiento",
+                    "Pos. OC generadas",
+                ):
                     val = round(float(val))
                 elif hasattr(val, "item"):
                     val = val.item()
@@ -617,13 +625,15 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
     ajustar_ancho(ws2, detalle_df)
     ws2.freeze_panes = "A3"
 
-    buffer = io.BytesIO()
+    from io import BytesIO
+
+    buffer = BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
 
 
 st.subheader("Registro semanal")
-st.caption(f"Prepara el reporte completo como **{nombre_archivo}**.")
+st.caption(f"Prepara el reporte completo (indicadores, tablas y detalle con comentarios) como **{nombre_archivo}**.")
 
 clave_excel = (len(df_f), int(pd.util.hash_pandas_object(detalle_editado["Comentario"].fillna("")).sum()), pd.Timestamp(fecha_corte))
 
@@ -641,11 +651,14 @@ with col_desc:
     excel_listo = st.session_state.get("_excel_bytes") is not None
     excel_desactualizado = st.session_state.get("_excel_clave") != clave_excel
     if excel_listo and excel_desactualizado:
-        st.caption("⚠️ Los filtros cambiaron — vuelve a preparar para reflejar la selección actual.")
+        st.caption("⚠️ Los filtros cambiaron desde que preparaste este Excel — vuelve a preparar para reflejar la selección actual.")
     if excel_listo:
         st.download_button(
             f"⬇ Descargar {nombre_archivo}",
             data=st.session_state["_excel_bytes"],
             file_name=nombre_archivo,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=False,
         )
+    else:
+        st.caption("Haz clic en \"Preparar Excel\" para generar el archivo de descarga.")
