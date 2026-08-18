@@ -254,46 +254,6 @@ if cumple:
 checkpoints.append(("6. Tras filtro Cumple", len(df_f)))
 _snapshot("6. Tras Cumple", df_f)
 
-# ---- NUEVO: Filtros Ariba (Catalogada, No Catalogada, Directas Ariba) ----
-st.caption("Filtros Ariba")
-c_ar1, c_ar2, c_ar3 = st.columns(3)
-
-# Identificación flexible de nombres de columna en el DataFrame
-col_ariba_cat = next((c for c in df.columns if "CATALOGADA" in c.upper() and "NO" not in c.upper()), "Ariba Catalogada")
-col_ariba_nocat = next((c for c in df.columns if "NO CATALOGADA" in c.upper() or "NOCATALOGADA" in c.upper()), "Ariba No Catalogada")
-col_ariba_dir = next((c for c in df.columns if "DIRECTA" in c.upper()), "Directas Ariba")
-
-ariba_cat = []
-ariba_nocat = []
-ariba_dir = []
-
-with c_ar1:
-    if col_ariba_cat in df_f.columns:
-        ariba_cat = st.multiselect("Ariba Catalogada", sorted(df_f[col_ariba_cat].dropna().unique()))
-
-with c_ar2:
-    if col_ariba_nocat in df_f.columns:
-        ariba_nocat = st.multiselect("Ariba No Catalogada", sorted(df_f[col_ariba_nocat].dropna().unique()))
-
-with c_ar3:
-    if col_ariba_dir in df_f.columns:
-        ariba_dir = st.multiselect("Directas Ariba", sorted(df_f[col_ariba_dir].dropna().unique()))
-
-if col_ariba_cat in df_f.columns and ariba_cat:
-    df_f = df_f[df_f[col_ariba_cat].isin(ariba_cat)]
-    checkpoints.append(("6a. Tras filtro Ariba Catalogada", len(df_f)))
-    _snapshot("6a. Tras Ariba Catalogada", df_f)
-
-if col_ariba_nocat in df_f.columns and ariba_nocat:
-    df_f = df_f[df_f[col_ariba_nocat].isin(ariba_nocat)]
-    checkpoints.append(("6b. Tras filtro Ariba No Catalogada", len(df_f)))
-    _snapshot("6b. Tras Ariba No Catalogada", df_f)
-
-if col_ariba_dir in df_f.columns and ariba_dir:
-    df_f = df_f[df_f[col_ariba_dir].isin(ariba_dir)]
-    checkpoints.append(("6c. Tras filtro Directas Ariba", len(df_f)))
-    _snapshot("6c. Tras Directas Ariba", df_f)
-
 # ---- Segunda capa: filtro por rango de Nivel de Servicio (días) ----
 # Los valores negativos aparecen cuando la solped se modificó DESPUÉS de que
 # ya existía la OC (Fecha modificación > Fecha de pedido). No representan
