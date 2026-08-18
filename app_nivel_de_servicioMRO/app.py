@@ -455,8 +455,16 @@ COLUMNAS_DETALLE = [
 
 
 def determinar_tipo_ariba(row):
-    """Identifica y clasifica la categoría ARIBA respetando datos previos o evaluando el dígito inicial."""
-    for col in ["Tipo Ariba", "Tipo_Ariba", "Ariba", "Origen Ariba"]:
+    """
+    Clasifica la solicitud:
+    1. Respeta si ya viene clasificada en una columna previa.
+    2. Si inicia con '1' o '5' -> SAP.
+    3. Si inicia con '6' -> Es ARIBA:
+       - ARIBA DIRECTA: Solped MRP / Directa.
+       - ARIBA NO CATALOGADA: Sin número de material (texto libre).
+       - ARIBA CATALOGADA: Con número de material en catálogo.
+    """
+    for col in ["Tipo Ariba", "Tipo_Ariba", "Origen Ariba", "Origen"]:
         if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
             val = str(row[col]).upper()
             if "NO CATALOGAD" in val or "NOCATALOGAD" in val:
@@ -465,19 +473,33 @@ def determinar_tipo_ariba(row):
                 return "🟢 ARIBA CATALOGADA"
             elif "DIRECTA" in val or "DIRECT" in val:
                 return "🟠 ARIBA DIRECTA"
+            elif "SAP" in val:
+                return "⚪ SAP"
 
     sol = str(row.get("Solicitud de pedido", "")).strip()
-    if sol.startswith("1"):
-        return "🟢 ARIBA CATALOGADA"
-    elif sol.startswith("6"):
-        return "🔵 ARIBA NO CATALOGADA"
-    elif sol.startswith("2") or sol.startswith("3") or sol.startswith("4"):
-        return "🟠 ARIBA DIRECTA"
-    return "🟢 ARIBA CATALOGADA"
+
+    # Solicitudes SAP (1 y 5)
+    if sol.startswith("1") or sol.startswith("5"):
+        return "⚪ SAP"
+
+    # Solicitudes ARIBA (6)
+    if sol.startswith("6"):
+        material = str(row.get("Material", "")).strip()
+        solped_mrp = str(row.get("Solped MRP", "")).strip().upper()
+        grupo_compras = str(row.get("Grupo de compras", "")).strip().upper()
+
+        if solped_mrp == "SÍ" or "DIR" in grupo_compras:
+            return "🟠 ARIBA DIRECTA"
+        elif not material or material.lower() in ["nan", "none", "n/a", "-", "0"]:
+            return "🔵 ARIBA NO CATALOGADA"
+        else:
+            return "🟢 ARIBA CATALOGADA"
+
+    return "⚪ SAP"
 
 
 def preparar_detalle(d: pd.DataFrame) -> pd.DataFrame:
-    """Ordena columnas, determina categoría ARIBA, quita auxiliares y deja fechas sin hora."""
+    """Ordena columnas, determina categoría ARIBA/SAP, quita auxiliares y deja fechas sin hora."""
     d = d.copy()
     d["Tipo Ariba"] = d.apply(determinar_tipo_ariba, axis=1)
 
@@ -522,7 +544,7 @@ with st.expander("Ver detalle de solicitudes", expanded=False):
         key="editor_detalle",
         column_config={
             "Tipo Ariba": st.column_config.TextColumn(
-                "Tipo Ariba", help="Categoría Ariba identificada por dígito o datos", width="medium"
+                "Tipo Ariba", help="Categoría Ariba/SAP identificada por regla de negocio", width="medium"
             ),
             "Comentario": st.column_config.TextColumn(
                 "Comentario", help="Anotación libre para el registro semanal", width="medium"
