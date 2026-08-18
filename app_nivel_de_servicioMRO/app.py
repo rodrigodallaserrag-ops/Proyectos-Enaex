@@ -605,14 +605,38 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
 
 
 st.subheader("Registro semanal")
-st.caption(f"Descarga el reporte completo (indicadores, tablas y detalle con comentarios) como **{nombre_archivo}**.")
-try:
-    st.download_button(
-        f"⬇ Descargar {nombre_archivo}",
-        data=generar_excel(detalle_editado),
-        file_name=nombre_archivo,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=False,
-    )
-except Exception as e:
-    st.error(f"No se pudo generar el Excel: {e}")
+st.caption(f"Prepara el reporte completo (indicadores, tablas y detalle con comentarios) como **{nombre_archivo}**.")
+
+# Patrón de dos pasos: generar_excel() SOLO corre cuando el usuario hace clic
+# en "Preparar", no en cada rerun. Escribir un Excel celda por celda con
+# openpyxl es lento a escala (varios segundos con miles de filas de detalle)
+# — si esto corriera en cada rerun (como antes), cada filtro que tocas
+# dispararía esa reconstrucción completa aunque no fueras a descargar nada.
+# Guardamos los bytes ya generados en session_state, listos para servir.
+clave_excel = (len(df_f), int(pd.util.hash_pandas_object(detalle_editado["Comentario"].fillna("")).sum()), pd.Timestamp(fecha_corte))
+
+col_prep, col_desc = st.columns([1, 2])
+with col_prep:
+    if st.button("📄 Preparar Excel"):
+        with st.spinner("Generando el Excel..."):
+            try:
+                st.session_state["_excel_bytes"] = generar_excel(detalle_editado)
+                st.session_state["_excel_clave"] = clave_excel
+            except Exception as e:
+                st.error(f"No se pudo generar el Excel: {e}")
+
+with col_desc:
+    excel_listo = st.session_state.get("_excel_bytes") is not None
+    excel_desactualizado = st.session_state.get("_excel_clave") != clave_excel
+    if excel_listo and excel_desactualizado:
+        st.caption("⚠️ Los filtros cambiaron desde que preparaste este Excel — vuelve a preparar para reflejar la selección actual.")
+    if excel_listo:
+        st.download_button(
+            f"⬇ Descargar {nombre_archivo}",
+            data=st.session_state["_excel_bytes"],
+            file_name=nombre_archivo,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=False,
+        )
+    else:
+        st.caption("Haz clic en \"Preparar Excel\" para generar el archivo de descarga.")
