@@ -8,11 +8,65 @@ Correr local: streamlit run app.py
 from io import BytesIO
 import config
 import loaders
+import numpy as np
 import pandas as pd
 import streamlit as st
 import transform
 
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
+
+
+# ---- 0. Función de Clasificación en 5 Categorías ----
+def determinar_tipo_ariba(row):
+    """
+    Clasifica las solicitudes en 5 categorías independientes:
+    - ⚙️ SAP ERP: Serie 1 (100...), Serie 19, CL...
+    - ⚪ SAP MRP: Serie 5 (500...) o marca de Solped MRP.
+    - 🟡 ARIBA DIRECTA: Flujo directo / automatizado.
+    - 🟢 ARIBA CATALOGADA: Serie 6 con código de material/catálogo.
+    - 🔵 ARIBA NO CATALOGADA: Serie 6 sin código de material o en Trazabilidad.
+    """
+    # Respetar clasificación explícita previa si ya viene en el DataFrame
+    for col in ["Tipo Ariba", "Tipo_Ariba", "Origen Ariba", "Origen", "Tipo Flujo"]:
+        if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
+            val = str(row[col]).upper()
+            if "DIRECTA" in val:
+                return "🟡 ARIBA DIRECTA"
+            elif "NO CATALOGAD" in val or "NOCATALOGAD" in val:
+                return "🔵 ARIBA NO CATALOGADA"
+            elif "CATALOGAD" in val:
+                return "🟢 ARIBA CATALOGADA"
+            elif "MRP" in val:
+                return "⚪ SAP MRP"
+            elif "ERP" in val:
+                return "⚙️ SAP ERP"
+
+    sol = str(row.get("Solicitud de pedido", "")).strip()
+    material = str(row.get("Material", "")).strip()
+    tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0"])
+    es_mrp_flag = str(row.get("Solped MRP", "")).strip().lower() in ["sí", "si", "true", "mrp", "1"]
+    en_trazabilidad = bool(row.get("En_Trazabilidad", False) or row.get("En Trazabilidad", False))
+    tipo_pedido = str(row.get("Tipo Pedido", "")).strip().upper()
+
+    # 1. SAP MRP
+    if sol.startswith("5") or es_mrp_flag:
+        return "⚪ SAP MRP"
+
+    # 2. SAP ERP
+    if sol.startswith("1") or sol.startswith("19") or sol.upper().startswith("CL"):
+        return "⚙️ SAP ERP"
+
+    # 3. Flujos ARIBA (Serie 6)
+    if sol.startswith("6"):
+        if "DIRECTA" in tipo_pedido or "DIRECT" in tipo_pedido:
+            return "🟡 ARIBA DIRECTA"
+        elif en_trazabilidad or not tiene_material:
+            return "🔵 ARIBA NO CATALOGADA"
+        else:
+            return "🟢 ARIBA CATALOGADA"
+
+    return "⚪ OTROS"
+
 
 # ---- 1. Autenticación y Reset de Caché ----
 if "app_password" in st.secrets:
@@ -54,25 +108,15 @@ with st.sidebar:
             st.rerun()
 
         if "onedrive" not in st.secrets:
-            st.error(
-                "Falta configurar los Secrets de OneDrive (Settings → Secrets)."
-            )
+            st.error("Falta configurar los Secrets de OneDrive en Streamlit.")
             st.stop()
 
     elif modo == "Subir archivos":
-        archivo_data = st.file_uploader(
-            "ME5A_con_Ariba (.xlsx o .parquet)", type=["xlsx", "parquet"]
-        )
-        archivo_resp_grupo = st.file_uploader(
-            "Responsable_Grupo_Compras.xlsx", type=["xlsx"]
-        )
-        archivo_centro = st.file_uploader(
-            "Centro_Sociedad_MRO.xlsx", type=["xlsx"]
-        )
+        archivo_data = st.file_uploader("ME5A_con_Ariba (.xlsx o .parquet)", type=["xlsx", "parquet"])
+        archivo_resp_grupo = st.file_uploader("Responsable_Grupo_Compras.xlsx", type=["xlsx"])
+        archivo_centro = st.file_uploader("Centro_Sociedad_MRO.xlsx", type=["xlsx"])
         archivo_mrp = st.file_uploader("Responsable_MRP.xlsx", type=["xlsx"])
-        if not all(
-            [archivo_data, archivo_resp_grupo, archivo_centro, archivo_mrp]
-        ):
+        if not all([archivo_data, archivo_resp_grupo, archivo_centro, archivo_mrp]):
             st.info("Sube los 4 archivos para generar el reporte.")
             st.stop()
     else:
@@ -82,16 +126,11 @@ with st.sidebar:
         archivo_mrp = "data/Responsable_MRP.xlsx"
 
     st.header("Parámetros")
-    fecha_corte = st.date_input(
-        "Fecha de corte del reporte (FechaCorteReporte)",
-        value=pd.Timestamp.today(),
-    )
-    st.caption(
-        f"SLA: {config.SLA_DIAS_ERP_MRP} días ERP/MRP · {config.SLA_DIAS_ARIBA} días Ariba"
-    )
+    fecha_corte = st.date_input("Fecha de corte del reporte", value=pd.Timestamp.today())
+    st.caption(f"SLA: {config.SLA_DIAS_ERP_MRP} días ERP/MRP · {config.SLA_DIAS_ARIBA} días Ariba")
 
 
-# ---- 3. Carga y Ejecución del Pipeline (Control O(1) vía Hash Liviano) ----
+# ---- 3. Carga y Pipeline ----
 def _clave_archivo(archivo):
     if hasattr(archivo, "name") and hasattr(archivo, "size"):
         return (archivo.name, archivo.size)
@@ -108,122 +147,66 @@ clave_actual = (
 
 if st.session_state.get("_clave_pipeline") != clave_actual:
     df_data = loaders.cargar_data_pr(archivo_data)
-    df_resp_grupo = loaders.cargar_responsable_grupo_compras(
-        archivo_resp_grupo
-    )
+    df_resp_grupo = loaders.cargar_responsable_grupo_compras(archivo_resp_grupo)
     df_centro_sociedad = loaders.cargar_centro_sociedad_mro(archivo_centro)
     df_resp_mrp = loaders.cargar_responsable_mrp(archivo_mrp)
 
     df_calculado = transform.pipeline_completo(
-        df_data,
-        df_resp_grupo,
-        df_centro_sociedad,
-        df_resp_mrp,
-        fecha_corte=pd.Timestamp(fecha_corte),
+        df_data, df_resp_grupo, df_centro_sociedad, df_resp_mrp, fecha_corte=pd.Timestamp(fecha_corte)
     )
     df_calculado["Año"] = df_calculado["Fecha de pedido"].dt.year
     df_calculado["Mes"] = df_calculado["Fecha de pedido"].dt.month
     df_calculado["Día"] = df_calculado["Fecha de pedido"].dt.day
+
+    # Asignación de la clasificación de 5 categorías
+    df_calculado["Tipo Ariba"] = df_calculado.apply(determinar_tipo_ariba, axis=1)
 
     st.session_state["_df_pipeline"] = df_calculado
     st.session_state["_clave_pipeline"] = clave_actual
 
 df = st.session_state["_df_pipeline"]
 
-# Parámetros globales
-NS_MIN_GLOBAL = (
-    int(df["Nivel de Servicio"].min())
-    if len(df) and pd.notna(df["Nivel de Servicio"].min())
-    else 0
-)
-NS_MAX_GLOBAL = (
-    int(df["Nivel de Servicio"].max())
-    if len(df) and pd.notna(df["Nivel de Servicio"].max())
-    else 100
-)
+NS_MIN_GLOBAL = int(df["Nivel de Servicio"].min()) if len(df) and pd.notna(df["Nivel de Servicio"].min()) else 0
+NS_MAX_GLOBAL = int(df["Nivel de Servicio"].max()) if len(df) and pd.notna(df["Nivel de Servicio"].max()) else 100
 
-checkpoints = [("0. Total tras el pipeline (sin filtros)", len(df))]
-metricas_por_etapa = []
-
-
-def _snapshot(nombre, d):
-    n = len(d)
-    pct = (d["Cumple"] == "Cumple").sum() / n * 100 if n else 0
-    prom = d["Nivel de Servicio"].mean() if n else float("nan")
-    pos_oc = d["Pedido"].nunique() + (1 if d["Pedido"].isna().any() else 0)
-    metricas_por_etapa.append(
-        (
-            nombre,
-            f"{n:,}",
-            f"{pct:.0f}%",
-            f"{prom:.0f}" if pd.notna(prom) else "-",
-            f"{pos_oc:,}",
-        )
-    )
-
-
-_snapshot("0. Sin filtros", df)
-
-# ---- 4. Filtros de Interfaz ----
+# ---- 4. Filtros de Usuario ----
 st.subheader("Filtros")
-c1, c2 = st.columns(2)
+c1, c2, c3 = st.columns(3)
 with c1:
     centros = st.multiselect("Centro", sorted(df["Centro"].dropna().unique()))
 with c2:
     aplica = st.multiselect("Aplica?", sorted(df["Aplica?"].dropna().unique()))
+with c3:
+    tipos_ariba = st.multiselect("Origen / Tipo Solicitud", sorted(df["Tipo Ariba"].dropna().unique()))
 
 df_f = df.copy()
 if centros:
     df_f = df_f[df_f["Centro"].isin(centros)]
-checkpoints.append(("1. Tras filtro Centro", len(df_f)))
-
 if aplica:
     df_f = df_f[df_f["Aplica?"].isin(aplica)]
-checkpoints.append(("2. Tras filtro Aplica?", len(df_f)))
-_snapshot("2. Tras Centro + Aplica?", df_f)
+if tipos_ariba:
+    df_f = df_f[df_f["Tipo Ariba"].isin(tipos_ariba)]
 
-st.caption(
-    "Estado Solped (el filtro de fecha inferior solo aplica a 'Pedido completo')"
-)
+st.caption("Estado Solped")
 h1, h2, h3, h4 = st.columns(4)
 with h1:
-    estados = st.multiselect(
-        "Estado Solped", sorted(df_f["Estado Solped"].dropna().unique())
-    )
+    estados = st.multiselect("Estado Solped", sorted(df_f["Estado Solped"].dropna().unique()))
 
 if estados:
     df_f = df_f[df_f["Estado Solped"].isin(estados)]
-
-checkpoints.append(("3. Tras filtro Estado Solped (total)", len(df_f)))
-_snapshot("3. Tras Estado Solped", df_f)
 
 # Jerarquía Temporal
 df_pedido_completo = df_f[df_f["Estado Solped"] == "Pedido completo"]
 
 with h2:
-    años = st.multiselect(
-        "Año",
-        sorted(df_pedido_completo["Año"].dropna().unique().astype(int)),
-    )
+    años = st.multiselect("Año", sorted(df_pedido_completo["Año"].dropna().unique().astype(int)))
 with h3:
-    _base_mes = (
-        df_pedido_completo[df_pedido_completo["Año"].isin(años)]
-        if años
-        else df_pedido_completo
-    )
-    meses = st.multiselect(
-        "Mes", sorted(_base_mes["Mes"].dropna().unique().astype(int))
-    )
+    _base_mes = df_pedido_completo[df_pedido_completo["Año"].isin(años)] if años else df_pedido_completo
+    meses = st.multiselect("Mes", sorted(_base_mes["Mes"].dropna().unique().astype(int)))
 with h4:
     _base_dia = _base_mes[_base_mes["Mes"].isin(meses)] if meses else _base_mes
-    fechas_disponibles = sorted(
-        _base_dia["Fecha de pedido"].dt.date.dropna().unique()
-    )
-    fechas = st.multiselect(
-        "Día",
-        fechas_disponibles,
-        format_func=lambda f: f.strftime("%d-%m-%Y"),
-    )
+    fechas_disponibles = sorted(_base_dia["Fecha de pedido"].dt.date.dropna().unique())
+    fechas = st.multiselect("Día", fechas_disponibles, format_func=lambda f: f.strftime("%d-%m-%Y"))
 
 if años or meses or fechas:
     es_pedido_completo = df_f["Estado Solped"] == "Pedido completo"
@@ -236,160 +219,56 @@ if años or meses or fechas:
         cond_fecha &= df_f["Fecha de pedido"].dt.date.isin(fechas)
     df_f = df_f[~es_pedido_completo | (es_pedido_completo & cond_fecha)]
 
-checkpoints.append(("4. Total tras jerarquía de fecha", len(df_f)))
-_snapshot("4. Tras jerarquía Año/Mes/Día", df_f)
-
-c3, c4 = st.columns(2)
-with c3:
-    solped_mrp = st.multiselect(
-        "Solped MRP", sorted(df_f["Solped MRP"].dropna().unique())
-    )
+c4, c5 = st.columns(2)
 with c4:
-    cumple = st.multiselect(
-        "Nivel de Servicio (Cumple)",
-        sorted(df_f["Cumple"].dropna().unique()),
-    )
+    solped_mrp = st.multiselect("Solped MRP", sorted(df_f["Solped MRP"].dropna().unique()))
+with c5:
+    cumple = st.multiselect("Nivel de Servicio (Cumple)", sorted(df_f["Cumple"].dropna().unique()))
 
 if solped_mrp:
     df_f = df_f[df_f["Solped MRP"].isin(solped_mrp)]
-checkpoints.append(("5. Tras filtro Solped MRP", len(df_f)))
-
 if cumple:
     df_f = df_f[df_f["Cumple"].isin(cumple)]
-checkpoints.append(("6. Tras filtro Cumple", len(df_f)))
 
 st.divider()
-st.subheader("Filtro por días de gestión (Nivel de Servicio)")
 
-if len(df_f):
-    n_negativos = (df_f["Nivel de Servicio"] < 0).sum()
-    f1, f2 = st.columns([1, 2])
-    with f1:
-        excluir_negativos = st.checkbox(
-            "Excluir negativos (solo desde 0)",
-            value=False,
-            help="Ocurren cuando la solped fue modificada tras generar la OC.",
-        )
-    with f2:
-        if excluir_negativos:
-            rango_ns = (0, NS_MAX_GLOBAL)
-            st.caption(
-                f"Rango aplicado: 0 a {NS_MAX_GLOBAL:,} días (excluyendo negativos)"
-            )
-        elif NS_MIN_GLOBAL < NS_MAX_GLOBAL:
-            rango_ns = st.slider(
-                "Rango de días de gestión",
-                min_value=NS_MIN_GLOBAL,
-                max_value=NS_MAX_GLOBAL,
-                value=(NS_MIN_GLOBAL, NS_MAX_GLOBAL),
-                key="slider_rango_dias",
-            )
-        else:
-            rango_ns = (NS_MIN_GLOBAL, NS_MAX_GLOBAL)
-
-    df_f = df_f[df_f["Nivel de Servicio"].between(rango_ns[0], rango_ns[1])]
-
-checkpoints.append(
-    ("7. Tras filtro Nivel de Servicio (RESULTADO FINAL)", len(df_f))
-)
-_snapshot("7. RESULTADO FINAL", df_f)
-
-# ---- 5. Diagnóstico de Filtrado ----
-with st.expander("🔍 Diagnóstico de filtrado (para comparar contra el pbix)"):
-    st.table(pd.DataFrame(checkpoints, columns=["Etapa", "Filas"]))
-    st.table(
-        pd.DataFrame(
-            metricas_por_etapa,
-            columns=[
-                "Etapa",
-                "Filas",
-                "% Cumplimiento",
-                "Prom. días",
-                "Pos. OC",
-            ],
-        )
-    )
-    st.dataframe(
-        df_f[
-            [
-                "Solicitud de pedido",
-                "Centro",
-                "Estado Solped",
-                "Fecha de pedido",
-                "Nivel de Servicio",
-                "Cumple",
-                "Solped MRP",
-            ]
-        ].sort_values("Solicitud de pedido"),
-        use_container_width=True,
-    )
-
-# ---- 6. Métricas y KPIs (Semáforos) ----
-pct_cumplimiento = (
-    (df_f["Cumple"] == "Cumple").sum() / max(len(df_f), 1) * 100
-)
+# ---- 5. Métricas y KPIs ----
+pct_cumplimiento = (df_f["Cumple"] == "Cumple").sum() / max(len(df_f), 1) * 100
 promedio_dias = df_f["Nivel de Servicio"].mean()
-pedidos_distintos = df_f["Pedido"].nunique() + (
-    1 if df_f["Pedido"].isna().any() else 0
-)
+pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
 
-def tarjeta(
-    titulo: str,
-    valor: str,
-    fondo: str = "rgba(64,75,85,0.07)",
-    borde: str = "rgba(64,75,85,0.35)",
-) -> str:
+def tarjeta(titulo: str, valor: str, fondo: str = "rgba(64,75,85,0.07)", borde: str = "rgba(64,75,85,0.35)") -> str:
     return (
         f'<div style="background:{fondo};border:1.5px solid {borde};border-radius:8px;'
         f'padding:14px 18px;text-align:center;">'
         f'<div style="font-size:0.78rem;color:#404B55;font-weight:600;letter-spacing:.03em;'
         f'text-transform:uppercase;opacity:.85;margin-bottom:4px;">{titulo}</div>'
         f'<div style="font-size:2rem;font-weight:700;color:#404B55;line-height:1.1;">{valor}</div>'
-        f"</div>"
+        f'</div>'
     )
 
 
 VERDE, VERDE_BORDE = "rgba(35, 145, 75, 0.16)", "rgba(35, 145, 75, 0.55)"
 ROJO, ROJO_BORDE = "rgba(204, 0, 0, 0.14)", "rgba(204, 0, 0, 0.55)"
 
-if pd.isna(promedio_dias):
-    f_dias, b_dias, txt_dias = "rgba(64,75,85,0.07)", "rgba(64,75,85,0.35)", "-"
-elif promedio_dias > 10:
-    f_dias, b_dias, txt_dias = ROJO, ROJO_BORDE, f"{promedio_dias:.0f}"
-else:
-    f_dias, b_dias, txt_dias = VERDE, VERDE_BORDE, f"{promedio_dias:.0f}"
-
-f_pct, b_pct = (
-    (VERDE, VERDE_BORDE) if pct_cumplimiento >= 85 else (ROJO, ROJO_BORDE)
-)
+txt_dias = f"{promedio_dias:.0f}" if pd.notna(promedio_dias) else "-"
+f_dias, b_dias = (ROJO, ROJO_BORDE) if pd.notna(promedio_dias) and promedio_dias > 10 else (VERDE, VERDE_BORDE)
+f_pct, b_pct = (VERDE, VERDE_BORDE) if pct_cumplimiento >= 85 else (ROJO, ROJO_BORDE)
 
 t1, t2, t3 = st.columns(3)
 with t1:
-    st.markdown(
-        tarjeta("Promedio días de gestión", txt_dias, f_dias, b_dias),
-        unsafe_allow_html=True,
-    )
+    st.markdown(tarjeta("Promedio días de gestión", txt_dias, f_dias, b_dias), unsafe_allow_html=True)
 with t2:
-    st.markdown(
-        tarjeta("% Cumplimiento", f"{pct_cumplimiento:.0f}%", f_pct, b_pct),
-        unsafe_allow_html=True,
-    )
+    st.markdown(tarjeta("% Cumplimiento", f"{pct_cumplimiento:.0f}%", f_pct, b_pct), unsafe_allow_html=True)
 with t3:
-    st.markdown(
-        tarjeta("OC generadas", f"{pedidos_distintos:,}"),
-        unsafe_allow_html=True,
-    )
+    st.markdown(tarjeta("OC generadas", f"{pedidos_distintos:,}"), unsafe_allow_html=True)
 
 st.divider()
 
 
-# ---- 7. Tablas con Estilo Enaex ----
-def tabla_enaex(
-    tabla: pd.DataFrame,
-    max_height: int | None = None,
-    compacta: bool = False,
-) -> str:
+# ---- 6. Tablas de Resultados ----
+def tabla_enaex(tabla: pd.DataFrame) -> str:
     cols = list(tabla.columns)
 
     def _fmt(col, val):
@@ -403,126 +282,44 @@ def tabla_enaex(
             return f"{val:,.0f}"
         return str(val)
 
-    pad = "4px 6px" if compacta else "7px 12px"
-    pad_th = "5px 6px" if compacta else "9px 12px"
-    fuente = "0.72rem" if compacta else "0.86rem"
-    fuente_th = "0.66rem" if compacta else "0.82rem"
-
     filas = []
     for i, r in enumerate(tabla.itertuples(index=False)):
         es_total = str(r[0]) == "TOTAL"
-        fondo = (
-            "#404B55"
-            if es_total
-            else ("#ffffff" if i % 2 == 0 else "#f4f5f7")
-        )
+        fondo = "#404B55" if es_total else ("#ffffff" if i % 2 == 0 else "#f4f5f7")
         color = "#ffffff" if es_total else "#404B55"
-        estilo_fila = f"background:{fondo};color:{color};" + (
-            "font-weight:700;border-top:2px solid #CC0000;" if es_total else ""
-        )
-
-        celdas = []
-        for j, c in enumerate(cols):
-            align = "left" if j == 0 else "right"
-            celdas.append(
-                f'<td style="padding:{pad};text-align:{align};'
-                f'border-bottom:1px solid #e3e5e8;white-space:nowrap;">{_fmt(c, r[j])}</td>'
-            )
+        estilo_fila = f"background:{fondo};color:{color};font-weight:{'700' if es_total else '400'};"
+        celdas = [
+            f'<td style="padding:7px 12px;text-align:{"left" if j==0 else "right"};border-bottom:1px solid #e3e5e8;white-space:nowrap;">{_fmt(c, r[j])}</td>'
+            for j, c in enumerate(cols)
+        ]
         filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
-    abrev = {
-        "Promedio días de gestión": "Días gest.",
-        "% Cumplimiento": "% Cumpl.",
-        "Pos. OC generadas": "Pos. OC",
-    }
     encabezados = "".join(
-        f'<th style="padding:{pad_th};text-align:{"left" if j == 0 else "right"};'
-        f'background:#404B55;color:#fff;font-weight:600;font-size:{fuente_th};'
-        f'letter-spacing:.02em;position:sticky;top:0;z-index:2;white-space:nowrap;">'
-        f"{abrev.get(c, c) if compacta else c}</th>"
+        f'<th style="padding:9px 12px;text-align:{"left" if j==0 else "right"};background:#404B55;color:#fff;font-weight:600;font-size:0.82rem;white-space:nowrap;">{c}</th>'
         for j, c in enumerate(cols)
     )
-
-    tabla_html = (
-        f'<table style="width:100%;min-width:{"340px" if compacta else "auto"};border-collapse:collapse;font-size:{fuente};'
-        f'font-family:inherit;border:1px solid #d8dbdf;">'
-        f"<thead><tr>{encabezados}</tr></thead><tbody>{''.join(filas)}</tbody></table>"
-    )
-
-    alto = f"max-height:{max_height}px;overflow-y:auto;" if max_height else ""
-    return f'<div style="{alto}overflow-x:auto;border:1px solid #d8dbdf;border-radius:4px;">{tabla_html}</div>'
+    tabla_html = f'<table style="width:100%;border-collapse:collapse;font-size:0.86rem;border:1px solid #d8dbdf;"><thead><tr>{encabezados}</tr></thead><tbody>{"".join(filas)}</tbody></table>'
+    return f'<div style="overflow-x:auto;border:1px solid #d8dbdf;border-radius:4px;">{tabla_html}</div>'
 
 
-# Tablas por Comprador y Centro
 st.subheader("Por comprador")
-col_comprador = (
-    "Comprador (Grupo de compras)"
-    if "Comprador (Grupo de compras)" in df_f.columns
-    else "Comprador por Grupo Compras"
-)
+col_comprador = "Comprador (Grupo de compras)" if "Comprador (Grupo de compras)" in df_f.columns else "Comprador por Grupo Compras"
 tabla_comprador = transform.calcular_metricas_por_grupo(df_f, [col_comprador])
-tabla_comprador = transform.agregar_fila_total(
-    tabla_comprador, df_f, [col_comprador]
-)
+tabla_comprador = transform.agregar_fila_total(tabla_comprador, df_f, [col_comprador])
 st.markdown(tabla_enaex(tabla_comprador), unsafe_allow_html=True)
 
-st.write("")
-vc1, vc2 = st.columns(2)
-with vc1:
-    st.subheader("Por centro logístico")
-    tabla_fija = transform.tabla_centros_fija(df_f)
-    st.markdown(tabla_enaex(tabla_fija, compacta=True), unsafe_allow_html=True)
-
-with vc2:
-    st.subheader("Detalle por centro")
-    cols_detalle = [
-        c for c in ["Centro", "Nombre Centro 2"] if c in df_f.columns
-    ]
-    tabla_detalle = transform.calcular_metricas_por_grupo(df_f, cols_detalle)
-    tabla_detalle = tabla_detalle.sort_values(
-        "Pos. OC generadas", ascending=False
-    )
-    tabla_detalle = transform.agregar_fila_total(
-        tabla_detalle, df_f, cols_detalle
-    )
-    st.markdown(
-        tabla_enaex(tabla_detalle, max_height=300, compacta=True),
-        unsafe_allow_html=True,
-    )
-
-st.divider()
-
-# ---- 8. Editor e Integración con Excel ----
+# ---- 7. Detalle de Solicitudes con Etiquetas ----
 COLUMNAS_DETALLE = [
-    "Centro",
-    "Material",
-    "Texto breve",
-    "Solicitud de pedido",
-    "Fecha de solicitud",
-    "Fecha modificación",
-    "Grupo de compras",
-    "Cantidad pedida",
-    "Pedido",
-    "Fecha de pedido",
-    "Posición de pedido",
-    "Comprador (Grupo de compras)",
-    "Solped MRP",
-    "Nombre Centro 2",
-    "Nombre Centro",
-    "Estado Solped",
-    "Nivel de Servicio",
-    "Comentario",
-    "Cumple",
+    "Centro", "Material", "Texto breve", "Solicitud de pedido", "Tipo Ariba",
+    "Fecha de solicitud", "Fecha modificación", "Grupo de compras", "Cantidad pedida",
+    "Pedido", "Fecha de pedido", "Posición de pedido", "Comprador (Grupo de compras)",
+    "Solped MRP", "Nombre Centro 2", "Estado Solped", "Nivel de Servicio", "Comentario", "Cumple"
 ]
 
 
 def preparar_detalle(d: pd.DataFrame) -> pd.DataFrame:
     d = d.copy()
-    for col_fecha in [
-        "Fecha de solicitud",
-        "Fecha modificación",
-        "Fecha de pedido",
-    ]:
+    for col_fecha in ["Fecha de solicitud", "Fecha modificación", "Fecha de pedido"]:
         if col_fecha in d.columns:
             d[col_fecha] = pd.to_datetime(d[col_fecha], errors="coerce").dt.date
     if "Comentario" not in d.columns:
@@ -533,151 +330,28 @@ def preparar_detalle(d: pd.DataFrame) -> pd.DataFrame:
 detalle = preparar_detalle(df_f)
 
 with st.expander("Ver detalle de solicitudes", expanded=False):
-    st.caption("Escribe comentarios editables para exportación.")
-    detalle_editado = st.data_editor(
+    # Leyenda visual de las 5 categorías
+    st.markdown(
+        """
+        <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+            <div style="background:#d4edda; color:#155724; padding:5px 10px; border-radius:5px; font-weight:bold; font-size:0.78rem;">🟢 ARIBA CATALOGADA</div>
+            <div style="background:#d1ecf1; color:#0c5460; padding:5px 10px; border-radius:5px; font-weight:bold; font-size:0.78rem;">🔵 ARIBA NO CATALOGADA</div>
+            <div style="background:#fff3cd; color:#856404; padding:5px 10px; border-radius:5px; font-weight:bold; font-size:0.78rem;">🟡 ARIBA DIRECTA</div>
+            <div style="background:#e2e3e5; color:#383d41; padding:5px 10px; border-radius:5px; font-weight:bold; font-size:0.78rem;">⚪ SAP MRP</div>
+            <div style="background:#f8d7da; color:#721c24; padding:5px 10px; border-radius:5px; font-weight:bold; font-size:0.78rem;">⚙️ SAP ERP</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.data_editor(
         detalle,
         use_container_width=True,
         num_rows="fixed",
         key="editor_detalle",
         column_config={
-            "Comentario": st.column_config.TextColumn("Comentario")
+            "Tipo Ariba": st.column_config.TextColumn("Origen / Tipo Solicitud", width="medium"),
+            "Comentario": st.column_config.TextColumn("Comentario", width="medium"),
         },
         disabled=[c for c in detalle.columns if c != "Comentario"],
     )
-
-
-def generar_excel(detalle_df: pd.DataFrame) -> bytes:
-    from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-    from openpyxl.utils import get_column_letter
-
-    gris, rojo, fuente_base = "FF404B55", "FFCC0000", "Arial"
-    wb = Workbook()
-    borde = Border(bottom=Side(style="thin", color="FFD8DBDF"))
-
-    def escribir_hoja(ws, titulo, tabla, col_inicio=1, fila_inicio=1):
-        ws.cell(row=fila_inicio, column=col_inicio, value=titulo).font = Font(
-            name=fuente_base, bold=True, size=12, color=gris
-        )
-        fila = fila_inicio + 1
-        for j, col in enumerate(tabla.columns):
-            c = ws.cell(row=fila, column=col_inicio + j, value=str(col))
-            c.font = Font(name=fuente_base, bold=True, color="FFFFFFFF", size=10)
-            c.fill = PatternFill("solid", fgColor=gris)
-            c.alignment = Alignment(
-                horizontal="center", vertical="center", wrap_text=True
-            )
-
-        for i, r in enumerate(tabla.itertuples(index=False, name=None)):
-            es_total = str(r[0]) == "TOTAL"
-            for j, col in enumerate(tabla.columns):
-                val = r[j]
-                if pd.isna(val):
-                    val = None
-                elif isinstance(val, (int, float)) and col in (
-                    "Promedio días de gestión",
-                    "% Cumplimiento",
-                    "Pos. OC generadas",
-                ):
-                    val = round(float(val))
-                elif hasattr(val, "item"):
-                    val = val.item()
-
-                c = ws.cell(row=fila + 1 + i, column=col_inicio + j, value=val)
-                c.font = Font(
-                    name=fuente_base, size=10, bold=es_total, color=gris
-                )
-                c.border = borde
-                if es_total:
-                    c.fill = PatternFill("solid", fgColor="FFEFF0F2")
-                if col == "% Cumplimiento" and val is not None:
-                    c.number_format = '0"%"'
-                if col in (
-                    "Fecha de solicitud",
-                    "Fecha modificación",
-                    "Fecha de pedido",
-                ):
-                    c.number_format = "DD-MM-YYYY"
-        return fila + 1 + len(tabla)
-
-    def ajustar_ancho(ws, tabla, col_inicio=1, extra=3):
-        for j, col in enumerate(tabla.columns):
-            largos = [len(str(col))]
-            for v in tabla[col].head(200):
-                largos.append(0 if pd.isna(v) else len(str(v)))
-            ws.column_dimensions[get_column_letter(col_inicio + j)].width = min(
-                max(largos) + extra, 45
-            )
-
-    ws = wb.active
-    ws.title = "Resumen"
-    ws["A1"] = "Nivel de Servicio MRO"
-    ws["A1"].font = Font(name=fuente_base, bold=True, size=14, color=gris)
-
-    resumen = pd.DataFrame(
-        {
-            "Indicador": [
-                "Promedio días de gestión",
-                "% Cumplimiento",
-                "OC generadas",
-                "Líneas consideradas",
-            ],
-            "Valor": [
-                round(promedio_dias) if pd.notna(promedio_dias) else None,
-                round(pct_cumplimiento),
-                pedidos_distintos,
-                len(df_f),
-            ],
-        }
-    )
-
-    fila = escribir_hoja(ws, "Indicadores generales", resumen, fila_inicio=3)
-    ajustar_ancho(ws, resumen)
-    fila = escribir_hoja(
-        ws, "Por comprador", tabla_comprador, fila_inicio=fila + 2
-    )
-    fila = escribir_hoja(
-        ws, "Por centro logístico", tabla_fija, fila_inicio=fila + 2
-    )
-    escribir_hoja(ws, "Detalle por centro", tabla_detalle, fila_inicio=fila + 2)
-
-    ws2 = wb.create_sheet("Detalle solicitudes")
-    escribir_hoja(ws2, "Detalle de solicitudes", detalle_df)
-    ajustar_ancho(ws2, detalle_df)
-    ws2.freeze_panes = "A3"
-
-    buffer = BytesIO()
-    wb.save(buffer)
-    return buffer.getvalue()
-
-
-st.subheader("Registro semanal")
-semana_ref = pd.Timestamp(fecha_corte) - pd.Timedelta(days=7)
-num_semana = semana_ref.isocalendar()[1]
-nombre_archivo = f"Sem{num_semana:02d}-{semana_ref.year}.xlsx"
-
-clave_excel = (
-    len(df_f),
-    int(pd.util.hash_pandas_object(detalle_editado["Comentario"].fillna("")).sum()),
-    pd.Timestamp(fecha_corte),
-)
-
-col_prep, col_desc = st.columns([1, 2])
-with col_prep:
-    if st.button("📄 Preparar Excel"):
-        with st.spinner("Generando el Excel..."):
-            try:
-                st.session_state["_excel_bytes"] = generar_excel(detalle_editado)
-                st.session_state["_excel_clave"] = clave_excel
-            except Exception as e:
-                st.error(f"No se pudo generar el Excel: {e}")
-
-with col_desc:
-    excel_listo = st.session_state.get("_excel_bytes") is not None
-    if excel_listo:
-        st.download_button(
-            f"⬇ Descargar {nombre_archivo}",
-            data=st.session_state["_excel_bytes"],
-            file_name=nombre_archivo,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
