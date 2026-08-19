@@ -4,21 +4,65 @@ Réplica del pbix "Nivel_de_servicio_BI.pbix", página "Dx Compradores".
 
 Correr local:  streamlit run app.py
 """
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
-import config, loaders, transform
+import config
+import loaders
+import transform
 
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
-# ---- Acceso con contraseña: cada ingreso fuerza datos frescos desde OneDrive ----
-# st.cache_data se comparte entre TODAS las sesiones/usuarios de esta misma
-# instancia corriendo (no es por sesión individual) — así que aunque el ttl
-# de _descargar_onedrive sea de 1 hora, otro usuario pudo haber disparado esa
-# descarga hace 40 minutos y tú heredarías esos bytes. Para garantizar "datos
-# frescos cada vez que ingreso la contraseña" sin depender del ttl, al
-# autenticarse correctamente se limpia el caché explícitamente y se obliga
-# una descarga nueva.
+
+# ---- 0. Función de Clasificación en 5 Categorías ----
+def determinar_tipo_ariba(row):
+    """
+    Clasifica las solicitudes en 5 categorías independientes:
+    - ⚙️ SAP ERP: Serie 1 (100...), Serie 19, CL...
+    - ⚪ SAP MRP: Serie 5 (500...) o marca de Solped MRP.
+    - 🟡 ARIBA DIRECTA: Flujo directo / automatizado.
+    - 🟢 ARIBA CATALOGADA: Serie 6 con código de material/catálogo.
+    - 🔵 ARIBA NO CATALOGADA: Serie 6 sin código de material o en Trazabilidad.
+    """
+    for col in ["Tipo Ariba", "Tipo_Ariba", "Origen Ariba", "Origen", "Tipo Flujo"]:
+        if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
+            val = str(row[col]).upper()
+            if "DIRECTA" in val:
+                return "🟡 ARIBA DIRECTA"
+            elif "NO CATALOGAD" in val or "NOCATALOGAD" in val:
+                return "🔵 ARIBA NO CATALOGADA"
+            elif "CATALOGAD" in val:
+                return "🟢 ARIBA CATALOGADA"
+            elif "MRP" in val:
+                return "⚪ SAP MRP"
+            elif "ERP" in val:
+                return "⚙️ SAP ERP"
+
+    sol = str(row.get("Solicitud de pedido", "")).strip()
+    material = str(row.get("Material", "")).strip()
+    tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0"])
+    es_mrp_flag = str(row.get("Solped MRP", "")).strip().lower() in ["sí", "si", "true", "mrp", "1"]
+    en_trazabilidad = bool(row.get("En_Trazabilidad", False) or row.get("En Trazabilidad", False))
+    tipo_pedido = str(row.get("Tipo Pedido", "")).strip().upper()
+
+    if sol.startswith("5") or es_mrp_flag:
+        return "⚪ SAP MRP"
+
+    if sol.startswith("1") or sol.startswith("19") or sol.upper().startswith("CL"):
+        return "⚙️ SAP ERP"
+
+    if sol.startswith("6"):
+        if "DIRECTA" in tipo_pedido or "DIRECT" in tipo_pedido:
+            return "🟡 ARIBA DIRECTA"
+        elif en_trazabilidad or not tiene_material:
+            return "🔵 ARIBA NO CATALOGADA"
+        else:
+            return "🟢 ARIBA CATALOGADA"
+
+    return "⚪ OTROS"
+
+
+# ---- Acceso con contraseña ----
 if "app_password" in st.secrets:
     if not st.session_state.get("_autenticado"):
         st.title("Dx Compradores — Nivel de Servicio")
@@ -35,7 +79,7 @@ if "app_password" in st.secrets:
 
 st.title("Dx Compradores — Nivel de Servicio")
 
-# ---- Fuente de datos: local (desarrollo), subida manual, u OneDrive automático ----
+# ---- Fuente de datos ----
 with st.sidebar:
     st.header("Datos de entrada")
     modo = st.radio(
@@ -46,10 +90,6 @@ with st.sidebar:
 
     archivo_data = archivo_resp_grupo = archivo_centro = archivo_mrp = None
     if modo == "OneDrive (automático)":
-        # Los 4 archivos se descargan solos desde los links guardados en
-        # Secrets (ver loaders._descargar_onedrive para el formato esperado).
-        # El caché con ttl=1h evita re-descargar en cada filtro, y se refresca
-        # solo — no hace falta tocar nada cuando actualizas el ME5A semanal.
         archivo_data = "onedrive:me5a_parquet"
         archivo_resp_grupo = "onedrive:responsable_grupo_compras"
         archivo_centro = "onedrive:centro_sociedad_mro"
@@ -69,8 +109,9 @@ with st.sidebar:
 
     elif modo == "Subir archivos":
         archivo_data = st.file_uploader(
-            "ME5A_con_Ariba (.xlsx o .parquet)", type=["xlsx", "parquet"],
-            help="Si ya lo convertiste en la pestaña 'Preparar datos', sube el .parquet — carga mucho más rápido y liviano que el .xlsx.",
+            "ME5A_con_Ariba (.xlsx o .parquet)",
+            type=["xlsx", "parquet"],
+            help="Si ya lo convertiste en la pestaña 'Preparar datos', sube el .parquet.",
         )
         archivo_resp_grupo = st.file_uploader("Responsable_Grupo_Compras.xlsx", type="xlsx")
         archivo_centro = st.file_uploader("Centro_Sociedad_MRO.xlsx", type="xlsx")
@@ -79,7 +120,6 @@ with st.sidebar:
             st.info("Sube los 4 archivos para generar el reporte.")
             st.stop()
     else:
-        # Rutas locales por defecto cuando no se suben archivos manualmente.
         archivo_data = "data/ME5A_con_Ariba.xlsx"
         archivo_resp_grupo = "data/Responsable_Grupo_Compras.xlsx"
         archivo_centro = "data/Centro_Sociedad_MRO.xlsx"
@@ -90,23 +130,8 @@ with st.sidebar:
     fecha_corte = st.date_input("Fecha de corte del reporte (FechaCorteReporte)", value=pd.Timestamp.today())
     st.caption(f"SLA: {config.SLA_DIAS_ERP_MRP} días ERP/MRP · {config.SLA_DIAS_ARIBA} días Ariba")
 
-# ---- Carga de datos + pipeline: computar UNA sola vez por sesión ----
-# Streamlit re-ejecuta este script completo en cada interacción (cada filtro
-# que tocas). Sin este bloque, eso significa releer los 4 archivos y correr
-# TODO el pipeline (merges + cálculo de Nivel de Servicio) en cada filtro,
-# aunque filtrar en sí sea barato (isin()/between() sobre datos en memoria).
-#
-# @st.cache_data no es la herramienta correcta acá: para decidir si hay
-# cache hit, tiene que hashear el CONTENIDO COMPLETO de los DataFrames en
-# cada rerun — con un dataset grande, ese hashing es más caro que el propio
-# cálculo, y además retiene copias completas en RAM (max_entries).
-#
-# La alternativa correcta para "calcular una vez, filtrar muchas veces"
-# es st.session_state con una CLAVE DE INVALIDACIÓN barata (nombre + tamaño
-# del archivo, no su contenido) — comparar esa clave es O(1), no O(n).
+
 def _clave_archivo(archivo):
-    """Identifica un archivo sin leer su contenido: (nombre, tamaño) para
-    un UploadedFile, o la ruta tal cual para un path local."""
     if hasattr(archivo, "name") and hasattr(archivo, "size"):
         return (archivo.name, archivo.size)
     return archivo
@@ -133,29 +158,22 @@ if st.session_state.get("_clave_pipeline") != clave_actual:
     df_calculado["Mes"] = df_calculado["Fecha de pedido"].dt.month
     df_calculado["Día"] = df_calculado["Fecha de pedido"].dt.day
 
+    # Asignación de categoría
+    df_calculado["Tipo Ariba"] = df_calculado.apply(determinar_tipo_ariba, axis=1)
+
     st.session_state["_df_pipeline"] = df_calculado
     st.session_state["_clave_pipeline"] = clave_actual
 
-# A partir de acá, cada rerun por filtro SOLO lee de session_state — no
-# vuelve a leer archivos ni a correr el pipeline.
 df = st.session_state["_df_pipeline"]
 
-# Min/max globales sobre el dataframe COMPLETO (sin filtrar), para que el
-# slider de más abajo no cambie de rango cada vez que filtras — si el rango
-# se recalcula sobre df_f (que cambia con cada filtro), el slider "salta" y
-# puede generar reruns en cadena.
 NS_MIN_GLOBAL = int(df["Nivel de Servicio"].min()) if len(df) and pd.notna(df["Nivel de Servicio"].min()) else 0
 NS_MAX_GLOBAL = int(df["Nivel de Servicio"].max()) if len(df) and pd.notna(df["Nivel de Servicio"].max()) else 100
 
-# Registro de conteos por etapa - para el panel de diagnóstico al final
 checkpoints = [("0. Total tras el pipeline (sin filtros)", len(df))]
-
-# Registro de las 3 métricas en cada etapa, para localizar dónde diverge del pbix
 metricas_por_etapa = []
 
 
 def _snapshot(nombre, d):
-    """Guarda las 3 métricas del pbix para el subconjunto d en esta etapa."""
     n = len(d)
     pct = (d["Cumple"] == "Cumple").sum() / n * 100 if n else 0
     prom = d["Nivel de Servicio"].mean() if n else float("nan")
@@ -167,13 +185,15 @@ def _snapshot(nombre, d):
 
 _snapshot("0. Sin filtros", df)
 
-# ---- Filtros: Centro y Aplica? ----
+# ---- Filtros ----
 st.subheader("Filtros")
-c1, c2 = st.columns(2)
+c1, c2, c3 = st.columns(3)
 with c1:
     centros = st.multiselect("Centro", sorted(df["Centro"].dropna().unique()))
 with c2:
     aplica = st.multiselect("Aplica?", sorted(df["Aplica?"].dropna().unique()))
+with c3:
+    tipos_ariba = st.multiselect("Origen / Tipo Solicitud", sorted(df["Tipo Ariba"].dropna().unique()))
 
 df_f = df.copy()
 if centros:
@@ -183,7 +203,12 @@ checkpoints.append(("1. Tras filtro Centro", len(df_f)))
 if aplica:
     df_f = df_f[df_f["Aplica?"].isin(aplica)]
 checkpoints.append(("2. Tras filtro Aplica?", len(df_f)))
-_snapshot("2. Tras Centro + Aplica?", df_f)
+
+if tipos_ariba:
+    df_f = df_f[df_f["Tipo Ariba"].isin(tipos_ariba)]
+checkpoints.append(("2b. Tras filtro Origen / Tipo Solicitud", len(df_f)))
+
+_snapshot("2. Tras Centro + Aplica? + Origen", df_f)
 
 # ---- Estado Solped ----
 st.caption("Estado Solped (el filtro de fecha de abajo solo aplica dentro de 'Pedido completo')")
@@ -199,11 +224,7 @@ checkpoints.append(("3b. Pedido incompleto (antes de jerarquía)", (df_f["Estado
 checkpoints.append(("3c. Pedido completo (antes de jerarquía)", (df_f["Estado Solped"] == "Pedido completo").sum()))
 _snapshot("3. Tras Estado Solped", df_f)
 
-conteo_sin_pedido_antes = (df_f["Estado Solped"] == "Sin pedido").sum()
-conteo_incompleto_antes = (df_f["Estado Solped"] == "Pedido incompleto").sum()
-conteo_completo_antes = (df_f["Estado Solped"] == "Pedido completo").sum()
-
-# ---- Jerarquía Año / Mes / Día (opciones calculadas solo sobre "Pedido completo") ----
+# ---- Jerarquía Año / Mes / Día ----
 df_pedido_completo = df_f[df_f["Estado Solped"] == "Pedido completo"]
 
 with h2:
@@ -213,12 +234,8 @@ with h3:
     meses = st.multiselect("Mes", sorted(_base_mes["Mes"].dropna().unique().astype(int)))
 with h4:
     _base_dia = _base_mes[_base_mes["Mes"].isin(meses)] if meses else _base_mes
-    # Fechas completas (no solo el número de día) para no mezclar, por ejemplo,
-    # el 30 de julio con el 30 de agosto si se seleccionan ambos meses.
     fechas_disponibles = sorted(_base_dia["Fecha de pedido"].dt.date.dropna().unique())
-    fechas = st.multiselect(
-        "Día", fechas_disponibles, format_func=lambda f: f.strftime("%d-%m-%Y")
-    )
+    fechas = st.multiselect("Día", fechas_disponibles, format_func=lambda f: f.strftime("%d-%m-%Y"))
 
 if años or meses or fechas:
     es_pedido_completo = df_f["Estado Solped"] == "Pedido completo"
@@ -231,17 +248,17 @@ if años or meses or fechas:
         cond_fecha &= df_f["Fecha de pedido"].dt.date.isin(fechas)
     df_f = df_f[~es_pedido_completo | (es_pedido_completo & cond_fecha)]
 
-checkpoints.append(("4a. Sin pedido tras jerarquía (debe ser IGUAL a 3a)", (df_f["Estado Solped"] == "Sin pedido").sum()))
-checkpoints.append(("4b. Pedido incompleto tras jerarquía (debe ser IGUAL a 3b)", (df_f["Estado Solped"] == "Pedido incompleto").sum()))
-checkpoints.append(("4c. Pedido completo tras jerarquía (debe ser MENOR O IGUAL a 3c)", (df_f["Estado Solped"] == "Pedido completo").sum()))
+checkpoints.append(("4a. Sin pedido tras jerarquía", (df_f["Estado Solped"] == "Sin pedido").sum()))
+checkpoints.append(("4b. Pedido incompleto tras jerarquía", (df_f["Estado Solped"] == "Pedido incompleto").sum()))
+checkpoints.append(("4c. Pedido completo tras jerarquía", (df_f["Estado Solped"] == "Pedido completo").sum()))
 checkpoints.append(("4. Total tras jerarquía de fecha", len(df_f)))
 _snapshot("4. Tras jerarquía Año/Mes/Día", df_f)
 
 # ---- Solped MRP y Cumple ----
-c3, c4 = st.columns(2)
-with c3:
-    solped_mrp = st.multiselect("Solped MRP", sorted(df_f["Solped MRP"].dropna().unique()))
+c4, c5 = st.columns(2)
 with c4:
+    solped_mrp = st.multiselect("Solped MRP", sorted(df_f["Solped MRP"].dropna().unique()))
+with c5:
     cumple = st.multiselect("Nivel de Servicio (Cumple)", sorted(df_f["Cumple"].dropna().unique()))
 
 if solped_mrp:
@@ -254,11 +271,6 @@ if cumple:
 checkpoints.append(("6. Tras filtro Cumple", len(df_f)))
 _snapshot("6. Tras Cumple", df_f)
 
-# ---- Segunda capa: filtro por rango de Nivel de Servicio (días) ----
-# Los valores negativos aparecen cuando la solped se modificó DESPUÉS de que
-# ya existía la OC (Fecha modificación > Fecha de pedido). No representan
-# gestión real y, por la regla de Cumple (<=10 o <=7), siempre puntúan como
-# "Cumple", lo que infla el indicador.
 st.divider()
 st.subheader("Filtro por días de gestión (Nivel de Servicio)")
 
@@ -270,19 +282,13 @@ if len(df_f):
         excluir_negativos = st.checkbox(
             "Excluir negativos (solo desde 0)",
             value=False,
-            help=(
-                f"Hay {n_negativos:,} filas con días negativos en la selección actual. "
-                "Ocurren cuando la solped se modificó después de generada la OC. "
-                "Al excluirlas el promedio deja de estar distorsionado."
-            ),
+            help="Filas con días negativos por modificación posterior a la OC.",
         )
     with f2:
         if excluir_negativos:
             rango_ns = (0, NS_MAX_GLOBAL)
             st.caption(f"Rango aplicado: 0 a {NS_MAX_GLOBAL:,} días (negativos excluidos)")
         elif NS_MIN_GLOBAL < NS_MAX_GLOBAL:
-            # Rango y key fijos (basados en NS_MIN/MAX_GLOBAL, no en df_f) para
-            # que el slider no se redefina en cada rerun con límites distintos.
             rango_ns = st.slider(
                 "Rango de días de gestión",
                 min_value=NS_MIN_GLOBAL,
@@ -296,42 +302,26 @@ if len(df_f):
 
     df_f = df_f[df_f["Nivel de Servicio"].between(rango_ns[0], rango_ns[1])]
 
-    if n_negativos and not excluir_negativos:
-        st.caption(
-            f"⚠️ La selección incluye {n_negativos:,} filas con días negativos, "
-            "que siempre cuentan como 'Cumple' y bajan el promedio."
-        )
-
 checkpoints.append(("7. Tras filtro Nivel de Servicio (RESULTADO FINAL)", len(df_f)))
 _snapshot("7. RESULTADO FINAL", df_f)
 
-# ---- Panel de diagnóstico ----
+# ---- Diagnóstico de filtrado ----
 with st.expander("🔍 Diagnóstico de filtrado (para comparar contra el pbix)"):
-    st.write(
-        "Filas en cada etapa. Los pasos 4a y 4b deben quedar IGUAL al paso 3 "
-        "(la jerarquía de fecha no debe tocar 'Sin pedido' ni 'Pedido incompleto'). "
-        "Si en el pbix ves un número distinto, compara etapa por etapa hasta encontrar "
-        "en cuál empiezan a diferir."
-    )
+    st.write("Filas en cada etapa:")
     st.table(pd.DataFrame(checkpoints, columns=["Etapa", "Filas"]))
-
-    st.write("**Las 3 métricas en cada etapa del filtro** — compara contra el pbix aplicando los mismos slicers, uno a uno, para ver en cuál se separan:")
+    st.write("**Las 3 métricas en cada etapa del filtro**:")
     st.table(pd.DataFrame(metricas_por_etapa, columns=["Etapa", "Filas", "% Cumplimiento", "Prom. días", "Pos. OC"]))
-
-    st.write("Detalle de las solicitudes en el resultado final, para cruzar 1 a 1 contra el export del pbix:")
     st.dataframe(
-        df_f[["Solicitud de pedido", "Centro", "Estado Solped", "Fecha de pedido", "Nivel de Servicio", "Cumple", "Solped MRP"]]
+        df_f[["Solicitud de pedido", "Centro", "Estado Solped", "Fecha de pedido", "Nivel de Servicio", "Cumple", "Solped MRP", "Tipo Ariba"]]
         .sort_values("Solicitud de pedido"),
         use_container_width=True,
     )
     csv = df_f.to_csv(index=False).encode("utf-8")
     st.download_button("Descargar detalle filtrado (CSV)", csv, "detalle_filtrado.csv", "text/csv")
 
-# ---- Tarjetas con semáforo ----
-VERDE = "rgba(35, 145, 75, 0.16)"
-VERDE_BORDE = "rgba(35, 145, 75, 0.55)"
-ROJO = "rgba(204, 0, 0, 0.14)"
-ROJO_BORDE = "rgba(204, 0, 0, 0.55)"
+# ---- Tarjetas ----
+VERDE, VERDE_BORDE = "rgba(35, 145, 75, 0.16)", "rgba(35, 145, 75, 0.55)"
+ROJO, ROJO_BORDE = "rgba(204, 0, 0, 0.14)", "rgba(204, 0, 0, 0.55)"
 
 pct_cumplimiento = (df_f["Cumple"] == "Cumple").sum() / max(len(df_f), 1) * 100
 promedio_dias = df_f["Nivel de Servicio"].mean()
@@ -349,7 +339,6 @@ def tarjeta(titulo: str, valor: str, fondo: str = "rgba(64,75,85,0.07)", borde: 
     )
 
 
-# Semáforo: días de gestión <= 10 verde, > 10 rojo
 if pd.isna(promedio_dias):
     f_dias, b_dias, txt_dias = "rgba(64,75,85,0.07)", "rgba(64,75,85,0.35)", "-"
 elif promedio_dias > 10:
@@ -357,11 +346,7 @@ elif promedio_dias > 10:
 else:
     f_dias, b_dias, txt_dias = VERDE, VERDE_BORDE, f"{promedio_dias:.0f}"
 
-# Semáforo: % cumplimiento >= 85 verde, < 85 rojo
-if pct_cumplimiento >= 85:
-    f_pct, b_pct = VERDE, VERDE_BORDE
-else:
-    f_pct, b_pct = ROJO, ROJO_BORDE
+f_pct, b_pct = (VERDE, VERDE_BORDE) if pct_cumplimiento >= 85 else (ROJO, ROJO_BORDE)
 
 t1, t2, t3 = st.columns(3)
 with t1:
@@ -373,17 +358,12 @@ with t3:
 
 st.divider()
 
-# ---- Estilo corporativo Enaex para las tablas ----
+# ---- Estilo corporativo Enaex ----
 ENAEX_GRIS = "#404B55"
 ENAEX_ROJO = "#CC0000"
 
 
 def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bool = False) -> str:
-    """
-    Renderiza la tabla como HTML con la paleta corporativa: encabezado gris
-    oscuro, filas alternadas, y la fila TOTAL destacada en rojo.
-    max_height (px) activa el scroll vertical con encabezado fijo.
-    """
     cols = list(tabla.columns)
 
     def _fmt(col, val):
@@ -402,10 +382,6 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
     fuente = "0.72rem" if compacta else "0.86rem"
     fuente_th = "0.66rem" if compacta else "0.82rem"
 
-    # OPTIMIZACIÓN: itertuples() en vez de iterrows(). Con listas de miles de
-    # filas, iterrows() reconstruye una Series por fila (~30x más lento acá
-    # en benchmark local); itertuples() entrega tuplas planas, mucho más rápido
-    # para solo leer valores como hacemos en este loop.
     filas = []
     for i, r in enumerate(tabla.itertuples(index=False)):
         es_total = str(r[0]) == "TOTAL"
@@ -423,8 +399,6 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
             )
         filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
-    # En modo compacto los títulos largos se abrevian: son los que hacen que la
-    # tabla se salga del recuadro cuando va en media pantalla.
     abrev = {
         "Promedio días de gestión": "Días gest.",
         "% Cumplimiento": "% Cumpl.",
@@ -444,13 +418,8 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
         f"<thead><tr>{encabezados}</tr></thead><tbody>{''.join(filas)}</tbody></table>"
     )
 
-    # Scroll horizontal siempre disponible (para tablas angostas en dos columnas),
-    # y vertical solo si se pidió max_height.
     alto = f"max-height:{max_height}px;overflow-y:auto;" if max_height else ""
-    return (
-        f'<div style="{alto}overflow-x:auto;border:1px solid #d8dbdf;'
-        f'border-radius:4px;">{tabla_html}</div>'
-    )
+    return f'<div style="{alto}overflow-x:auto;border:1px solid #d8dbdf;border-radius:4px;">{tabla_html}</div>'
 
 
 # ---- Tabla por Comprador ----
@@ -470,7 +439,7 @@ st.markdown(tabla_enaex(tabla_comprador), unsafe_allow_html=True)
 
 st.write("")
 
-# ---- Dos vistas por centro, en paralelo ----
+# ---- Dos vistas por centro en paralelo ----
 vc1, vc2 = st.columns(2)
 
 with vc1:
@@ -490,12 +459,13 @@ with vc2:
 
 st.divider()
 
-# ---- Detalle de solicitudes con columna de comentario editable ----
+# ---- Detalle de solicitudes ----
 COLUMNAS_DETALLE = [
     "Centro",
     "Material",
     "Texto breve",
     "Solicitud de pedido",
+    "Tipo Ariba",
     "Fecha de solicitud",
     "Fecha modificación",
     "Grupo de compras",
@@ -515,7 +485,6 @@ COLUMNAS_DETALLE = [
 
 
 def preparar_detalle(d: pd.DataFrame) -> pd.DataFrame:
-    """Ordena columnas, quita las auxiliares y deja las fechas sin hora."""
     d = d.copy()
     for col_fecha in ["Fecha de solicitud", "Fecha modificación", "Fecha de pedido"]:
         if col_fecha in d.columns:
@@ -535,21 +504,22 @@ with st.expander("Ver detalle de solicitudes", expanded=False):
         num_rows="fixed",
         key="editor_detalle",
         column_config={
+            "Tipo Ariba": st.column_config.TextColumn("Origen / Tipo Solicitud", width="medium"),
             "Comentario": st.column_config.TextColumn(
                 "Comentario", help="Anotación libre para el registro semanal", width="medium"
-            )
+            ),
         },
         disabled=[c for c in detalle.columns if c != "Comentario"],
     )
 
-# ---- Exportación del registro semanal a Excel ----
+# ---- Exportación a Excel ----
 semana_ref = pd.Timestamp(fecha_corte) - pd.Timedelta(days=7)
 num_semana = semana_ref.isocalendar()[1]
 nombre_archivo = f"Sem{num_semana:02d}-{semana_ref.year}.xlsx"
 
 
 def generar_excel(detalle_df: pd.DataFrame) -> bytes:
-    """Arma el registro semanal: resumen, tablas por comprador/centro y detalle."""
+    from io import BytesIO
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
@@ -571,10 +541,7 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
             c.font = Font(name=fuente_base, bold=True, color="FFFFFFFF", size=10)
             c.fill = PatternFill("solid", fgColor=gris)
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        # OPTIMIZACIÓN: itertuples() en vez de iterrows() — mismo motivo que en
-        # tabla_enaex. Acá además necesitamos los nombres de columna, así que
-        # usamos itertuples(name=None) para tuplas planas y las emparejamos con
-        # tabla.columns por índice.
+
         for i, r in enumerate(tabla.itertuples(index=False, name=None)):
             es_total = str(r[0]) == "TOTAL"
             for j, col in enumerate(tabla.columns):
@@ -588,7 +555,6 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
                 ):
                     val = round(float(val))
                 elif hasattr(val, "item"):
-                    # numpy.int64 / numpy.float64 -> tipo nativo de Python
                     val = val.item()
                 c = ws.cell(row=fila + 1 + i, column=col_inicio + j, value=val)
                 c.font = Font(name=fuente_base, size=10, bold=es_total, color=gris)
@@ -603,14 +569,11 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
 
     def ajustar_ancho(ws, tabla, col_inicio=1, extra=3):
         for j, col in enumerate(tabla.columns):
-            # Se recorre en Python puro: los métodos de pandas (fillna/replace)
-            # fallan o cambian dtypes en columnas Int64 anulables con vacíos.
             largos = [len(str(col))]
             for v in tabla[col].head(200):
                 largos.append(0 if pd.isna(v) else len(str(v)))
             ws.column_dimensions[get_column_letter(col_inicio + j)].width = min(max(largos) + extra, 45)
 
-    # --- Hoja 1: Resumen ---
     ws = wb.active
     ws.title = "Resumen"
     ws["A1"] = f"Nivel de Servicio MRO — Registro semana {num_semana:02d}/{semana_ref.year}"
@@ -639,13 +602,10 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
     fila = escribir_hoja(ws, "Por centro logístico", tabla_fija, fila_inicio=fila + 2)
     escribir_hoja(ws, "Detalle por centro", tabla_detalle, fila_inicio=fila + 2)
 
-    # --- Hoja 2: Detalle de solicitudes (con comentarios) ---
     ws2 = wb.create_sheet("Detalle solicitudes")
     escribir_hoja(ws2, "Detalle de solicitudes", detalle_df)
     ajustar_ancho(ws2, detalle_df)
     ws2.freeze_panes = "A3"
-
-    from io import BytesIO
 
     buffer = BytesIO()
     wb.save(buffer)
@@ -655,12 +615,6 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
 st.subheader("Registro semanal")
 st.caption(f"Prepara el reporte completo (indicadores, tablas y detalle con comentarios) como **{nombre_archivo}**.")
 
-# Patrón de dos pasos: generar_excel() SOLO corre cuando el usuario hace clic
-# en "Preparar", no en cada rerun. Escribir un Excel celda por celda con
-# openpyxl es lento a escala (varios segundos con miles de filas de detalle)
-# — si esto corriera en cada rerun (como antes), cada filtro que tocas
-# dispararía esa reconstrucción completa aunque no fueras a descargar nada.
-# Guardamos los bytes ya generados en session_state, listos para servir.
 clave_excel = (len(df_f), int(pd.util.hash_pandas_object(detalle_editado["Comentario"].fillna("")).sum()), pd.Timestamp(fecha_corte))
 
 col_prep, col_desc = st.columns([1, 2])
@@ -687,4 +641,4 @@ with col_desc:
             use_container_width=False,
         )
     else:
-        st.caption("Haz clic en \"Preparar Excel\" para generar el archivo de descarga.")
+        st.caption('Haz clic en "Preparar Excel" para generar el archivo de descarga.')
