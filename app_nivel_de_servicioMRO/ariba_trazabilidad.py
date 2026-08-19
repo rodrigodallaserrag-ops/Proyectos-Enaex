@@ -238,6 +238,22 @@ def resumen_por_solped(cadena: pd.DataFrame) -> pd.DataFrame:
     return r.sort_values("Solicitud de pedido").reset_index(drop=True)
 
 
+# ==============================================================================
+# FUNCIÓN AÑADIDA PARA INTEGRACIÓN DIRECTA CON STREAMLIT / APP.PY
+# ==============================================================================
+def procesar_trazabilidad_completa(archivo, empresa: str = EMPRESA_POR_DEFECTO):
+    """
+    Procesa el archivo sucio ingresado en la UI de Streamlit.
+    Devuelve:
+      - df_cadena: Trazabilidad completa paso a paso.
+      - df_resumen: Solpeds SAP 600 identificadas como NO CATALOGADAS.
+    """
+    raw = cargar_reporte(archivo, empresa=empresa)
+    df_cadena = construir_cadena(raw)
+    df_resumen = resumen_por_solped(df_cadena)
+    return df_cadena, df_resumen
+
+
 if __name__ == "__main__":
     import sys
 
