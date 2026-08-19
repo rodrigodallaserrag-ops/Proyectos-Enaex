@@ -14,25 +14,22 @@ import transform
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
 
-# ---- 0. Función de Clasificación en 5 Categorías ----
+# ---- 0. Función de Clasificación de Categorías ----
 def determinar_tipo_ariba(row):
     """
-    Clasifica las solicitudes en 5 categorías independientes:
+    Clasifica las solicitudes en las categorías solicitadas:
     - ⚙️ SAP ERP: Serie 1 (100...), Serie 19, CL...
     - ⚪ SAP MRP: Serie 5 (500...) o marca de Solped MRP.
-    - 🟡 ARIBA DIRECTA: Flujo directo / automatizado.
-    - 🟢 ARIBA CATALOGADA: Serie 6 con código de material/catálogo.
+    - 🟢 ARIBA CATALOGADA / DIRECTA: Flujos directos o catalogados.
     - 🔵 ARIBA NO CATALOGADA: Serie 6 sin código de material o en Trazabilidad.
     """
     for col in ["Tipo Ariba", "Tipo_Ariba", "Origen Ariba", "Origen", "Tipo Flujo"]:
         if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
             val = str(row[col]).upper()
-            if "DIRECTA" in val:
-                return "🟡 ARIBA DIRECTA"
-            elif "NO CATALOGAD" in val or "NOCATALOGAD" in val:
+            if "NO CATALOGAD" in val or "NOCATALOGAD" in val:
                 return "🔵 ARIBA NO CATALOGADA"
-            elif "CATALOGAD" in val:
-                return "🟢 ARIBA CATALOGADA"
+            elif "DIRECTA" in val or "CATALOGAD" in val:
+                return "🟢 ARIBA CATALOGADA / DIRECTA"
             elif "MRP" in val:
                 return "⚪ SAP MRP"
             elif "ERP" in val:
@@ -43,7 +40,6 @@ def determinar_tipo_ariba(row):
     tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0"])
     es_mrp_flag = str(row.get("Solped MRP", "")).strip().lower() in ["sí", "si", "true", "mrp", "1"]
     en_trazabilidad = bool(row.get("En_Trazabilidad", False) or row.get("En Trazabilidad", False))
-    tipo_pedido = str(row.get("Tipo Pedido", "")).strip().upper()
 
     if sol.startswith("5") or es_mrp_flag:
         return "⚪ SAP MRP"
@@ -52,12 +48,10 @@ def determinar_tipo_ariba(row):
         return "⚙️ SAP ERP"
 
     if sol.startswith("6"):
-        if "DIRECTA" in tipo_pedido or "DIRECT" in tipo_pedido:
-            return "🟡 ARIBA DIRECTA"
-        elif en_trazabilidad or not tiene_material:
+        if en_trazabilidad or not tiene_material:
             return "🔵 ARIBA NO CATALOGADA"
         else:
-            return "🟢 ARIBA CATALOGADA"
+            return "🟢 ARIBA CATALOGADA / DIRECTA"
 
     return "⚪ OTROS"
 
@@ -272,7 +266,7 @@ checkpoints.append(("6. Tras filtro Cumple", len(df_f)))
 _snapshot("6. Tras Cumple", df_f)
 
 st.divider()
-st.subheader("Filtro por días de gestión (SLA Comprador)")
+st.subheader("Filtro por días de gestión (Nivel de Servicio)")
 
 if len(df_f):
     n_negativos = (df_f["Nivel de Servicio"] < 0).sum()
@@ -329,14 +323,16 @@ promedio_lead_time = df_f["Lead Time Total"].mean() if "Lead Time Total" in df_f
 pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
 
-def tarjeta(titulo: str, valor: str, fondo: str = "rgba(64,75,85,0.07)", borde: str = "rgba(64,75,85,0.35)") -> str:
+def tarjeta(titulo: str, valor: str, subtitulo: str = "", fondo: str = "rgba(64,75,85,0.07)", borde: str = "rgba(64,75,85,0.35)") -> str:
+    html_sub = f'<div style="font-size:0.78rem;color:#555;margin-top:4px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
     return (
         f'<div style="background:{fondo};border:1.5px solid {borde};border-radius:8px;'
-        f'padding:14px 18px;text-align:center;">'
+        f'padding:12px 18px;text-align:center;">'
         f'<div style="font-size:0.78rem;color:#404B55;font-weight:600;letter-spacing:.03em;'
         f'text-transform:uppercase;opacity:.85;margin-bottom:4px;">{titulo}</div>'
         f'<div style="font-size:2rem;font-weight:700;color:#404B55;line-height:1.1;">{valor}</div>'
-        f"</div>"
+        f'{html_sub}'
+        f'</div>'
     )
 
 
@@ -350,14 +346,21 @@ else:
 f_pct, b_pct = (VERDE, VERDE_BORDE) if pct_cumplimiento >= 85 else (ROJO, ROJO_BORDE)
 txt_lt = f"{promedio_lead_time:.0f}" if pd.notna(promedio_lead_time) else "-"
 
-t1, t2, t3, t4 = st.columns(4)
+t1, t2, t3 = st.columns(3)
 with t1:
-    st.markdown(tarjeta("SLA Comprador (Días)", txt_dias, f_dias, b_dias), unsafe_allow_html=True)
+    st.markdown(
+        tarjeta(
+            "Nivel de Servicio",
+            f"{txt_dias} días",
+            subtitulo=f"Lead Time Total: <b>{txt_lt}</b> días",
+            fondo=f_dias,
+            borde=b_dias,
+        ),
+        unsafe_allow_html=True,
+    )
 with t2:
-    st.markdown(tarjeta("Lead Time Total (Días)", txt_lt), unsafe_allow_html=True)
+    st.markdown(tarjeta("% Cumplimiento SLA", f"{pct_cumplimiento:.0f}%", fondo=f_pct, borde=b_pct), unsafe_allow_html=True)
 with t3:
-    st.markdown(tarjeta("% Cumplimiento SLA", f"{pct_cumplimiento:.0f}%", f_pct, b_pct), unsafe_allow_html=True)
-with t4:
     st.markdown(tarjeta("OC generadas", f"{pedidos_distintos:,}"), unsafe_allow_html=True)
 
 st.divider()
@@ -404,7 +407,7 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
         filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
     abrev = {
-        "Promedio días de gestión": "SLA Compr.",
+        "Promedio días de gestión": "Nivel Serv.",
         "Promedio Lead Time Total": "LT Total",
         "% Cumplimiento": "% Cumpl.",
         "Pos. OC generadas": "Pos. OC",
@@ -520,7 +523,7 @@ with st.expander("Ver detalle de solicitudes", expanded=False):
             "Comentario": st.column_config.TextColumn(
                 "Comentario", help="Anotación libre para el registro semanal", width="medium"
             ),
-            "Nivel de Servicio": st.column_config.NumberColumn("SLA Comprador (días)"),
+            "Nivel de Servicio": st.column_config.NumberColumn("Nivel de Servicio (días)"),
             "Lead Time Total": st.column_config.NumberColumn("Lead Time Total (días)"),
         },
         disabled=[c for c in detalle.columns if c != "Comentario"],
@@ -602,7 +605,7 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
     resumen = pd.DataFrame(
         {
             "Indicador": [
-                "Promedio SLA Comprador (días)",
+                "Promedio Nivel de Servicio (días)",
                 "Promedio Lead Time Total (días)",
                 "% Cumplimiento SLA",
                 "OC generadas",
