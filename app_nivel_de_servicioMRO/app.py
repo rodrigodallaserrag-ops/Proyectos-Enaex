@@ -15,54 +15,37 @@ st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide
 # ---- Función de Clasificación Flujo SAP / Ariba ----
 def determinar_tipo_ariba(row):
     """
-    Clasifica la solicitud integrando los flujos SAP y Ariba:
-    1. Respeta la clasificación explícita en columnas previas si existe.
-    2. Serie 1 (SAP Manual):
-       - Con Código de Material -> ⚪ SAP CATALOGADA
-       - Sin Código de Material -> ⚪ SAP DIRECTA
-    3. Serie 5 (SAP MRP / Automática):
-       - ⚙️ SAP MRP / AUTOMÁTICA
-    4. Serie 6 (Ariba):
-       - Presente en Trazabilidad -> 🔵 ARIBA NO CATALOGADA
-       - Con Código de Material -> 🟢 ARIBA CATALOGADA
-       - Sin Código de Material / Directa -> 🟠 ARIBA DIRECTA
+    Clasifica la solicitud integrando los flujos SAP y Ariba según reglas unificadas:
+    - Serie 1 (100) y Serie 5 (500) -> ⚪ SAP ERP Y MRP
+    - Serie 6 (600):
+        * Sin material o registrada en Trazabilidad -> 🔵 ARIBA NO CATALOGADA
+        * Con código de material / catálogo -> 🟢 ARIBA DIRECTA / CATALOGADA
     """
+    # 1. Respetar clasificación previa explícita si existe
     for col in ["Tipo Ariba", "Tipo_Ariba", "Origen Ariba", "Origen", "Tipo Flujo"]:
         if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
             val = str(row[col]).upper()
             if "NO CATALOGAD" in val or "NOCATALOGAD" in val:
                 return "🔵 ARIBA NO CATALOGADA"
-            elif "CATALOGAD" in val and "SAP" not in val:
-                return "🟢 ARIBA CATALOGADA"
-            elif "DIRECTA" in val and "SAP" not in val:
-                return "🟠 ARIBA DIRECTA"
-            elif "SAP CATALOGAD" in val:
-                return "⚪ SAP CATALOGADA"
-            elif "SAP DIRECTA" in val:
-                return "⚪ SAP DIRECTA"
-            elif "MRP" in val or "AUTOMATICA" in val or "AUTOMÁTICA" in val:
-                return "⚙️ SAP MRP / AUTOMÁTICA"
+            elif "CATALOGAD" in val or "DIRECTA" in val:
+                return "🟢 ARIBA DIRECTA / CATALOGADA"
+            elif "SAP" in val or "ERP" in val or "MRP" in val:
+                return "⚪ SAP ERP Y MRP"
 
     sol = str(row.get("Solicitud de pedido", "")).strip()
     material = str(row.get("Material", "")).strip()
     tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0"])
 
-    if sol.startswith("1"):
-        return "⚪ SAP CATALOGADA" if tiene_material else "⚪ SAP DIRECTA"
+    # Serie 1 (100) y Serie 5 (500)
+    if sol.startswith("1") or sol.startswith("5"):
+        return "⚪ SAP ERP Y MRP"
 
-    if sol.startswith("5"):
-        return "⚙️ SAP MRP / AUTOMÁTICA"
-
+    # Serie 6 (600)
     if sol.startswith("6"):
-        solped_mrp = str(row.get("Solped MRP", "")).strip().upper()
-        grupo_compras = str(row.get("Grupo de compras", "")).strip().upper()
-
-        if solped_mrp == "SÍ" or "DIR" in grupo_compras:
-            return "🟠 ARIBA DIRECTA"
-        elif not tiene_material:
+        if not tiene_material:
             return "🔵 ARIBA NO CATALOGADA"
         else:
-            return "🟢 ARIBA CATALOGADA"
+            return "🟢 ARIBA DIRECTA / CATALOGADA"
 
     return "⚪ OTROS"
 
@@ -157,7 +140,7 @@ if st.session_state.get("_clave_pipeline") != clave_actual:
     df_calculado["Mes"] = df_calculado["Fecha de pedido"].dt.month
     df_calculado["Día"] = df_calculado["Fecha de pedido"].dt.day
     
-    # 🔹 Se calcula la categorización inmediatamente al cargar la data
+    # 🔹 Cálculo inmediato de la nueva clasificación al cargar
     df_calculado["Tipo Ariba"] = df_calculado.apply(determinar_tipo_ariba, axis=1)
 
     st.session_state["_df_pipeline"] = df_calculado
@@ -190,7 +173,6 @@ with c1:
 with c2:
     aplica = st.multiselect("Aplica?", sorted(df["Aplica?"].dropna().unique()))
 with c3:
-    # 🔹 Nuevo selector interactivo para filtrar por Categoría / Origen
     tipos_ariba = st.multiselect("Tipo / Origen", sorted(df["Tipo Ariba"].dropna().unique()))
 
 df_f = df.copy()
@@ -374,12 +356,9 @@ with st.expander("Ver detalle de solicitudes", expanded=False):
     st.markdown(
         """
         <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
-            <div style="background:#d4edda; color:#155724; padding:6px 12px; border-radius:6px; font-weight:bold; font-size:0.8rem;">🟢 ARIBA CATALOGADA</div>
+            <div style="background:#d4edda; color:#155724; padding:6px 12px; border-radius:6px; font-weight:bold; font-size:0.8rem;">🟢 ARIBA DIRECTA / CATALOGADA</div>
             <div style="background:#d1ecf1; color:#0c5460; padding:6px 12px; border-radius:6px; font-weight:bold; font-size:0.8rem;">🔵 ARIBA NO CATALOGADA</div>
-            <div style="background:#fff3cd; color:#856404; padding:6px 12px; border-radius:6px; font-weight:bold; font-size:0.8rem;">🟠 ARIBA DIRECTA</div>
-            <div style="background:#e2e3e5; color:#383d41; padding:6px 12px; border-radius:6px; font-weight:bold; font-size:0.8rem;">⚪ SAP CATALOGADA</div>
-            <div style="background:#e2e3e5; color:#383d41; padding:6px 12px; border-radius:6px; font-weight:bold; font-size:0.8rem;">⚪ SAP DIRECTA</div>
-            <div style="background:#e2e3e5; color:#383d41; padding:6px 12px; border-radius:6px; font-weight:bold; font-size:0.8rem;">⚙️ SAP MRP / AUTOMÁTICA</div>
+            <div style="background:#e2e3e5; color:#383d41; padding:6px 12px; border-radius:6px; font-weight:bold; font-size:0.8rem;">⚪ SAP ERP Y MRP</div>
         </div>
         """,
         unsafe_allow_html=True
