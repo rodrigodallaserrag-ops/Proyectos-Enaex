@@ -16,7 +16,7 @@ st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide
 def determinar_tipo_ariba(row):
     """
     Clasifica la solicitud integrando los flujos SAP y Ariba según reglas unificadas:
-    - Serie 1 (100) y Serie 5 (500) -> ⚪ SAP ERP Y MRP
+    - Serie 1 (100) y Serie 5 (500) -> ⚪ SAP ERP / MRP
     - Serie 6 (600):
         * Sin material o registrada en Trazabilidad -> 🔵 ARIBA NO CATALOGADA
         * Con código de material / catálogo -> 🟢 ARIBA DIRECTA / CATALOGADA
@@ -30,7 +30,7 @@ def determinar_tipo_ariba(row):
             elif "CATALOGAD" in val or "DIRECTA" in val:
                 return "🟢 ARIBA DIRECTA / CATALOGADA"
             elif "SAP" in val or "ERP" in val or "MRP" in val:
-                return "⚪ SAP ERP Y MRP"
+                return "⚪ SAP ERP / MRP"
 
     sol = str(row.get("Solicitud de pedido", "")).strip()
     material = str(row.get("Material", "")).strip()
@@ -38,7 +38,7 @@ def determinar_tipo_ariba(row):
 
     # Serie 1 (100) y Serie 5 (500)
     if sol.startswith("1") or sol.startswith("5"):
-        return "⚪ SAP ERP Y MRP"
+        return "⚪ SAP ERP / MRP"
 
     # Serie 6 (600)
     if sol.startswith("6"):
