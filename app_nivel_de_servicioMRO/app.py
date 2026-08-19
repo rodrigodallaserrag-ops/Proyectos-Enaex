@@ -14,44 +14,47 @@ import transform
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
 
-# ---- 0. Función de Clasificación de Categorías ----
+# ---- 0. Función de Clasificación Corregida ----
 def determinar_tipo_ariba(row):
     """
-    Clasifica las solicitudes en las categorías solicitadas:
+    Clasifica las solicitudes garantizando la detección de Ariba No Catalogada:
     - ⚙️ SAP ERP: Serie 1 (100...), Serie 19, CL...
     - ⚪ SAP MRP: Serie 5 (500...) o marca de Solped MRP.
-    - 🟢 ARIBA CATALOGADA / DIRECTA: Flujos directos o catalogados.
-    - 🔵 ARIBA NO CATALOGADA: Serie 6 sin código de material o en Trazabilidad.
+    - 🟢 ARIBA CATALOGADA / DIRECTA: Flujos directos o catalogados con material.
+    - 🔵 ARIBA NO CATALOGADA: Serie 6 sin código de material, en Trazabilidad o sin catálogo.
     """
-    for col in ["Tipo Ariba", "Tipo_Ariba", "Origen Ariba", "Origen", "Tipo Flujo"]:
-        if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
-            val = str(row[col]).upper()
-            if "NO CATALOGAD" in val or "NOCATALOGAD" in val:
-                return "🔵 ARIBA NO CATALOGADA"
-            elif "DIRECTA" in val or "CATALOGAD" in val:
-                return "🟢 ARIBA CATALOGADA / DIRECTA"
-            elif "MRP" in val:
-                return "⚪ SAP MRP"
-            elif "ERP" in val:
-                return "⚙️ SAP ERP"
-
     sol = str(row.get("Solicitud de pedido", "")).strip()
     material = str(row.get("Material", "")).strip()
-    tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0"])
+    tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0", "null"])
     es_mrp_flag = str(row.get("Solped MRP", "")).strip().lower() in ["sí", "si", "true", "mrp", "1"]
     en_trazabilidad = bool(row.get("En_Trazabilidad", False) or row.get("En Trazabilidad", False))
 
-    if sol.startswith("5") or es_mrp_flag:
+    # Extracción de texto desde columnas nativas de origen (excluyendo 'Tipo Ariba' para evitar conflictos)
+    texto_origen = ""
+    for col in ["Tipo_Ariba", "Origen Ariba", "Origen", "Tipo Flujo", "Tipo Pedido"]:
+        if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
+            texto_origen += " " + str(row[col]).upper()
+
+    # 1. Reglas por prefijo de Solped y Trazabilidad
+    if sol.startswith("5") or es_mrp_flag or "MRP" in texto_origen:
         return "⚪ SAP MRP"
 
-    if sol.startswith("1") or sol.startswith("19") or sol.upper().startswith("CL"):
+    if sol.startswith("1") or sol.startswith("19") or sol.upper().startswith("CL") or "ERP" in texto_origen:
         return "⚙️ SAP ERP"
 
     if sol.startswith("6"):
-        if en_trazabilidad or not tiene_material:
+        if "NO CATALOGAD" in texto_origen or "NOCATALOGAD" in texto_origen or "SIN CODIGO" in texto_origen:
+            return "🔵 ARIBA NO CATALOGADA"
+        elif en_trazabilidad or not tiene_material:
             return "🔵 ARIBA NO CATALOGADA"
         else:
             return "🟢 ARIBA CATALOGADA / DIRECTA"
+
+    # 2. Evaluación fallback por texto de origen
+    if "NO CATALOGAD" in texto_origen or "NOCATALOGAD" in texto_origen:
+        return "🔵 ARIBA NO CATALOGADA"
+    elif "DIRECTA" in texto_origen or "CATALOGAD" in texto_origen:
+        return "🟢 ARIBA CATALOGADA / DIRECTA"
 
     return "⚪ OTROS"
 
@@ -152,7 +155,7 @@ if st.session_state.get("_clave_pipeline") != clave_actual:
     df_calculado["Mes"] = df_calculado["Fecha de pedido"].dt.month
     df_calculado["Día"] = df_calculado["Fecha de pedido"].dt.day
 
-    # Asignación de categoría
+    # Asignación corregida de categoría
     df_calculado["Tipo Ariba"] = df_calculado.apply(determinar_tipo_ariba, axis=1)
 
     st.session_state["_df_pipeline"] = df_calculado
