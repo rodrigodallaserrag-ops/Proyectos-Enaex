@@ -456,46 +456,59 @@ COLUMNAS_DETALLE = [
 
 def determinar_tipo_ariba(row):
     """
-    Clasifica la solicitud:
-    1. Respeta si ya viene clasificada en una columna previa.
-    2. Si inicia con '1' o '5' -> SAP.
-    3. Si inicia con '6' -> Es ARIBA:
-       - ARIBA DIRECTA: Solped MRP / Directa.
-       - ARIBA NO CATALOGADA: Sin número de material (texto libre).
-       - ARIBA CATALOGADA: Con número de material en catálogo.
+    Clasifica la solicitud integrando los flujos SAP y Ariba:
+    1. Respeta la clasificación explícita en columnas previas si existe.
+    2. Serie 1 (SAP Manual):
+       - Con Código de Material -> ⚪ SAP CATALOGADA
+       - Sin Código de Material -> ⚪ SAP DIRECTA
+    3. Serie 5 (SAP MRP / Automática):
+       - ⚙️ SAP MRP / AUTOMÁTICA
+    4. Serie 6 (Ariba):
+       - Presente en Trazabilidad -> 🔵 ARIBA NO CATALOGADA
+       - Con Código de Material -> 🟢 ARIBA CATALOGADA
+       - Sin Código de Material / Directa -> 🟠 ARIBA DIRECTA
     """
-    for col in ["Tipo Ariba", "Tipo_Ariba", "Origen Ariba", "Origen"]:
+    # 1. Verificar si ya viene categorizada en columnas previas
+    for col in ["Tipo Ariba", "Tipo_Ariba", "Origen Ariba", "Origen", "Tipo Flujo"]:
         if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
             val = str(row[col]).upper()
             if "NO CATALOGAD" in val or "NOCATALOGAD" in val:
                 return "🔵 ARIBA NO CATALOGADA"
-            elif "CATALOGAD" in val:
+            elif "CATALOGAD" in val and "SAP" not in val:
                 return "🟢 ARIBA CATALOGADA"
-            elif "DIRECTA" in val or "DIRECT" in val:
+            elif "DIRECTA" in val and "SAP" not in val:
                 return "🟠 ARIBA DIRECTA"
-            elif "SAP" in val:
-                return "⚪ SAP"
+            elif "SAP CATALOGAD" in val:
+                return "⚪ SAP CATALOGADA"
+            elif "SAP DIRECTA" in val:
+                return "⚪ SAP DIRECTA"
+            elif "MRP" in val or "AUTOMATICA" in val or "AUTOMÁTICA" in val:
+                return "⚙️ SAP MRP / AUTOMÁTICA"
 
     sol = str(row.get("Solicitud de pedido", "")).strip()
+    material = str(row.get("Material", "")).strip()
+    tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0"])
 
     # Solicitudes SAP (1 y 5)
-    if sol.startswith("1") or sol.startswith("5"):
-        return "⚪ SAP"
+    if sol.startswith("1"):
+        return "⚪ SAP CATALOGADA" if tiene_material else "⚪ SAP DIRECTA"
+
+    if sol.startswith("5"):
+        return "⚙️ SAP MRP / AUTOMÁTICA"
 
     # Solicitudes ARIBA (6)
     if sol.startswith("6"):
-        material = str(row.get("Material", "")).strip()
         solped_mrp = str(row.get("Solped MRP", "")).strip().upper()
         grupo_compras = str(row.get("Grupo de compras", "")).strip().upper()
 
         if solped_mrp == "SÍ" or "DIR" in grupo_compras:
             return "🟠 ARIBA DIRECTA"
-        elif not material or material.lower() in ["nan", "none", "n/a", "-", "0"]:
+        elif not tiene_material:
             return "🔵 ARIBA NO CATALOGADA"
         else:
             return "🟢 ARIBA CATALOGADA"
 
-    return "⚪ SAP"
+    return "⚪ OTROS"
 
 
 def preparar_detalle(d: pd.DataFrame) -> pd.DataFrame:
@@ -516,21 +529,33 @@ detalle = preparar_detalle(df_f)
 with st.expander("Ver detalle de solicitudes", expanded=False):
     st.caption("La columna **Comentario** es editable: escribe ahí y se incluirá en el Excel de registro.")
 
-    # ---- Extensión visual superior: 3 rectángulos indicativos ----
+    # ---- Extensión visual superior: 6 rectángulos indicativos ----
     st.markdown(
         """
-        <div style="display: flex; gap: 15px; margin-top: 5px; margin-bottom: 15px; align-items: center; flex-wrap: wrap;">
-            <div style="background-color: #d4edda; color: #155724; border: 1.5px solid #c3e6cb; padding: 10px 18px; border-radius: 8px; font-weight: bold; font-size: 0.88rem; display: flex; align-items: center; gap: 8px;">
-                <span style="height: 14px; width: 14px; background-color: #28a745; border-radius: 3px; display: inline-block;"></span>
+        <div style="display: flex; gap: 10px; margin-top: 5px; margin-bottom: 15px; align-items: center; flex-wrap: wrap;">
+            <div style="background-color: #d4edda; color: #155724; border: 1.5px solid #c3e6cb; padding: 8px 14px; border-radius: 8px; font-weight: bold; font-size: 0.82rem; display: flex; align-items: center; gap: 6px;">
+                <span style="height: 12px; width: 12px; background-color: #28a745; border-radius: 3px; display: inline-block;"></span>
                 🟢 ARIBA CATALOGADA
             </div>
-            <div style="background-color: #d1ecf1; color: #0c5460; border: 1.5px solid #bee5eb; padding: 10px 18px; border-radius: 8px; font-weight: bold; font-size: 0.88rem; display: flex; align-items: center; gap: 8px;">
-                <span style="height: 14px; width: 14px; background-color: #0d6efd; border-radius: 3px; display: inline-block;"></span>
+            <div style="background-color: #d1ecf1; color: #0c5460; border: 1.5px solid #bee5eb; padding: 8px 14px; border-radius: 8px; font-weight: bold; font-size: 0.82rem; display: flex; align-items: center; gap: 6px;">
+                <span style="height: 12px; width: 12px; background-color: #0d6efd; border-radius: 3px; display: inline-block;"></span>
                 🔵 ARIBA NO CATALOGADA
             </div>
-            <div style="background-color: #fff3cd; color: #856404; border: 1.5px solid #ffeeba; padding: 10px 18px; border-radius: 8px; font-weight: bold; font-size: 0.88rem; display: flex; align-items: center; gap: 8px;">
-                <span style="height: 14px; width: 14px; background-color: #fd7e14; border-radius: 3px; display: inline-block;"></span>
+            <div style="background-color: #fff3cd; color: #856404; border: 1.5px solid #ffeeba; padding: 8px 14px; border-radius: 8px; font-weight: bold; font-size: 0.82rem; display: flex; align-items: center; gap: 6px;">
+                <span style="height: 12px; width: 12px; background-color: #fd7e14; border-radius: 3px; display: inline-block;"></span>
                 🟠 ARIBA DIRECTA
+            </div>
+            <div style="background-color: #e2e3e5; color: #383d41; border: 1.5px solid #d6d8db; padding: 8px 14px; border-radius: 8px; font-weight: bold; font-size: 0.82rem; display: flex; align-items: center; gap: 6px;">
+                <span style="height: 12px; width: 12px; background-color: #6c757d; border-radius: 3px; display: inline-block;"></span>
+                ⚪ SAP CATALOGADA
+            </div>
+            <div style="background-color: #e2e3e5; color: #383d41; border: 1.5px solid #d6d8db; padding: 8px 14px; border-radius: 8px; font-weight: bold; font-size: 0.82rem; display: flex; align-items: center; gap: 6px;">
+                <span style="height: 12px; width: 12px; background-color: #6c757d; border-radius: 3px; display: inline-block;"></span>
+                ⚪ SAP DIRECTA
+            </div>
+            <div style="background-color: #e2e3e5; color: #383d41; border: 1.5px solid #d6d8db; padding: 8px 14px; border-radius: 8px; font-weight: bold; font-size: 0.82rem; display: flex; align-items: center; gap: 6px;">
+                <span style="height: 12px; width: 12px; background-color: #6c757d; border-radius: 3px; display: inline-block;"></span>
+                ⚙️ SAP MRP / AUTOMÁTICA
             </div>
         </div>
         """,
@@ -544,7 +569,7 @@ with st.expander("Ver detalle de solicitudes", expanded=False):
         key="editor_detalle",
         column_config={
             "Tipo Ariba": st.column_config.TextColumn(
-                "Tipo Ariba", help="Categoría Ariba/SAP identificada por regla de negocio", width="medium"
+                "Tipo / Origen", help="Categoría identificada según prefijo Solped y código de material", width="medium"
             ),
             "Comentario": st.column_config.TextColumn(
                 "Comentario", help="Anotación libre para el registro semanal", width="medium"
