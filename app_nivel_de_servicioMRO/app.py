@@ -272,7 +272,7 @@ checkpoints.append(("6. Tras filtro Cumple", len(df_f)))
 _snapshot("6. Tras Cumple", df_f)
 
 st.divider()
-st.subheader("Filtro por días de gestión (Nivel de Servicio)")
+st.subheader("Filtro por días de gestión (SLA Comprador)")
 
 if len(df_f):
     n_negativos = (df_f["Nivel de Servicio"] < 0).sum()
@@ -319,12 +319,13 @@ with st.expander("🔍 Diagnóstico de filtrado (para comparar contra el pbix)")
     csv = df_f.to_csv(index=False).encode("utf-8")
     st.download_button("Descargar detalle filtrado (CSV)", csv, "detalle_filtrado.csv", "text/csv")
 
-# ---- Tarjetas ----
+# ---- Tarjetas KPI ----
 VERDE, VERDE_BORDE = "rgba(35, 145, 75, 0.16)", "rgba(35, 145, 75, 0.55)"
 ROJO, ROJO_BORDE = "rgba(204, 0, 0, 0.14)", "rgba(204, 0, 0, 0.55)"
 
 pct_cumplimiento = (df_f["Cumple"] == "Cumple").sum() / max(len(df_f), 1) * 100
 promedio_dias = df_f["Nivel de Servicio"].mean()
+promedio_lead_time = df_f["Lead Time Total"].mean() if "Lead Time Total" in df_f.columns else float("nan")
 pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
 
@@ -347,13 +348,16 @@ else:
     f_dias, b_dias, txt_dias = VERDE, VERDE_BORDE, f"{promedio_dias:.0f}"
 
 f_pct, b_pct = (VERDE, VERDE_BORDE) if pct_cumplimiento >= 85 else (ROJO, ROJO_BORDE)
+txt_lt = f"{promedio_lead_time:.0f}" if pd.notna(promedio_lead_time) else "-"
 
-t1, t2, t3 = st.columns(3)
+t1, t2, t3, t4 = st.columns(4)
 with t1:
-    st.markdown(tarjeta("Promedio días de gestión", txt_dias, f_dias, b_dias), unsafe_allow_html=True)
+    st.markdown(tarjeta("SLA Comprador (Días)", txt_dias, f_dias, b_dias), unsafe_allow_html=True)
 with t2:
-    st.markdown(tarjeta("% Cumplimiento", f"{pct_cumplimiento:.0f}%", f_pct, b_pct), unsafe_allow_html=True)
+    st.markdown(tarjeta("Lead Time Total (Días)", txt_lt), unsafe_allow_html=True)
 with t3:
+    st.markdown(tarjeta("% Cumplimiento SLA", f"{pct_cumplimiento:.0f}%", f_pct, b_pct), unsafe_allow_html=True)
+with t4:
     st.markdown(tarjeta("OC generadas", f"{pedidos_distintos:,}"), unsafe_allow_html=True)
 
 st.divider()
@@ -369,7 +373,7 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
     def _fmt(col, val):
         if pd.isna(val):
             return "-"
-        if col == "Promedio días de gestión":
+        if col in ["Promedio días de gestión", "Promedio Lead Time Total"]:
             return f"{val:,.0f}"
         if col == "% Cumplimiento":
             return f"{val:,.0f}%"
@@ -400,7 +404,8 @@ def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bo
         filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
     abrev = {
-        "Promedio días de gestión": "Días gest.",
+        "Promedio días de gestión": "SLA Compr.",
+        "Promedio Lead Time Total": "LT Total",
         "% Cumplimiento": "% Cumpl.",
         "Pos. OC generadas": "Pos. OC",
     }
@@ -472,6 +477,7 @@ COLUMNAS_DETALLE = [
     "Solicitud de pedido",
     "Tipo Ariba",
     "Fecha de solicitud",
+    "Fecha de liberación",
     "Fecha modificación",
     "Grupo de compras",
     "Cantidad pedida",
@@ -484,6 +490,7 @@ COLUMNAS_DETALLE = [
     "Nombre Centro",
     "Estado Solped",
     "Nivel de Servicio",
+    "Lead Time Total",
     "Comentario",
     "Cumple",
 ]
@@ -491,7 +498,7 @@ COLUMNAS_DETALLE = [
 
 def preparar_detalle(d: pd.DataFrame) -> pd.DataFrame:
     d = d.copy()
-    for col_fecha in ["Fecha de solicitud", "Fecha modificación", "Fecha de pedido"]:
+    for col_fecha in ["Fecha de solicitud", "Fecha de liberación", "Fecha modificación", "Fecha de pedido"]:
         if col_fecha in d.columns:
             d[col_fecha] = pd.to_datetime(d[col_fecha], errors="coerce").dt.date
     if "Comentario" not in d.columns:
@@ -513,6 +520,8 @@ with st.expander("Ver detalle de solicitudes", expanded=False):
             "Comentario": st.column_config.TextColumn(
                 "Comentario", help="Anotación libre para el registro semanal", width="medium"
             ),
+            "Nivel de Servicio": st.column_config.NumberColumn("SLA Comprador (días)"),
+            "Lead Time Total": st.column_config.NumberColumn("Lead Time Total (días)"),
         },
         disabled=[c for c in detalle.columns if c != "Comentario"],
     )
@@ -555,6 +564,7 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
                     val = None
                 elif isinstance(val, (int, float)) and col in (
                     "Promedio días de gestión",
+                    "Promedio Lead Time Total",
                     "% Cumplimiento",
                     "Pos. OC generadas",
                 ):
@@ -568,7 +578,7 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
                     c.fill = PatternFill("solid", fgColor="FFEFF0F2")
                 if col == "% Cumplimiento" and val is not None:
                     c.number_format = '0"%"'
-                if col in ("Fecha de solicitud", "Fecha modificación", "Fecha de pedido"):
+                if col in ("Fecha de solicitud", "Fecha de liberación", "Fecha modificación", "Fecha de pedido"):
                     c.number_format = "DD-MM-YYYY"
         return fila + 1 + len(tabla)
 
@@ -588,11 +598,19 @@ def generar_excel(detalle_df: pd.DataFrame) -> bytes:
     ws["A3"] = f"Generado: {pd.Timestamp.today().date()}"
     ws["A3"].font = Font(name=fuente_base, size=10, italic=True, color=gris)
 
+    promedio_lt_val = round(promedio_lead_time) if pd.notna(promedio_lead_time) else None
     resumen = pd.DataFrame(
         {
-            "Indicador": ["Promedio días de gestión", "% Cumplimiento", "OC generadas", "Líneas consideradas"],
+            "Indicador": [
+                "Promedio SLA Comprador (días)",
+                "Promedio Lead Time Total (días)",
+                "% Cumplimiento SLA",
+                "OC generadas",
+                "Líneas consideradas",
+            ],
             "Valor": [
                 round(promedio_dias) if pd.notna(promedio_dias) else None,
+                promedio_lt_val,
                 round(pct_cumplimiento),
                 pedidos_distintos,
                 len(df_f),
