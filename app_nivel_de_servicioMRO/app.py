@@ -33,21 +33,24 @@ if st.button(icono_tema, key="theme_toggle", help="Alternar Modo Claro/Oscuro"):
     st.rerun()
 
 if st.session_state["tema"] == "claro":
-    # MODO CLARO: CSS ajustado para centrar el icono correctamente
+    # MODO CLARO: CSS ajustado para colocar el icono debajo de los 3 puntos y evitar que sea gigante
     st.markdown("""
         <style>
         .st-key-theme_toggle {
             position: fixed !important;
-            top: 15px !important;
-            right: 60px !important;
+            top: 65px !important; /* Posicionado justo debajo de los 3 puntos */
+            right: 15px !important; /* Esquina superior derecha */
             z-index: 999999 !important;
-            width: auto !important;
+            width: 45px !important; /* Ancho fijo para evitar que sea gigante */
+            height: 45px !important; /* Alto fijo */
+            min-width: 0 !important; 
         }
         .st-key-theme_toggle button {
-            background: transparent !important;
-            border: none !important;
-            box-shadow: none !important;
-            font-size: 1.6rem !important;
+            background: #FFFFFF !important;
+            border: 1px solid #E0E0E0 !important;
+            border-radius: 50% !important; /* Botón circular */
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important;
+            font-size: 1.4rem !important;
             padding: 0 !important;
             margin: 0 !important;
             color: #111111 !important;
@@ -55,37 +58,41 @@ if st.session_state["tema"] == "claro":
             align-items: center !important;
             justify-content: center !important;
             line-height: 1 !important;
-            height: auto !important;
+            width: 100% !important;
+            height: 100% !important;
             min-height: unset !important;
         }
         .st-key-theme_toggle button p {
             margin: 0 !important;
             padding: 0 !important;
             line-height: 1 !important;
-            font-size: 1.6rem !important;
+            font-size: 1.4rem !important;
         }
         .st-key-theme_toggle button:hover {
             transform: scale(1.1) !important;
-            background: transparent !important;
+            background: #F0F0F0 !important;
         }
         </style>
     """, unsafe_allow_html=True)
 else:
-    # MODO OSCURO: CSS ajustado para centrar el icono correctamente
+    # MODO OSCURO: CSS ajustado para colocar el icono debajo de los 3 puntos y evitar que sea gigante
     st.markdown("""
         <style>
         .st-key-theme_toggle {
             position: fixed !important;
-            top: 15px !important;
-            right: 60px !important;
+            top: 65px !important; /* Posicionado justo debajo de los 3 puntos */
+            right: 15px !important; /* Esquina superior derecha */
             z-index: 999999 !important;
-            width: auto !important;
+            width: 45px !important; /* Ancho fijo para evitar que sea gigante */
+            height: 45px !important; /* Alto fijo */
+            min-width: 0 !important;
         }
         .st-key-theme_toggle button {
-            background: transparent !important;
-            border: none !important;
-            box-shadow: none !important;
-            font-size: 1.6rem !important;
+            background: #1E2329 !important;
+            border: 1px solid #444444 !important;
+            border-radius: 50% !important; /* Botón circular */
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3) !important;
+            font-size: 1.4rem !important;
             padding: 0 !important;
             margin: 0 !important;
             color: #FF3333 !important;
@@ -93,18 +100,20 @@ else:
             align-items: center !important;
             justify-content: center !important;
             line-height: 1 !important;
-            height: auto !important;
+            width: 100% !important;
+            height: 100% !important;
             min-height: unset !important;
         }
         .st-key-theme_toggle button p {
             margin: 0 !important;
             padding: 0 !important;
             line-height: 1 !important;
-            font-size: 1.6rem !important;
+            font-size: 1.4rem !important;
         }
         .st-key-theme_toggle button:hover {
             transform: scale(1.1) !important;
-            background: transparent !important;
+            background: #2C323A !important;
+            border-color: #FF3333 !important;
         }
 
         .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
