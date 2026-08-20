@@ -30,8 +30,6 @@ st.markdown("""
     [data-testid="stSidebarNav"] a[href*="Trazabilidad"],
     [data-testid="stSidebarNav"] a[href*="ariba"],
     [data-testid="stSidebarNav"] a[href*="Ariba"],
-    [data-testid="stSidebarNav"] a[href*="preparar"],
-    [data-testid="stSidebarNav"] a[href*="Preparar"] {
         display: none !important;
     }
     </style>
