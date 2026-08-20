@@ -552,7 +552,7 @@ with tab_dx:
                     "Comentario", help="Anotación libre para el registro semanal", width="medium"
                 ),
                 "Nivel de Servicio": st.column_config.NumberColumn("Nivel de Servicio (días)"),
-                "Lead Time Total": st.column_config.NumberColumn("Lead Time Total (días)"),
+                "Lead Time Total": None,  # 👈 Oculto visualmente del frontend
             },
             disabled=[c for c in detalle.columns if c != "Comentario"],
         )
