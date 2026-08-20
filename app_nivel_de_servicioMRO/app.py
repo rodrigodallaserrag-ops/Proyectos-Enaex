@@ -21,15 +21,17 @@ except ImportError:
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
 # ==============================================================================
-# OCULTAR NAVEGACIÓN GLOBAL (TRAZABILIDAD ARIBA)
+# OCULTAR NAVEGACIÓN GLOBAL (TRAZABILIDAD Y PREPARAR DATOS)
 # ==============================================================================
 st.markdown("""
     <style>
-    /* Ocultar enlaces del menú lateral que contengan 'trazabilidad' o 'ariba' */
+    /* Ocultar enlaces del menú lateral que contengan 'trazabilidad', 'ariba' o 'preparar' */
     [data-testid="stSidebarNav"] a[href*="trazabilidad"],
     [data-testid="stSidebarNav"] a[href*="Trazabilidad"],
     [data-testid="stSidebarNav"] a[href*="ariba"],
-    [data-testid="stSidebarNav"] a[href*="Ariba"] {
+    [data-testid="stSidebarNav"] a[href*="Ariba"],
+    [data-testid="stSidebarNav"] a[href*="preparar"],
+    [data-testid="stSidebarNav"] a[href*="Preparar"] {
         display: none !important;
     }
     </style>
