@@ -21,6 +21,22 @@ import streamlit as st
 
 import config
 
+import streamlit as st
+
+# ==============================================================================
+# OCULTAR NAVEGACIÓN GLOBAL (TRAZABILIDAD ARIBA)
+# ==============================================================================
+st.markdown("""
+    <style>
+    /* Ocultar enlaces del menú lateral que contengan 'trazabilidad' o 'ariba' */
+    [data-testid="stSidebarNav"] a[href*="trazabilidad"],
+    [data-testid="stSidebarNav"] a[href*="Trazabilidad"],
+    [data-testid="stSidebarNav"] a[href*="ariba"],
+    [data-testid="stSidebarNav"] a[href*="Ariba"] {
+        display: none !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # ---- Carga automática desde OneDrive for Business (opcional) ----
 # Uso: en app.py, pasar el string "onedrive:<nombre_secreto>" como `ruta` a
