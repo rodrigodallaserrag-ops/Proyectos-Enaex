@@ -20,6 +20,103 @@ except ImportError:
 
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
+# ==============================================================================
+# CONFIGURACIÓN TEMA (CLARO PREDETERMINADO / OSCURO)
+# ==============================================================================
+if "tema" not in st.session_state:
+    st.session_state["tema"] = "claro"
+
+# Botón flotante para cambiar tema
+icono_tema = "🌙" if st.session_state["tema"] == "claro" else "☀️"
+if st.button(icono_tema, key="theme_toggle", help="Alternar Modo Claro/Oscuro"):
+    st.session_state["tema"] = "oscuro" if st.session_state["tema"] == "claro" else "claro"
+    st.rerun()
+
+if st.session_state["tema"] == "claro":
+    # MODO CLARO: El diseño original se queda intacto. Solo estilizamos el botón.
+    st.markdown("""
+        <style>
+        .st-key-theme_toggle {
+            position: fixed !important;
+            top: 15px !important;
+            right: 60px !important;
+            z-index: 999999 !important;
+            width: auto !important;
+        }
+        .st-key-theme_toggle button {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            font-size: 1.6rem !important;
+            padding: 0 !important;
+            color: #111111 !important;
+        }
+        .st-key-theme_toggle button:hover {
+            transform: scale(1.1) !important;
+            background: transparent !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+else:
+    # MODO OSCURO: Se inyecta el CSS solicitado.
+    st.markdown("""
+        <style>
+        .st-key-theme_toggle {
+            position: fixed !important;
+            top: 15px !important;
+            right: 60px !important;
+            z-index: 999999 !important;
+            width: auto !important;
+        }
+        .st-key-theme_toggle button {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            font-size: 1.6rem !important;
+            padding: 0 !important;
+            color: #FF3333 !important;
+        }
+        .st-key-theme_toggle button:hover {
+            transform: scale(1.1) !important;
+            background: transparent !important;
+        }
+
+        .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
+            background-color: #0E1117 !important;
+            color: #FF3333 !important;
+        }
+
+        p, span, label, h1, h2, h3, h4, h5, h6, div, td, th, caption, .stMarkdown {
+            color: #FF3333 !important;
+        }
+
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button) {
+            background-color: #CC0000 !important;
+            color: #FFFFFF !important;
+            border: 1px solid #FF4D4D !important;
+            font-weight: bold !important;
+        }
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button):hover {
+            background-color: #FF0000 !important;
+            color: #FFFFFF !important;
+            border-color: #FF6666 !important;
+        }
+
+        input, select, textarea, div[data-baseweb="select"] {
+            background-color: #1E2329 !important;
+            color: #FF3333 !important;
+            border-color: #CC0000 !important;
+        }
+
+        [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
+            background-color: #1E2329 !important;
+            padding: 2rem !important;
+            border-radius: 12px !important;
+            border: 1px solid #CC0000 !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
 
 # ---- 0. Función de Clasificación Corregida ----
 def determinar_tipo_ariba(row):
@@ -142,7 +239,6 @@ with tab_dx:
             return (archivo.name, archivo.size)
         return archivo
 
-    # 🔹 CAMBIO: Se añade el estado de la trazabilidad a la clave de caché
     clave_actual = (
         _clave_archivo(archivo_data),
         _clave_archivo(archivo_resp_grupo),
@@ -165,7 +261,6 @@ with tab_dx:
         df_calculado["Mes"] = df_calculado["Fecha de pedido"].dt.month
         df_calculado["Día"] = df_calculado["Fecha de pedido"].dt.day
 
-        # 🔹 CAMBIO: Se realiza el cruce con la Trazabilidad procesada antes de clasificar
         if "df_trazabilidad_limpio" in st.session_state:
             df_traz = st.session_state["df_trazabilidad_limpio"]
             col_traz = "Solicitud de pedido" if "Solicitud de pedido" in df_traz.columns else "Solped SAP (600)"
@@ -356,14 +451,18 @@ with tab_dx:
     promedio_lead_time = df_f["Lead Time Total"].mean() if "Lead Time Total" in df_f.columns else float("nan")
     pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
+    # Condición de texto para las Cards
+    color_texto_card = "#FF3333" if st.session_state["tema"] == "oscuro" else "#404B55"
+    color_sub_card = "#FF3333" if st.session_state["tema"] == "oscuro" else "#555"
+
     def tarjeta(titulo: str, valor: str, subtitulo: str = "", fondo: str = "rgba(64,75,85,0.07)", borde: str = "rgba(64,75,85,0.35)") -> str:
-        html_sub = f'<div style="font-size:0.78rem;color:#555;margin-top:4px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
+        html_sub = f'<div style="font-size:0.78rem;color:{color_sub_card};margin-top:4px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
         return (
             f'<div style="background:{fondo};border:1.5px solid {borde};border-radius:8px;'
             f'padding:12px 18px;text-align:center;">'
-            f'<div style="font-size:0.78rem;color:#404B55;font-weight:600;letter-spacing:.03em;'
+            f'<div style="font-size:0.78rem;color:{color_texto_card};font-weight:600;letter-spacing:.03em;'
             f'text-transform:uppercase;opacity:.85;margin-bottom:4px;">{titulo}</div>'
-            f'<div style="font-size:2rem;font-weight:700;color:#404B55;line-height:1.1;">{valor}</div>'
+            f'<div style="font-size:2rem;font-weight:700;color:{color_texto_card};line-height:1.1;">{valor}</div>'
             f'{html_sub}'
             f'</div>'
         )
@@ -398,7 +497,7 @@ with tab_dx:
     st.divider()
 
     # ---- Estilo corporativo Enaex ----
-    ENAEX_GRIS = "#404B55"
+    ENAEX_GRIS = "#1E2329" if st.session_state["tema"] == "oscuro" else "#404B55"
     ENAEX_ROJO = "#CC0000"
 
     def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bool = False) -> str:
@@ -420,20 +519,22 @@ with tab_dx:
         fuente = "0.72rem" if compacta else "0.86rem"
         fuente_th = "0.66rem" if compacta else "0.82rem"
 
+        color_texto_tabla = "#FF3333" if st.session_state["tema"] == "oscuro" else "#404B55"
+
         filas = []
         for i, r in enumerate(tabla.itertuples(index=False)):
             es_total = str(r[0]) == "TOTAL"
             if es_total:
                 estilo_fila = f"background:{ENAEX_GRIS};color:#fff;font-weight:700;border-top:2px solid {ENAEX_ROJO};"
             else:
-                fondo = "#ffffff" if i % 2 == 0 else "#f4f5f7"
-                estilo_fila = f"background:{fondo};color:{ENAEX_GRIS};"
+                fondo = "#ffffff" if (i % 2 == 0 and st.session_state["tema"] == "claro") else ("#f4f5f7" if st.session_state["tema"] == "claro" else "#14181d")
+                estilo_fila = f"background:{fondo};color:{color_texto_tabla};"
             celdas = []
             for j, c in enumerate(cols):
                 align = "left" if j == 0 else "right"
                 celdas.append(
                     f'<td style="padding:{pad};text-align:{align};'
-                    f'border-bottom:1px solid #e3e5e8;white-space:nowrap;">{_fmt(c, r[j])}</td>'
+                    f'border-bottom:1px solid #d8dbdf;white-space:nowrap;">{_fmt(c, r[j])}</td>'
                 )
             filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
@@ -737,7 +838,7 @@ with tab_trazabilidad:
                         st.session_state["df_trazabilidad_cadena"] = df_cadena
                         st.session_state["df_trazabilidad_limpio"] = df_resumen
 
-                        # 🔹 CAMBIO: Borrar la caché del pipeline para obligar a recalcular la Pestaña 1
+                        # Borrar la caché del pipeline para obligar a recalcular la Pestaña 1
                         st.session_state.pop("_clave_pipeline", None)
                         st.success("¡Trazabilidad procesada con éxito! La pestaña Dx Compradores ha sido actualizada.")
                         st.rerun()
