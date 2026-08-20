@@ -21,6 +21,21 @@ except ImportError:
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
 # ==============================================================================
+# OCULTAR NAVEGACIÓN GLOBAL (TRAZABILIDAD ARIBA)
+# ==============================================================================
+st.markdown("""
+    <style>
+    /* Ocultar enlaces del menú lateral que contengan 'trazabilidad' o 'ariba' */
+    [data-testid="stSidebarNav"] a[href*="trazabilidad"],
+    [data-testid="stSidebarNav"] a[href*="Trazabilidad"],
+    [data-testid="stSidebarNav"] a[href*="ariba"],
+    [data-testid="stSidebarNav"] a[href*="Ariba"] {
+        display: none !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# ==============================================================================
 # CONFIGURACIÓN TEMA (CLARO PREDETERMINADO / OSCURO)
 # ==============================================================================
 if "tema" not in st.session_state:
