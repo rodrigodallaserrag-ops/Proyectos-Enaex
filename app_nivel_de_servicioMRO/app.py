@@ -25,11 +25,15 @@ st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide
 # ==============================================================================
 st.markdown("""
     <style>
-    /* Ocultar enlaces del menú lateral que contengan 'trazabilidad' o 'ariba' */
-    [data-testid="stSidebarNav"] a[href*="trazabilidad"],
-    [data-testid="stSidebarNav"] a[href*="Trazabilidad"],
-    [data-testid="stSidebarNav"] a[href*="ariba"],
-    [data-testid="stSidebarNav"] a[href*="Ariba"] {
+    /* Ocultar enlaces del menú lateral y su contenedor (li) para no dejar espacios vacíos.
+       La "i" hace que ignore si está escrito en mayúsculas o minúsculas. */
+    [data-testid="stSidebarNav"] a[href*="trazabilidad" i],
+    [data-testid="stSidebarNav"] a[href*="ariba" i] {
+        display: none !important;
+    }
+    
+    [data-testid="stSidebarNav"] ul li:has(a[href*="trazabilidad" i]),
+    [data-testid="stSidebarNav"] ul li:has(a[href*="ariba" i]) {
         display: none !important;
     }
     </style>
