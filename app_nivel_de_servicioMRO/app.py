@@ -37,36 +37,36 @@ if st.button(icono_tema, key="theme_toggle", help="Cambiar Modo Claro / Oscuro")
 
 # 3. Inyección de Estilos CSS según el tema seleccionado
 if st.session_state["tema"] == "claro":
-    # MODO CLARO: Fondo Blanco Puro, Letras Negras, Botones Simples Legibles
+    # MODO CLARO: Inspirado en interfaz sobria y limpia estilo "Productos de Lujo"
     st.markdown("""
         <style>
-        /* Ubicación del icono completamente transparente a la izquierda del menú superior */
-        .st-key-theme_toggle,
-        div[data-testid="stElementContainer"]:has(button[key="theme_toggle"]) {
+        /* 1. Icono Luna/Sol 100% Transparente */
+        .st-key-theme_toggle {
             position: fixed !important;
-            top: 8px !important;
-            right: 220px !important;
+            top: 10px !important;
+            right: 180px !important;
             z-index: 999999 !important;
             width: auto !important;
-            margin: 0 !important;
         }
-        button[key="theme_toggle"] {
+        .st-key-theme_toggle button {
             background: transparent !important;
+            background-color: transparent !important;
             border: none !important;
             box-shadow: none !important;
             outline: none !important;
             padding: 0 !important;
-            font-size: 1.3rem !important;
+            font-size: 1.4rem !important;
             cursor: pointer !important;
             color: #111111 !important;
         }
-        button[key="theme_toggle"]:hover {
+        .st-key-theme_toggle button:hover {
             background: transparent !important;
+            background-color: transparent !important;
             border: none !important;
             transform: scale(1.15) !important;
         }
 
-        /* Fondo Blanco Puro y Textos Negros */
+        /* 2. Fondo Blanco Puro y Tipografía Negrita/Limpia */
         .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
             background-color: #FFFFFF !important;
             color: #111111 !important;
@@ -75,120 +75,124 @@ if st.session_state["tema"] == "claro":
             color: #111111 !important;
         }
 
-        /* Inputs y Selectores Limpios */
+        /* 3. Inputs, Selectores y Filtros Estilo "Buscador Limpio" */
         input, select, textarea, div[data-baseweb="select"] > div {
-            background-color: #FFFFFF !important;
+            background-color: #F4F4F5 !important;
             color: #111111 !important;
-            border: 1px solid #CCCCCC !important;
-            border-radius: 6px !important;
+            border: 1px solid #E4E4E7 !important;
+            border-radius: 8px !important;
+        }
+        /* Flechas de desplegables neutrales (sin rojo) */
+        div[data-baseweb="select"] svg {
+            fill: #52525B !important;
         }
         div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
             background-color: #FFFFFF !important;
+            border: 1px solid #E4E4E7 !important;
         }
         li[role="option"] {
             color: #111111 !important;
             background-color: #FFFFFF !important;
         }
         li[role="option"]:hover, li[aria-selected="true"] {
-            background-color: #F0F0F0 !important;
+            background-color: #F4F4F5 !important;
             color: #000000 !important;
         }
 
-        /* Botones Modo Claro */
-        button:not([key="theme_toggle"]) {
-            background-color: #E30613 !important;
+        /* 4. Botones Sobrios (Neutros, sin saturación roja) */
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button),
+        div[data-testid="stForm"] button {
+            background-color: #18181B !important;
             color: #FFFFFF !important;
-            border: none !important;
+            border: 1px solid #18181B !important;
             font-weight: 600 !important;
-            border-radius: 6px !important;
+            border-radius: 8px !important;
         }
-        button:not([key="theme_toggle"]):hover {
-            background-color: #B3000B !important;
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button):hover,
+        div[data-testid="stForm"] button:hover {
+            background-color: #27272A !important;
             color: #FFFFFF !important;
+            border-color: #27272A !important;
         }
 
-        /* Pestañas */
+        /* 5. Pestañas Modernas */
         button[data-baseweb="tab"] {
-            color: #555555 !important;
+            color: #71717A !important;
             background: transparent !important;
+            font-weight: 500 !important;
         }
         button[aria-selected="true"][data-baseweb="tab"] {
-            color: #E30613 !important;
-            border-bottom-color: #E30613 !important;
+            color: #18181B !important;
+            border-bottom: 2px solid #18181B !important;
+            font-weight: 700 !important;
         }
 
-        /* Contenedor Login */
+        /* 6. Tarjeta Login Limpia */
         [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
             background-color: #FFFFFF !important;
-            padding: 2rem !important;
+            padding: 2.5rem !important;
             border-radius: 12px !important;
-            border: 1px solid #E0E0E0 !important;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05) !important;
+            border: 1px solid #E4E4E7 !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.03) !important;
         }
         </style>
     """, unsafe_allow_html=True)
 else:
-    # MODO OSCURO ORIGINAL (Sin Cambios)
+    # MODO OSCURO ORIGINAL
     st.markdown("""
         <style>
-        /* Ubicación del icono completamente transparente */
-        .st-key-theme_toggle,
-        div[data-testid="stElementContainer"]:has(button[key="theme_toggle"]) {
+        .st-key-theme_toggle {
             position: fixed !important;
-            top: 8px !important;
-            right: 220px !important;
+            top: 10px !important;
+            right: 180px !important;
             z-index: 999999 !important;
             width: auto !important;
-            margin: 0 !important;
         }
-        button[key="theme_toggle"] {
+        .st-key-theme_toggle button {
             background: transparent !important;
+            background-color: transparent !important;
             border: none !important;
             box-shadow: none !important;
             outline: none !important;
             padding: 0 !important;
-            font-size: 1.3rem !important;
+            font-size: 1.4rem !important;
             cursor: pointer !important;
             color: #FF3333 !important;
         }
-        button[key="theme_toggle"]:hover {
+        .st-key-theme_toggle button:hover {
             background: transparent !important;
+            background-color: transparent !important;
             border: none !important;
             transform: scale(1.15) !important;
         }
 
-        /* Fondo Oscuro */
         .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
             background-color: #0E1117 !important;
             color: #FF3333 !important;
         }
 
-        /* Letras Rojas */
         p, span, label, h1, h2, h3, h4, h5, h6, div, td, th, caption, .stMarkdown {
             color: #FF3333 !important;
         }
 
-        /* Botones Rojos */
-        button:not([key="theme_toggle"]) {
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button) {
             background-color: #CC0000 !important;
             color: #FFFFFF !important;
             border: 1px solid #FF4D4D !important;
             font-weight: bold !important;
         }
-        button:not([key="theme_toggle"]):hover {
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button):hover {
             background-color: #FF0000 !important;
             color: #FFFFFF !important;
             border-color: #FF6666 !important;
         }
 
-        /* Entradas de texto y selectores */
         input, select, textarea, div[data-baseweb="select"] {
             background-color: #1E2329 !important;
             color: #FF3333 !important;
             border-color: #CC0000 !important;
         }
 
-        /* Contenedor Login */
         [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
             background-color: #1E2329 !important;
             padding: 2rem !important;
