@@ -19,6 +19,23 @@ import streamlit as st
 
 import loaders
 
+import streamlit as st
+
+# ==============================================================================
+# OCULTAR NAVEGACIÓN GLOBAL (TRAZABILIDAD ARIBA)
+# ==============================================================================
+st.markdown("""
+    <style>
+    /* Ocultar enlaces del menú lateral que contengan 'trazabilidad' o 'ariba' */
+    [data-testid="stSidebarNav"] a[href*="trazabilidad"],
+    [data-testid="stSidebarNav"] a[href*="Trazabilidad"],
+    [data-testid="stSidebarNav"] a[href*="ariba"],
+    [data-testid="stSidebarNav"] a[href*="Ariba"] {
+        display: none !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 st.set_page_config(page_title="Preparar datos - Nivel de Servicio", layout="wide")
 
 st.title("Preparar datos — Conversión a Parquet")
