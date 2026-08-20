@@ -20,6 +20,12 @@ except ImportError:
 
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
+# Agregar la imagen limitando el ancho para que no ocupe toda la pantalla
+        st.image("enaex-logo.png", width=250) 
+        
+        st.title("Dx Compradores — Nivel de Servicio")
+        clave_ingresada = st.text_input("Contraseña de acceso", type="password")
+
 # ==============================================================================
 # OCULTAR NAVEGACIÓN GLOBAL (TRAZABILIDAD ARIBA)
 # ==============================================================================
