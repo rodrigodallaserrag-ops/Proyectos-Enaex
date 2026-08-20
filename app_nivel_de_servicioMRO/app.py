@@ -1,8 +1,7 @@
 """
 Streamlit - Dx Compradores
 Réplica del pbix "Nivel_de_servicio_BI.pbix", página "Dx Compradores" y Trazabilidad.
-
-Correr local: streamlit run app.py
+Estilo Corporativo ENAEX.
 """
 import pandas as pd
 import streamlit as st
@@ -18,7 +17,7 @@ try:
 except ImportError:
     HAS_TRAZABILIDAD = False
 
-# 1. Configuración de página con icono
+# 1. Configuración de página
 st.set_page_config(
     page_title="Dx Compradores - Nivel de Servicio",
     page_icon="📊",
@@ -29,118 +28,187 @@ st.set_page_config(
 if "tema" not in st.session_state:
     st.session_state["tema"] = "claro"
 
-# Botón flotante ubicado a la izquierda de 'Fork' en la barra superior
+# Botón de cambio de tema (Ubicado mediante CSS en la barra superior)
 icono_tema = "🌙" if st.session_state["tema"] == "claro" else "☀️"
 if st.button(icono_tema, key="theme_toggle", help="Cambiar Modo Claro / Oscuro"):
     st.session_state["tema"] = "oscuro" if st.session_state["tema"] == "claro" else "claro"
     st.rerun()
 
-# 3. Inyección de Estilos CSS según el tema seleccionado
+# 3. Inyección de Estilos CSS Corporativos ENAEX
 if st.session_state["tema"] == "claro":
-    # MODO CLARO: Fondo Blanco, Letras Negras
     st.markdown("""
         <style>
-        /* Ubicación del botón de tema a la izquierda de Fork */
+        /* Posicionamiento fijo del botón en la barra superior (a la izquierda de Fork) */
+        .st-key-theme_toggle,
         div[data-testid="stElementContainer"]:has(button[key="theme_toggle"]) {
             position: fixed !important;
-            top: 10px !important;
+            top: 8px !important;
             right: 145px !important;
             z-index: 999999 !important;
             width: auto !important;
+            margin: 0 !important;
         }
         button[key="theme_toggle"] {
             background: transparent !important;
-            border: 1px solid #CCCCCC !important;
+            border: 1px solid #CBD5E1 !important;
             border-radius: 50% !important;
             width: 36px !important;
             height: 36px !important;
             padding: 0 !important;
-            font-size: 1.2rem !important;
+            font-size: 1.1rem !important;
             cursor: pointer !important;
             box-shadow: none !important;
-            color: #111111 !important;
+            color: #1E252B !important;
         }
-        
-        /* Fondo Blanco y Textos Negros */
-        .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body {
-            background-color: #FFFFFF !important;
-            color: #111111 !important;
+        button[key="theme_toggle"]:hover {
+            border-color: #E30613 !important;
+            background-color: #F1F5F9 !important;
         }
-        p, span, label, h1, h2, h3, h4, h5, h6, div, td, th, [data-testid="stHeader"] {
-            color: #111111 !important;
-        }
-        
-        /* Contenedor Login */
-        [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
+
+        /* Fondo y Textos Modo Claro ENAEX */
+        .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stSidebar"] {
             background-color: #F8F9FA !important;
+            color: #1E252B !important;
+        }
+        h1, h2, h3, h4, h5, h6, p, span, label, div, td, th, .stMarkdown {
+            color: #1E252B !important;
+        }
+
+        /* Inputs y Selectores */
+        input, select, textarea, div[data-baseweb="select"] > div {
+            background-color: #FFFFFF !important;
+            color: #1E252B !important;
+            border-color: #CBD5E1 !important;
+        }
+        div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
+            background-color: #FFFFFF !important;
+        }
+        li[role="option"] {
+            color: #1E252B !important;
+            background-color: #FFFFFF !important;
+        }
+        li[role="option"]:hover, li[aria-selected="true"] {
+            background-color: #F1F5F9 !important;
+            color: #E30613 !important;
+        }
+
+        /* Botones Primarios Rojo ENAEX */
+        button:not([key="theme_toggle"]) {
+            background-color: #E30613 !important;
+            color: #FFFFFF !important;
+            border: none !important;
+            font-weight: 600 !important;
+            border-radius: 6px !important;
+        }
+        button:not([key="theme_toggle"]):hover {
+            background-color: #B3000B !important;
+            color: #FFFFFF !important;
+        }
+
+        /* Pestañas */
+        button[data-baseweb="tab"] {
+            color: #1E252B !important;
+        }
+        button[aria-selected="true"][data-baseweb="tab"] {
+            color: #E30613 !important;
+            border-bottom-color: #E30613 !important;
+        }
+
+        /* Contenedor Login / Formularios */
+        [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
+            background-color: #FFFFFF !important;
             padding: 2rem !important;
             border-radius: 12px !important;
-            border: 1px solid #D8DBDF !important;
+            border: 1px solid #E2E8F0 !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05) !important;
         }
         </style>
     """, unsafe_allow_html=True)
 else:
-    # MODO OSCURO: Fondo Oscuro, Letras y Botones Rojos
     st.markdown("""
         <style>
-        /* Ubicación del botón de tema a la izquierda de Fork */
+        /* Posicionamiento fijo del botón en la barra superior (a la izquierda de Fork) */
+        .st-key-theme_toggle,
         div[data-testid="stElementContainer"]:has(button[key="theme_toggle"]) {
             position: fixed !important;
-            top: 10px !important;
+            top: 8px !important;
             right: 145px !important;
             z-index: 999999 !important;
             width: auto !important;
+            margin: 0 !important;
         }
         button[key="theme_toggle"] {
             background: transparent !important;
-            border: 1px solid #FF3333 !important;
+            border: 1px solid #475569 !important;
             border-radius: 50% !important;
             width: 36px !important;
             height: 36px !important;
             padding: 0 !important;
-            font-size: 1.2rem !important;
+            font-size: 1.1rem !important;
             cursor: pointer !important;
             box-shadow: none !important;
-            color: #FF3333 !important;
+            color: #F8FAFC !important;
+        }
+        button[key="theme_toggle"]:hover {
+            border-color: #E30613 !important;
+            background-color: #1E293B !important;
         }
 
-        /* Fondo Oscuro */
-        .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
-            background-color: #0E1117 !important;
-            color: #FF3333 !important;
+        /* Fondo y Textos Modo Oscuro */
+        .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stSidebar"] {
+            background-color: #111827 !important;
+            color: #F3F4F6 !important;
+        }
+        h1, h2, h3, h4, h5, h6, p, span, label, div, td, th, .stMarkdown {
+            color: #F3F4F6 !important;
         }
 
-        /* Letras Rojas */
-        p, span, label, h1, h2, h3, h4, h5, h6, div, td, th, caption, .stMarkdown {
-            color: #FF3333 !important;
-        }
-
-        /* Botones Rojos */
-        button:not([key="theme_toggle"]) {
-            background-color: #CC0000 !important;
+        /* Inputs y Selectores */
+        input, select, textarea, div[data-baseweb="select"] > div {
+            background-color: #1F2937 !important;
             color: #FFFFFF !important;
-            border: 1px solid #FF4D4D !important;
-            font-weight: bold !important;
+            border-color: #374151 !important;
+        }
+        div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
+            background-color: #1F2937 !important;
+        }
+        li[role="option"] {
+            color: #F3F4F6 !important;
+            background-color: #1F2937 !important;
+        }
+        li[role="option"]:hover, li[aria-selected="true"] {
+            background-color: #374151 !important;
+            color: #FF4D4D !important;
+        }
+
+        /* Botones Rojo ENAEX */
+        button:not([key="theme_toggle"]) {
+            background-color: #E30613 !important;
+            color: #FFFFFF !important;
+            border: none !important;
+            font-weight: 600 !important;
+            border-radius: 6px !important;
         }
         button:not([key="theme_toggle"]):hover {
-            background-color: #FF0000 !important;
+            background-color: #FF1A27 !important;
             color: #FFFFFF !important;
-            border-color: #FF6666 !important;
         }
 
-        /* Entradas de texto y selectores */
-        input, select, textarea, div[data-baseweb="select"] {
-            background-color: #1E2329 !important;
-            color: #FF3333 !important;
-            border-color: #CC0000 !important;
+        /* Pestañas */
+        button[data-baseweb="tab"] {
+            color: #9CA3AF !important;
+        }
+        button[aria-selected="true"][data-baseweb="tab"] {
+            color: #FF4D4D !important;
+            border-bottom-color: #FF4D4D !important;
         }
 
         /* Contenedor Login */
         [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
-            background-color: #1E2329 !important;
+            background-color: #1F2937 !important;
             padding: 2rem !important;
             border-radius: 12px !important;
-            border: 1px solid #CC0000 !important;
+            border: 1px solid #374151 !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -148,13 +216,6 @@ else:
 
 # ---- 0. Función de Clasificación ----
 def determinar_tipo_ariba(row):
-    """
-    Clasifica las solicitudes garantizando la detección de Ariba No Catalogada:
-    - ⚙️ SAP ERP: Serie 1 (100...), Serie 19, CL...
-    - ⚪ SAP MRP: Serie 5 (500...) o marca de Solped MRP.
-    - 🟢 ARIBA CATALOGADA / DIRECTA: Flujos directos o catalogados con material.
-    - 🔵 ARIBA NO CATALOGADA: Serie 6 sin código de material, en Trazabilidad o sin catálogo.
-    """
     sol = str(row.get("Solicitud de pedido", "")).strip()
     material = str(row.get("Material", "")).strip()
     tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0", "null"])
@@ -370,9 +431,7 @@ with tab_dx:
     if estados:
         df_f = df_f[df_f["Estado Solped"].isin(estados)]
     checkpoints.append(("3. Tras filtro Estado Solped (total)", len(df_f)))
-    checkpoints.append(("3a. Sin pedido (antes de jerarquía)", (df_f["Estado Solped"] == "Sin pedido").sum()))
-    checkpoints.append(("3b. Pedido incompleto (antes de jerarquía)", (df_f["Estado Solped"] == "Pedido incompleto").sum()))
-    checkpoints.append(("3c. Pedido completo (antes de jerarquía)", (df_f["Estado Solped"] == "Pedido completo").sum()))
+
     _snapshot("3. Tras Estado Solped", df_f)
 
     # ---- Jerarquía Año / Mes / Día ----
@@ -399,10 +458,6 @@ with tab_dx:
             cond_fecha &= df_f["Fecha de pedido"].dt.date.isin(fechas)
         df_f = df_f[~es_pedido_completo | (es_pedido_completo & cond_fecha)]
 
-    checkpoints.append(("4a. Sin pedido tras jerarquía", (df_f["Estado Solped"] == "Sin pedido").sum()))
-    checkpoints.append(("4b. Pedido incompleto tras jerarquía", (df_f["Estado Solped"] == "Pedido incompleto").sum()))
-    checkpoints.append(("4c. Pedido completo tras jerarquía", (df_f["Estado Solped"] == "Pedido completo").sum()))
-    checkpoints.append(("4. Total tras jerarquía de fecha", len(df_f)))
     _snapshot("4. Tras jerarquía Año/Mes/Día", df_f)
 
     # ---- Solped MRP y Cumple ----
@@ -414,20 +469,16 @@ with tab_dx:
 
     if solped_mrp:
         df_f = df_f[df_f["Solped MRP"].isin(solped_mrp)]
-    checkpoints.append(("5. Tras filtro Solped MRP", len(df_f)))
     _snapshot("5. Tras Solped MRP", df_f)
 
     if cumple:
         df_f = df_f[df_f["Cumple"].isin(cumple)]
-    checkpoints.append(("6. Tras filtro Cumple", len(df_f)))
     _snapshot("6. Tras Cumple", df_f)
 
     st.divider()
     st.subheader("Filtro por días de gestión (Nivel de Servicio)")
 
     if len(df_f):
-        n_negativos = (df_f["Nivel de Servicio"] < 0).sum()
-
         f1, f2 = st.columns([1, 2])
         with f1:
             excluir_negativos = st.checkbox(
@@ -453,7 +504,6 @@ with tab_dx:
 
         df_f = df_f[df_f["Nivel de Servicio"].between(rango_ns[0], rango_ns[1])]
 
-    checkpoints.append(("7. Tras filtro Nivel de Servicio (RESULTADO FINAL)", len(df_f)))
     _snapshot("7. RESULTADO FINAL", df_f)
 
     # ---- Diagnóstico de filtrado ----
@@ -470,32 +520,35 @@ with tab_dx:
         csv = df_f.to_csv(index=False).encode("utf-8")
         st.download_button("Descargar detalle filtrado (CSV)", csv, "detalle_filtrado.csv", "text/csv")
 
-    # ---- Tarjetas KPI ----
-    VERDE, VERDE_BORDE = "rgba(35, 145, 75, 0.16)", "rgba(35, 145, 75, 0.55)"
-    ROJO, ROJO_BORDE = "rgba(204, 0, 0, 0.14)", "rgba(204, 0, 0, 0.55)"
+    # ---- Tarjetas KPI Corporativas ENAEX ----
+    VERDE = "rgba(16, 185, 129, 0.12)"
+    VERDE_BORDE = "rgba(16, 185, 129, 0.45)"
+    ROJO = "rgba(227, 6, 19, 0.12)"
+    ROJO_BORDE = "rgba(227, 6, 19, 0.45)"
+    NEUTRO = "rgba(100, 116, 139, 0.1)"
+    NEUTRO_BORDE = "rgba(100, 116, 139, 0.3)"
 
     pct_cumplimiento = (df_f["Cumple"] == "Cumple").sum() / max(len(df_f), 1) * 100
     promedio_dias = df_f["Nivel de Servicio"].mean()
     promedio_lead_time = df_f["Lead Time Total"].mean() if "Lead Time Total" in df_f.columns else float("nan")
     pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
-    # Color de texto dinámico en tarjetas KPI
-    color_texto_card = "#FF3333" if st.session_state["tema"] == "oscuro" else "#404B55"
+    color_texto_card = "#1E252B" if st.session_state["tema"] == "claro" else "#F3F4F6"
 
-    def tarjeta(titulo: str, valor: str, subtitulo: str = "", fondo: str = "rgba(64,75,85,0.07)", borde: str = "rgba(64,75,85,0.35)") -> str:
-        html_sub = f'<div style="font-size:0.78rem;color:{color_texto_card};margin-top:4px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
+    def tarjeta(titulo: str, valor: str, subtitulo: str = "", fondo: str = NEUTRO, borde: str = NEUTRO_BORDE) -> str:
+        html_sub = f'<div style="font-size:0.8rem;color:{color_texto_card};margin-top:6px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
         return (
-            f'<div style="background:{fondo};border:1.5px solid {borde};border-radius:8px;'
-            f'padding:12px 18px;text-align:center;">'
-            f'<div style="font-size:0.78rem;color:{color_texto_card};font-weight:600;letter-spacing:.03em;'
-            f'text-transform:uppercase;opacity:.85;margin-bottom:4px;">{titulo}</div>'
-            f'<div style="font-size:2rem;font-weight:700;color:{color_texto_card};line-height:1.1;">{valor}</div>'
+            f'<div style="background:{fondo};border:1.5px solid {borde};border-radius:10px;'
+            f'padding:16px 20px;text-align:center;">'
+            f'<div style="font-size:0.75rem;color:{color_texto_card};font-weight:700;letter-spacing:.05em;'
+            f'text-transform:uppercase;opacity:.85;margin-bottom:6px;">{titulo}</div>'
+            f'<div style="font-size:2.2rem;font-weight:800;color:{color_texto_card};line-height:1.1;">{valor}</div>'
             f'{html_sub}'
             f'</div>'
         )
 
     if pd.isna(promedio_dias):
-        f_dias, b_dias, txt_dias = "rgba(64,75,85,0.07)", "rgba(64,75,85,0.35)", "-"
+        f_dias, b_dias, txt_dias = NEUTRO, NEUTRO_BORDE, "-"
     elif promedio_dias > 10:
         f_dias, b_dias, txt_dias = ROJO, ROJO_BORDE, f"{promedio_dias:.0f}"
     else:
@@ -523,9 +576,9 @@ with tab_dx:
 
     st.divider()
 
-    # ---- Estilo corporativo Enaex ----
-    ENAEX_GRIS = "#404B55" if st.session_state["tema"] == "claro" else "#1E2329"
-    ENAEX_ROJO = "#CC0000"
+    # ---- Estilo de Tablas ENAEX ----
+    ENAEX_CHARCOAL = "#1E252B"
+    ENAEX_ROJO = "#E30613"
 
     def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bool = False) -> str:
         cols = list(tabla.columns)
@@ -541,27 +594,33 @@ with tab_dx:
                 return f"{val:,.0f}"
             return str(val)
 
-        pad = "4px 6px" if compacta else "7px 12px"
-        pad_th = "5px 6px" if compacta else "9px 12px"
-        fuente = "0.72rem" if compacta else "0.86rem"
-        fuente_th = "0.66rem" if compacta else "0.82rem"
+        pad = "5px 8px" if compacta else "8px 14px"
+        pad_th = "7px 8px" if compacta else "10px 14px"
+        fuente = "0.78rem" if compacta else "0.88rem"
+        fuente_th = "0.72rem" if compacta else "0.84rem"
 
-        color_texto_tabla = "#FF3333" if st.session_state["tema"] == "oscuro" else ENAEX_GRIS
+        color_texto_tabla = "#1E252B" if st.session_state["tema"] == "claro" else "#F3F4F6"
+        borde_tabla = "#E2E8F0" if st.session_state["tema"] == "claro" else "#374151"
 
         filas = []
         for i, r in enumerate(tabla.itertuples(index=False)):
             es_total = str(r[0]) == "TOTAL"
             if es_total:
-                estilo_fila = f"background:{ENAEX_GRIS};color:#fff;font-weight:700;border-top:2px solid {ENAEX_ROJO};"
+                estilo_fila = f"background:{ENAEX_CHARCOAL};color:#FFFFFF;font-weight:700;border-top:2px solid {ENAEX_ROJO};"
             else:
-                fondo = "#ffffff" if (i % 2 == 0 and st.session_state["tema"] == "claro") else ("#f4f5f7" if st.session_state["tema"] == "claro" else "#14181d")
+                if st.session_state["tema"] == "claro":
+                    fondo = "#FFFFFF" if (i % 2 == 0) else "#F8FAFC"
+                else:
+                    fondo = "#111827" if (i % 2 == 0) else "#1F2937"
                 estilo_fila = f"background:{fondo};color:{color_texto_tabla};"
+            
             celdas = []
             for j, c in enumerate(cols):
                 align = "left" if j == 0 else "right"
+                texto_color_celda = "#FFFFFF" if es_total else color_texto_tabla
                 celdas.append(
-                    f'<td style="padding:{pad};text-align:{align};'
-                    f'border-bottom:1px solid #343b44;white-space:nowrap;">{_fmt(c, r[j])}</td>'
+                    f'<td style="padding:{pad};text-align:{align};color:{texto_color_celda};'
+                    f'border-bottom:1px solid {borde_tabla};white-space:nowrap;">{_fmt(c, r[j])}</td>'
                 )
             filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
@@ -573,7 +632,8 @@ with tab_dx:
         }
         encabezados = "".join(
             f'<th style="padding:{pad_th};text-align:{"left" if j == 0 else "right"};'
-            f'background:{ENAEX_GRIS};color:#fff;font-weight:600;font-size:{fuente_th};'
+            f'background:{ENAEX_CHARCOAL};color:#FFFFFF;font-weight:700;font-size:{fuente_th};'
+            f'border-bottom:2px solid {ENAEX_ROJO};'
             f'letter-spacing:.02em;position:sticky;top:0;z-index:2;white-space:nowrap;">'
             f"{abrev.get(c, c) if compacta else c}</th>"
             for j, c in enumerate(cols)
@@ -584,20 +644,20 @@ with tab_dx:
 
         tabla_html = (
             f'<table style="width:100%;min-width:{ancho_min};border-collapse:collapse;font-size:{fuente};'
-            f'font-family:inherit;border:1px solid #d8dbdf;">'
+            f'font-family:inherit;border:1px solid {borde_tabla};">'
             f'<thead><tr>{encabezados}</tr></thead>'
             f'<tbody>{cuerpo_tabla}</tbody>'
             f'</table>'
         )
 
         alto = f"max-height:{max_height}px;overflow-y:auto;" if max_height else ""
-        return f'<div style="{alto}overflow-x:auto;border:1px solid #d8dbdf;border-radius:4px;">{tabla_html}</div>'
+        return f'<div style="{alto}overflow-x:auto;border:1px solid {borde_tabla};border-radius:8px;">{tabla_html}</div>'
 
     # ---- Tabla por Comprador ----
     st.subheader("Por comprador")
     st.caption(
         "Asignación por **grupo de compras**: las líneas MRP se reparten entre los "
-        "compradores responsables de cada grupo, en vez de concentrarse en el responsable de MRP."
+        "compradores responsables de cada grupo."
     )
     col_comprador = (
         "Comprador (Grupo de compras)"
@@ -696,8 +756,8 @@ with tab_dx:
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.utils import get_column_letter
 
-        gris = "FF404B55"
-        rojo = "FFCC0000"
+        gris = "FF1E252B"
+        rojo = "FFE30613"
         fuente_base = "Arial"
 
         wb = Workbook()
