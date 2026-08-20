@@ -21,32 +21,54 @@ except ImportError:
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
 # ==============================================================================
-# CONTROLES Y ESTILOS DE TEMA DINÁMICO (Blanco Brillante / Azul Marino)
+# CONTROLES Y ESTILOS DE TEMA DINÁMICO (Predeterminado: Modo Claro)
 # ==============================================================================
 if "tema" not in st.session_state:
-    st.session_state["tema"] = "dark"  # Estado inicial por defecto: Azul Marino
+    st.session_state["tema"] = "light"  # Modo Claro predeterminado
 
-icono_boton = "☀️ Modo Claro" if st.session_state["tema"] == "dark" else "🌙 Modo Oscuro"
+# Encabezado superior compacto para alojar únicamente el icono del tema en la esquina
+top_col1, top_col2 = st.columns([0.96, 0.04])
+with top_col2:
+    icono_tema = "🌙" if st.session_state["tema"] == "light" else "☀️"
+    if st.button(icono_tema, key="btn_toggle_tema", help="Cambiar modo Claro / Oscuro"):
+        st.session_state["tema"] = "dark" if st.session_state["tema"] == "light" else "light"
+        st.rerun()
 
-# Botón desplegado en la barra lateral
-if st.sidebar.button(icono_boton, use_container_width=True):
-    st.session_state["tema"] = "light" if st.session_state["tema"] == "dark" else "dark"
-    st.rerun()
-
-# Inyección de CSS según selección
+# CSS Robusto para evitar que las letras/etiquetas se vuelvan invisibles
 if st.session_state["tema"] == "dark":
     st.markdown(
         """
         <style>
+        /* Fondo general Oscuro */
         .stApp {
             background-color: #0d1b2a !important;
-            color: #e0e1dd !important;
+            color: #f1f5f9 !important;
         }
+        /* Sidebar */
         [data-testid="stSidebar"] {
             background-color: #1b263b !important;
         }
-        [data-testid="stHeader"] {
-            background-color: rgba(13, 27, 42, 0.8) !important;
+        [data-testid="stSidebar"] * {
+            color: #f1f5f9 !important;
+        }
+        /* Textos, títulos y etiquetas de controles */
+        h1, h2, h3, h4, h5, h6, p, label, span, div, .stMarkdown, [data-testid="stCaptionContainer"] {
+            color: #f1f5f9 !important;
+        }
+        /* Inputs, Selects y Multiselects */
+        div[data-baseweb="select"] > div, input, textarea {
+            background-color: #1e293b !important;
+            color: #ffffff !important;
+            border-color: #475569 !important;
+        }
+        /* Opciones desplegables dentro de selectores */
+        ul[role="listbox"] li {
+            background-color: #1e293b !important;
+            color: #ffffff !important;
+        }
+        /* Sliders */
+        [data-testid="stSlider"] * {
+            color: #f1f5f9 !important;
         }
         </style>
         """,
@@ -56,12 +78,28 @@ else:
     st.markdown(
         """
         <style>
+        /* Fondo general Claro */
         .stApp {
             background-color: #ffffff !important;
-            color: #1e293b !important;
+            color: #0f172a !important;
         }
+        /* Sidebar */
         [data-testid="stSidebar"] {
             background-color: #f8fafc !important;
+        }
+        /* Textos, títulos y etiquetas */
+        h1, h2, h3, h4, h5, h6, p, label, span, .stMarkdown, [data-testid="stCaptionContainer"] {
+            color: #0f172a !important;
+        }
+        /* Inputs, Selects y Multiselects */
+        div[data-baseweb="select"] > div, input, textarea {
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+            border-color: #cbd5e1 !important;
+        }
+        /* Sliders */
+        [data-testid="stSlider"] * {
+            color: #0f172a !important;
         }
         </style>
         """,
@@ -190,7 +228,6 @@ with tab_dx:
             return (archivo.name, archivo.size)
         return archivo
 
-    # 🔹 CAMBIO: Se añade el estado de la trazabilidad a la clave de caché
     clave_actual = (
         _clave_archivo(archivo_data),
         _clave_archivo(archivo_resp_grupo),
@@ -213,7 +250,6 @@ with tab_dx:
         df_calculado["Mes"] = df_calculado["Fecha de pedido"].dt.month
         df_calculado["Día"] = df_calculado["Fecha de pedido"].dt.day
 
-        # 🔹 CAMBIO: Se realiza el cruce con la Trazabilidad procesada antes de clasificar
         if "df_trazabilidad_limpio" in st.session_state:
             df_traz = st.session_state["df_trazabilidad_limpio"]
             col_traz = "Solicitud de pedido" if "Solicitud de pedido" in df_traz.columns else "Solped SAP (600)"
@@ -395,7 +431,7 @@ with tab_dx:
         csv = df_f.to_csv(index=False).encode("utf-8")
         st.download_button("Descargar detalle filtrado (CSV)", csv, "detalle_filtrado.csv", "text/csv")
 
-    # ---- Tarjetas KPI ----
+    # ---- Tarjetas KPI adaptativas al tema ----
     VERDE, VERDE_BORDE = "rgba(35, 145, 75, 0.16)", "rgba(35, 145, 75, 0.55)"
     ROJO, ROJO_BORDE = "rgba(204, 0, 0, 0.14)", "rgba(204, 0, 0, 0.55)"
 
@@ -404,14 +440,17 @@ with tab_dx:
     promedio_lead_time = df_f["Lead Time Total"].mean() if "Lead Time Total" in df_f.columns else float("nan")
     pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
+    color_texto_kpi = "#f1f5f9" if st.session_state["tema"] == "dark" else "#404B55"
+    color_sub_kpi = "#cbd5e1" if st.session_state["tema"] == "dark" else "#555555"
+
     def tarjeta(titulo: str, valor: str, subtitulo: str = "", fondo: str = "rgba(64,75,85,0.07)", borde: str = "rgba(64,75,85,0.35)") -> str:
-        html_sub = f'<div style="font-size:0.78rem;color:#555;margin-top:4px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
+        html_sub = f'<div style="font-size:0.78rem;color:{color_sub_kpi};margin-top:4px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
         return (
             f'<div style="background:{fondo};border:1.5px solid {borde};border-radius:8px;'
             f'padding:12px 18px;text-align:center;">'
-            f'<div style="font-size:0.78rem;color:#404B55;font-weight:600;letter-spacing:.03em;'
+            f'<div style="font-size:0.78rem;color:{color_texto_kpi};font-weight:600;letter-spacing:.03em;'
             f'text-transform:uppercase;opacity:.85;margin-bottom:4px;">{titulo}</div>'
-            f'<div style="font-size:2rem;font-weight:700;color:#404B55;line-height:1.1;">{valor}</div>'
+            f'<div style="font-size:2rem;font-weight:700;color:{color_texto_kpi};line-height:1.1;">{valor}</div>'
             f'{html_sub}'
             f'</div>'
         )
@@ -600,7 +639,7 @@ with tab_dx:
                     "Comentario", help="Anotación libre para el registro semanal", width="medium"
                 ),
                 "Nivel de Servicio": st.column_config.NumberColumn("Nivel de Servicio (días)"),
-                "Lead Time Total": None,  # 👈 Oculto visualmente del frontend
+                "Lead Time Total": None,  # Oculto visualmente del frontend
             },
             disabled=[c for c in detalle.columns if c != "Comentario"],
         )
@@ -785,7 +824,6 @@ with tab_trazabilidad:
                         st.session_state["df_trazabilidad_cadena"] = df_cadena
                         st.session_state["df_trazabilidad_limpio"] = df_resumen
 
-                        # 🔹 CAMBIO: Borrar la caché del pipeline para obligar a recalcular la Pestaña 1
                         st.session_state.pop("_clave_pipeline", None)
                         st.success("¡Trazabilidad procesada con éxito! La pestaña Dx Compradores ha sido actualizada.")
                         st.rerun()
