@@ -37,10 +37,10 @@ if st.button(icono_tema, key="theme_toggle", help="Cambiar Modo Claro / Oscuro")
 
 # 3. Inyección de Estilos CSS según el tema seleccionado
 if st.session_state["tema"] == "claro":
-    # MODO CLARO: Inspirado en interfaz sobria y limpia estilo "Productos de Lujo"
+    # MODO CLARO: Texto azul de alto contraste y componentes legibles sobre fondo blanco
     st.markdown("""
         <style>
-        /* 1. Icono Luna/Sol 100% Transparente */
+        /* 1. Icono Luna/Sol Transparente */
         .st-key-theme_toggle {
             position: fixed !important;
             top: 10px !important;
@@ -57,7 +57,7 @@ if st.session_state["tema"] == "claro":
             padding: 0 !important;
             font-size: 1.4rem !important;
             cursor: pointer !important;
-            color: #111111 !important;
+            color: #1D4ED8 !important;
         }
         .st-key-theme_toggle button:hover {
             background: transparent !important;
@@ -66,79 +66,99 @@ if st.session_state["tema"] == "claro":
             transform: scale(1.15) !important;
         }
 
-        /* 2. Fondo Blanco Puro y Tipografía Negrita/Limpia */
+        /* 2. Fondo Blanco Puro y Tipografía Azul */
         .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
             background-color: #FFFFFF !important;
-            color: #111111 !important;
+            color: #1D4ED8 !important;
         }
         p, span, label, h1, h2, h3, h4, h5, h6, div, td, th, caption, .stMarkdown {
-            color: #111111 !important;
+            color: #1D4ED8 !important;
         }
 
-        /* 3. Inputs, Selectores y Filtros Estilo "Buscador Limpio" */
-        input, select, textarea, div[data-baseweb="select"] > div {
-            background-color: #F4F4F5 !important;
-            color: #111111 !important;
-            border: 1px solid #E4E4E7 !important;
+        /* 3. Inputs, Selectores y Filtros con Texto Azul Legible */
+        input, select, textarea {
+            background-color: #F8FAFC !important;
+            color: #1D4ED8 !important;
+            -webkit-text-fill-color: #1D4ED8 !important;
+            border: 1px solid #CBD5E1 !important;
             border-radius: 8px !important;
         }
-        /* Flechas de desplegables neutrales (sin rojo) */
-        div[data-baseweb="select"] svg {
-            fill: #52525B !important;
-        }
-        div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
-            background-color: #FFFFFF !important;
-            border: 1px solid #E4E4E7 !important;
-        }
-        li[role="option"] {
-            color: #111111 !important;
-            background-color: #FFFFFF !important;
-        }
-        li[role="option"]:hover, li[aria-selected="true"] {
-            background-color: #F4F4F5 !important;
-            color: #000000 !important;
+
+        div[data-baseweb="select"], div[data-baseweb="select"] > div {
+            background-color: #F8FAFC !important;
+            border-color: #CBD5E1 !important;
+            border-radius: 8px !important;
         }
 
-        /* 4. Botones Sobrios (Neutros, sin saturación roja) */
+        div[data-baseweb="select"] * {
+            color: #1D4ED8 !important;
+            -webkit-text-fill-color: #1D4ED8 !important;
+        }
+
+        div[data-baseweb="select"] svg {
+            fill: #1D4ED8 !important;
+        }
+
+        div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
+            background-color: #FFFFFF !important;
+            border: 1px solid #CBD5E1 !important;
+        }
+
+        li[role="option"] {
+            color: #1D4ED8 !important;
+            background-color: #FFFFFF !important;
+        }
+
+        li[role="option"]:hover, li[aria-selected="true"] {
+            background-color: #EFF6FF !important;
+            color: #1E40AF !important;
+        }
+
+        /* 4. Botones Azules Destacados */
         div[data-testid="stButton"] > button:not(.st-key-theme_toggle button),
         div[data-testid="stForm"] button {
-            background-color: #18181B !important;
+            background-color: #2563EB !important;
             color: #FFFFFF !important;
-            border: 1px solid #18181B !important;
+            border: 1px solid #2563EB !important;
             font-weight: 600 !important;
             border-radius: 8px !important;
         }
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button) *,
+        div[data-testid="stForm"] button * {
+            color: #FFFFFF !important;
+            -webkit-text-fill-color: #FFFFFF !important;
+        }
         div[data-testid="stButton"] > button:not(.st-key-theme_toggle button):hover,
         div[data-testid="stForm"] button:hover {
-            background-color: #27272A !important;
+            background-color: #1D4ED8 !important;
             color: #FFFFFF !important;
-            border-color: #27272A !important;
+            border-color: #1D4ED8 !important;
         }
 
-        /* 5. Pestañas Modernas */
+        /* 5. Pestañas */
         button[data-baseweb="tab"] {
-            color: #71717A !important;
+            color: #3B82F6 !important;
             background: transparent !important;
             font-weight: 500 !important;
         }
         button[aria-selected="true"][data-baseweb="tab"] {
-            color: #18181B !important;
-            border-bottom: 2px solid #18181B !important;
+            color: #1D4ED8 !important;
+            border-bottom: 2px solid #1D4ED8 !important;
             font-weight: 700 !important;
         }
 
-        /* 6. Tarjeta Login Limpia */
+        /* 6. Formulario / Tarjeta de Login */
         [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
             background-color: #FFFFFF !important;
             padding: 2.5rem !important;
             border-radius: 12px !important;
-            border: 1px solid #E4E4E7 !important;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.03) !important;
+            border: 1px solid #CBD5E1 !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05) !important;
         }
         </style>
     """, unsafe_allow_html=True)
 else:
-    # MODO OSCURO ACTUALIZADO: Texto Azul y Bordes Modernos con Glow
+    # MODO OSCURO: Texto Azul y Bordes Modernos con Glow
     st.markdown("""
         <style>
         /* 1. Icono Luna/Sol */
@@ -259,13 +279,6 @@ else:
 
 # ---- 0. Función de Clasificación ----
 def determinar_tipo_ariba(row):
-    """
-    Clasifica las solicitudes garantizando la detección de Ariba No Catalogada:
-    - ⚙️ SAP ERP: Serie 1 (100...), Serie 19, CL...
-    - ⚪ SAP MRP: Serie 5 (500...) o marca de Solped MRP.
-    - 🟢 ARIBA CATALOGADA / DIRECTA: Flujos directos o catalogados con material.
-    - 🔵 ARIBA NO CATALOGADA: Serie 6 sin código de material, en Trazabilidad o sin catálogo.
-    """
     sol = str(row.get("Solicitud de pedido", "")).strip()
     material = str(row.get("Material", "")).strip()
     tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0", "null"])
@@ -590,7 +603,7 @@ with tab_dx:
     promedio_lead_time = df_f["Lead Time Total"].mean() if "Lead Time Total" in df_f.columns else float("nan")
     pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
-    color_texto_card = "#60A5FA" if st.session_state["tema"] == "oscuro" else "#111111"
+    color_texto_card = "#60A5FA" if st.session_state["tema"] == "oscuro" else "#1D4ED8"
 
     def tarjeta(titulo: str, valor: str, subtitulo: str = "", fondo: str = "rgba(64,75,85,0.07)", borde: str = "rgba(64,75,85,0.35)") -> str:
         html_sub = f'<div style="font-size:0.78rem;color:{color_texto_card};margin-top:4px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
@@ -656,7 +669,7 @@ with tab_dx:
         fuente = "0.72rem" if compacta else "0.86rem"
         fuente_th = "0.66rem" if compacta else "0.82rem"
 
-        color_texto_tabla = "#60A5FA" if st.session_state["tema"] == "oscuro" else "#111111"
+        color_texto_tabla = "#60A5FA" if st.session_state["tema"] == "oscuro" else "#1D4ED8"
 
         filas = []
         for i, r in enumerate(tabla.itertuples(index=False)):
