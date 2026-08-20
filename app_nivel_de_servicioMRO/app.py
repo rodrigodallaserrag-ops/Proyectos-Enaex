@@ -38,53 +38,52 @@ if st.button(icono_tema, key="theme_toggle", help="Cambiar Modo Claro / Oscuro")
 if st.session_state["tema"] == "claro":
     st.markdown("""
         <style>
-        /* Posicionamiento fijo del botón en la barra superior (a la izquierda de Fork) */
+        /* Posicionamiento fijo del botón transparente a la izquierda del menú superior */
         .st-key-theme_toggle,
         div[data-testid="stElementContainer"]:has(button[key="theme_toggle"]) {
             position: fixed !important;
             top: 8px !important;
-            right: 145px !important;
+            right: 220px !important;
             z-index: 999999 !important;
             width: auto !important;
             margin: 0 !important;
         }
         button[key="theme_toggle"] {
             background: transparent !important;
-            border: 1px solid #CBD5E1 !important;
-            border-radius: 50% !important;
-            width: 36px !important;
-            height: 36px !important;
-            padding: 0 !important;
-            font-size: 1.1rem !important;
-            cursor: pointer !important;
+            border: none !important;
             box-shadow: none !important;
-            color: #1E252B !important;
+            padding: 0 !important;
+            font-size: 1.3rem !important;
+            cursor: pointer !important;
+            outline: none !important;
         }
         button[key="theme_toggle"]:hover {
-            border-color: #E30613 !important;
-            background-color: #F1F5F9 !important;
+            background: transparent !important;
+            border: none !important;
+            transform: scale(1.15) !important;
+            transition: transform 0.2s ease !important;
         }
 
         /* Fondo y Textos Modo Claro ENAEX */
         .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stSidebar"] {
-            background-color: #F8F9FA !important;
-            color: #1E252B !important;
+            background-color: #F8FAFC !important;
+            color: #0F172A !important;
         }
         h1, h2, h3, h4, h5, h6, p, span, label, div, td, th, .stMarkdown {
-            color: #1E252B !important;
+            color: #0F172A !important;
         }
 
         /* Inputs y Selectores */
         input, select, textarea, div[data-baseweb="select"] > div {
             background-color: #FFFFFF !important;
-            color: #1E252B !important;
+            color: #0F172A !important;
             border-color: #CBD5E1 !important;
         }
         div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
             background-color: #FFFFFF !important;
         }
         li[role="option"] {
-            color: #1E252B !important;
+            color: #0F172A !important;
             background-color: #FFFFFF !important;
         }
         li[role="option"]:hover, li[aria-selected="true"] {
@@ -107,7 +106,7 @@ if st.session_state["tema"] == "claro":
 
         /* Pestañas */
         button[data-baseweb="tab"] {
-            color: #1E252B !important;
+            color: #475569 !important;
         }
         button[aria-selected="true"][data-baseweb="tab"] {
             color: #E30613 !important;
@@ -127,61 +126,63 @@ if st.session_state["tema"] == "claro":
 else:
     st.markdown("""
         <style>
-        /* Posicionamiento fijo del botón en la barra superior (a la izquierda de Fork) */
+        /* Posicionamiento fijo del botón transparente a la izquierda del menú superior */
         .st-key-theme_toggle,
         div[data-testid="stElementContainer"]:has(button[key="theme_toggle"]) {
             position: fixed !important;
             top: 8px !important;
-            right: 145px !important;
+            right: 220px !important;
             z-index: 999999 !important;
             width: auto !important;
             margin: 0 !important;
         }
         button[key="theme_toggle"] {
             background: transparent !important;
-            border: 1px solid #475569 !important;
-            border-radius: 50% !important;
-            width: 36px !important;
-            height: 36px !important;
-            padding: 0 !important;
-            font-size: 1.1rem !important;
-            cursor: pointer !important;
+            border: none !important;
             box-shadow: none !important;
-            color: #F8FAFC !important;
+            padding: 0 !important;
+            font-size: 1.3rem !important;
+            cursor: pointer !important;
+            outline: none !important;
         }
         button[key="theme_toggle"]:hover {
-            border-color: #E30613 !important;
-            background-color: #1E293B !important;
+            background: transparent !important;
+            border: none !important;
+            transform: scale(1.15) !important;
+            transition: transform 0.2s ease !important;
         }
 
         /* Fondo y Textos Modo Oscuro */
         .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stSidebar"] {
-            background-color: #111827 !important;
-            color: #F3F4F6 !important;
+            background-color: #0F172A !important;
+            color: #F8FAFC !important;
         }
-        h1, h2, h3, h4, h5, h6, p, span, label, div, td, th, .stMarkdown {
-            color: #F3F4F6 !important;
+        h1, h2, h3, h4, h5, h6 {
+            color: #FFFFFF !important;
+        }
+        p, span, label, div, td, th, .stMarkdown {
+            color: #F8FAFC !important;
         }
 
-        /* Inputs y Selectores */
+        /* Inputs y Selectores en Modo Oscuro */
         input, select, textarea, div[data-baseweb="select"] > div {
-            background-color: #1F2937 !important;
+            background-color: #1E293B !important;
             color: #FFFFFF !important;
-            border-color: #374151 !important;
+            border-color: #334155 !important;
         }
         div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
-            background-color: #1F2937 !important;
+            background-color: #1E293B !important;
         }
         li[role="option"] {
-            color: #F3F4F6 !important;
-            background-color: #1F2937 !important;
+            color: #F8FAFC !important;
+            background-color: #1E293B !important;
         }
         li[role="option"]:hover, li[aria-selected="true"] {
-            background-color: #374151 !important;
-            color: #FF4D4D !important;
+            background-color: #334155 !important;
+            color: #E30613 !important;
         }
 
-        /* Botones Rojo ENAEX */
+        /* Botones Rojo ENAEX en Modo Oscuro */
         button:not([key="theme_toggle"]) {
             background-color: #E30613 !important;
             color: #FFFFFF !important;
@@ -196,19 +197,19 @@ else:
 
         /* Pestañas */
         button[data-baseweb="tab"] {
-            color: #9CA3AF !important;
+            color: #94A3B8 !important;
         }
         button[aria-selected="true"][data-baseweb="tab"] {
-            color: #FF4D4D !important;
-            border-bottom-color: #FF4D4D !important;
+            color: #E30613 !important;
+            border-bottom-color: #E30613 !important;
         }
 
         /* Contenedor Login */
         [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
-            background-color: #1F2937 !important;
+            background-color: #1E293B !important;
             padding: 2rem !important;
             border-radius: 12px !important;
-            border: 1px solid #374151 !important;
+            border: 1px solid #334155 !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -533,7 +534,7 @@ with tab_dx:
     promedio_lead_time = df_f["Lead Time Total"].mean() if "Lead Time Total" in df_f.columns else float("nan")
     pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
-    color_texto_card = "#1E252B" if st.session_state["tema"] == "claro" else "#F3F4F6"
+    color_texto_card = "#0F172A" if st.session_state["tema"] == "claro" else "#F8FAFC"
 
     def tarjeta(titulo: str, valor: str, subtitulo: str = "", fondo: str = NEUTRO, borde: str = NEUTRO_BORDE) -> str:
         html_sub = f'<div style="font-size:0.8rem;color:{color_texto_card};margin-top:6px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
@@ -599,8 +600,8 @@ with tab_dx:
         fuente = "0.78rem" if compacta else "0.88rem"
         fuente_th = "0.72rem" if compacta else "0.84rem"
 
-        color_texto_tabla = "#1E252B" if st.session_state["tema"] == "claro" else "#F3F4F6"
-        borde_tabla = "#E2E8F0" if st.session_state["tema"] == "claro" else "#374151"
+        color_texto_tabla = "#0F172A" if st.session_state["tema"] == "claro" else "#F8FAFC"
+        borde_tabla = "#E2E8F0" if st.session_state["tema"] == "claro" else "#334155"
 
         filas = []
         for i, r in enumerate(tabla.itertuples(index=False)):
@@ -611,7 +612,7 @@ with tab_dx:
                 if st.session_state["tema"] == "claro":
                     fondo = "#FFFFFF" if (i % 2 == 0) else "#F8FAFC"
                 else:
-                    fondo = "#111827" if (i % 2 == 0) else "#1F2937"
+                    fondo = "#0F172A" if (i % 2 == 0) else "#1E293B"
                 estilo_fila = f"background:{fondo};color:{color_texto_tabla};"
             
             celdas = []
