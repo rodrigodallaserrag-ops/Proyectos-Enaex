@@ -33,12 +33,12 @@ if st.button(icono_tema, key="theme_toggle", help="Alternar Modo Claro/Oscuro"):
     st.rerun()
 
 if st.session_state["tema"] == "claro":
-    # MODO CLARO: El diseño original se queda intacto. Solo estilizamos el botón.
+    # MODO CLARO: CSS ajustado para centrar el icono correctamente
     st.markdown("""
         <style>
         .st-key-theme_toggle {
             position: fixed !important;
-            top: 65px !important;
+            top: 15px !important;
             right: 60px !important;
             z-index: 999999 !important;
             width: auto !important;
@@ -49,7 +49,20 @@ if st.session_state["tema"] == "claro":
             box-shadow: none !important;
             font-size: 1.6rem !important;
             padding: 0 !important;
+            margin: 0 !important;
             color: #111111 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            line-height: 1 !important;
+            height: auto !important;
+            min-height: unset !important;
+        }
+        .st-key-theme_toggle button p {
+            margin: 0 !important;
+            padding: 0 !important;
+            line-height: 1 !important;
+            font-size: 1.6rem !important;
         }
         .st-key-theme_toggle button:hover {
             transform: scale(1.1) !important;
@@ -58,12 +71,12 @@ if st.session_state["tema"] == "claro":
         </style>
     """, unsafe_allow_html=True)
 else:
-    # MODO OSCURO: Se inyecta el CSS solicitado.
+    # MODO OSCURO: CSS ajustado para centrar el icono correctamente
     st.markdown("""
         <style>
         .st-key-theme_toggle {
             position: fixed !important;
-            top: 65px !important;
+            top: 15px !important;
             right: 60px !important;
             z-index: 999999 !important;
             width: auto !important;
@@ -74,7 +87,20 @@ else:
             box-shadow: none !important;
             font-size: 1.6rem !important;
             padding: 0 !important;
+            margin: 0 !important;
             color: #FF3333 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            line-height: 1 !important;
+            height: auto !important;
+            min-height: unset !important;
+        }
+        .st-key-theme_toggle button p {
+            margin: 0 !important;
+            padding: 0 !important;
+            line-height: 1 !important;
+            font-size: 1.6rem !important;
         }
         .st-key-theme_toggle button:hover {
             transform: scale(1.1) !important;
