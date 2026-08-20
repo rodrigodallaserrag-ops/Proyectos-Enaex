@@ -20,12 +20,6 @@ except ImportError:
 
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
-# Agregar la imagen limitando el ancho para que no ocupe toda la pantalla
-        st.image("enaex-logo.png", width=250) 
-        
-        st.title("Dx Compradores — Nivel de Servicio")
-        clave_ingresada = st.text_input("Contraseña de acceso", type="password")
-
 # ==============================================================================
 # OCULTAR NAVEGACIÓN GLOBAL (TRAZABILIDAD ARIBA)
 # ==============================================================================
@@ -219,6 +213,8 @@ def determinar_tipo_ariba(row):
 # ---- Acceso con contraseña ----
 if "app_password" in st.secrets:
     if not st.session_state.get("_autenticado"):
+        # Logo de Enaex agregado en la pantalla de acceso
+        st.image("enaex-logo.png", width=250)
         st.title("Dx Compradores — Nivel de Servicio")
         clave_ingresada = st.text_input("Contraseña de acceso", type="password")
         if st.button("Ingresar"):
@@ -238,6 +234,8 @@ tab_dx, tab_trazabilidad = st.tabs(["📊 Dx Compradores", "🔗 Trazabilidad No
 # PESTAÑA 1: DX COMPRADORES
 # ==============================================================================
 with tab_dx:
+    # Logo de Enaex agregado en el reporte principal
+    st.image("enaex-logo.png", width=250)
     st.title("Dx Compradores — Nivel de Servicio")
 
     # ---- Fuente de datos ----
