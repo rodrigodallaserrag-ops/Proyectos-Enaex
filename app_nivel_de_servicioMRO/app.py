@@ -29,7 +29,7 @@ st.set_page_config(
 if "tema" not in st.session_state:
     st.session_state["tema"] = "claro"
 
-# Botón flotante ubicado a la izquierda de 'Fork' en la barra superior
+# Botón del tema (Transparente)
 icono_tema = "🌙" if st.session_state["tema"] == "claro" else "☀️"
 if st.button(icono_tema, key="theme_toggle", help="Cambiar Modo Claro / Oscuro"):
     st.session_state["tema"] = "oscuro" if st.session_state["tema"] == "claro" else "claro"
@@ -37,71 +37,124 @@ if st.button(icono_tema, key="theme_toggle", help="Cambiar Modo Claro / Oscuro")
 
 # 3. Inyección de Estilos CSS según el tema seleccionado
 if st.session_state["tema"] == "claro":
-    # MODO CLARO: Fondo Blanco, Letras Negras
+    # MODO CLARO: Fondo Blanco Puro, Letras Negras, Botones Simples Legibles
     st.markdown("""
         <style>
-        /* Ubicación del botón de tema a la izquierda de Fork */
+        /* Ubicación del icono completamente transparente a la izquierda del menú superior */
+        .st-key-theme_toggle,
         div[data-testid="stElementContainer"]:has(button[key="theme_toggle"]) {
             position: fixed !important;
-            top: 10px !important;
-            right: 145px !important;
+            top: 8px !important;
+            right: 220px !important;
             z-index: 999999 !important;
             width: auto !important;
+            margin: 0 !important;
         }
         button[key="theme_toggle"] {
             background: transparent !important;
-            border: 1px solid #CCCCCC !important;
-            border-radius: 50% !important;
-            width: 36px !important;
-            height: 36px !important;
-            padding: 0 !important;
-            font-size: 1.2rem !important;
-            cursor: pointer !important;
+            border: none !important;
             box-shadow: none !important;
+            outline: none !important;
+            padding: 0 !important;
+            font-size: 1.3rem !important;
+            cursor: pointer !important;
             color: #111111 !important;
         }
-        
-        /* Fondo Blanco y Textos Negros */
-        .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body {
+        button[key="theme_toggle"]:hover {
+            background: transparent !important;
+            border: none !important;
+            transform: scale(1.15) !important;
+        }
+
+        /* Fondo Blanco Puro y Textos Negros */
+        .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
             background-color: #FFFFFF !important;
             color: #111111 !important;
         }
-        p, span, label, h1, h2, h3, h4, h5, h6, div, td, th, [data-testid="stHeader"] {
+        p, span, label, h1, h2, h3, h4, h5, h6, div, td, th, caption, .stMarkdown {
             color: #111111 !important;
         }
-        
+
+        /* Inputs y Selectores Limpios */
+        input, select, textarea, div[data-baseweb="select"] > div {
+            background-color: #FFFFFF !important;
+            color: #111111 !important;
+            border: 1px solid #CCCCCC !important;
+            border-radius: 6px !important;
+        }
+        div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
+            background-color: #FFFFFF !important;
+        }
+        li[role="option"] {
+            color: #111111 !important;
+            background-color: #FFFFFF !important;
+        }
+        li[role="option"]:hover, li[aria-selected="true"] {
+            background-color: #F0F0F0 !important;
+            color: #000000 !important;
+        }
+
+        /* Botones Modo Claro */
+        button:not([key="theme_toggle"]) {
+            background-color: #E30613 !important;
+            color: #FFFFFF !important;
+            border: none !important;
+            font-weight: 600 !important;
+            border-radius: 6px !important;
+        }
+        button:not([key="theme_toggle"]):hover {
+            background-color: #B3000B !important;
+            color: #FFFFFF !important;
+        }
+
+        /* Pestañas */
+        button[data-baseweb="tab"] {
+            color: #555555 !important;
+            background: transparent !important;
+        }
+        button[aria-selected="true"][data-baseweb="tab"] {
+            color: #E30613 !important;
+            border-bottom-color: #E30613 !important;
+        }
+
         /* Contenedor Login */
         [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
-            background-color: #F8F9FA !important;
+            background-color: #FFFFFF !important;
             padding: 2rem !important;
             border-radius: 12px !important;
-            border: 1px solid #D8DBDF !important;
+            border: 1px solid #E0E0E0 !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05) !important;
         }
         </style>
     """, unsafe_allow_html=True)
 else:
-    # MODO OSCURO: Fondo Oscuro, Letras y Botones Rojos
+    # MODO OSCURO ORIGINAL (Sin Cambios)
     st.markdown("""
         <style>
-        /* Ubicación del botón de tema a la izquierda de Fork */
+        /* Ubicación del icono completamente transparente */
+        .st-key-theme_toggle,
         div[data-testid="stElementContainer"]:has(button[key="theme_toggle"]) {
             position: fixed !important;
-            top: 10px !important;
-            right: 145px !important;
+            top: 8px !important;
+            right: 220px !important;
             z-index: 999999 !important;
             width: auto !important;
+            margin: 0 !important;
         }
         button[key="theme_toggle"] {
             background: transparent !important;
-            border: 1px solid #FF3333 !important;
-            border-radius: 50% !important;
-            width: 36px !important;
-            height: 36px !important;
-            padding: 0 !important;
-            font-size: 1.2rem !important;
-            cursor: pointer !important;
+            border: none !important;
             box-shadow: none !important;
+            outline: none !important;
+            padding: 0 !important;
+            font-size: 1.3rem !important;
+            cursor: pointer !important;
             color: #FF3333 !important;
+        }
+        button[key="theme_toggle"]:hover {
+            background: transparent !important;
+            border: none !important;
+            transform: scale(1.15) !important;
         }
 
         /* Fondo Oscuro */
@@ -479,8 +532,7 @@ with tab_dx:
     promedio_lead_time = df_f["Lead Time Total"].mean() if "Lead Time Total" in df_f.columns else float("nan")
     pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
-    # Color de texto dinámico en tarjetas KPI
-    color_texto_card = "#FF3333" if st.session_state["tema"] == "oscuro" else "#404B55"
+    color_texto_card = "#FF3333" if st.session_state["tema"] == "oscuro" else "#111111"
 
     def tarjeta(titulo: str, valor: str, subtitulo: str = "", fondo: str = "rgba(64,75,85,0.07)", borde: str = "rgba(64,75,85,0.35)") -> str:
         html_sub = f'<div style="font-size:0.78rem;color:{color_texto_card};margin-top:4px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
@@ -524,7 +576,7 @@ with tab_dx:
     st.divider()
 
     # ---- Estilo corporativo Enaex ----
-    ENAEX_GRIS = "#404B55" if st.session_state["tema"] == "claro" else "#1E2329"
+    ENAEX_GRIS = "#1E2329" if st.session_state["tema"] == "oscuro" else "#404B55"
     ENAEX_ROJO = "#CC0000"
 
     def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bool = False) -> str:
@@ -546,7 +598,7 @@ with tab_dx:
         fuente = "0.72rem" if compacta else "0.86rem"
         fuente_th = "0.66rem" if compacta else "0.82rem"
 
-        color_texto_tabla = "#FF3333" if st.session_state["tema"] == "oscuro" else ENAEX_GRIS
+        color_texto_tabla = "#FF3333" if st.session_state["tema"] == "oscuro" else "#111111"
 
         filas = []
         for i, r in enumerate(tabla.itertuples(index=False)):
@@ -554,14 +606,14 @@ with tab_dx:
             if es_total:
                 estilo_fila = f"background:{ENAEX_GRIS};color:#fff;font-weight:700;border-top:2px solid {ENAEX_ROJO};"
             else:
-                fondo = "#ffffff" if (i % 2 == 0 and st.session_state["tema"] == "claro") else ("#f4f5f7" if st.session_state["tema"] == "claro" else "#14181d")
+                fondo = "#ffffff" if (i % 2 == 0 and st.session_state["tema"] == "claro") else ("#f9f9f9" if st.session_state["tema"] == "claro" else "#14181d")
                 estilo_fila = f"background:{fondo};color:{color_texto_tabla};"
             celdas = []
             for j, c in enumerate(cols):
                 align = "left" if j == 0 else "right"
                 celdas.append(
                     f'<td style="padding:{pad};text-align:{align};'
-                    f'border-bottom:1px solid #343b44;white-space:nowrap;">{_fmt(c, r[j])}</td>'
+                    f'border-bottom:1px solid #d8dbdf;white-space:nowrap;">{_fmt(c, r[j])}</td>'
                 )
             filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
