@@ -142,12 +142,14 @@ with tab_dx:
             return (archivo.name, archivo.size)
         return archivo
 
+    # 🔹 CAMBIO: Se añade el estado de la trazabilidad a la clave de caché
     clave_actual = (
         _clave_archivo(archivo_data),
         _clave_archivo(archivo_resp_grupo),
         _clave_archivo(archivo_centro),
         _clave_archivo(archivo_mrp),
         pd.Timestamp(fecha_corte),
+        "df_trazabilidad_limpio" in st.session_state,
     )
 
     if st.session_state.get("_clave_pipeline") != clave_actual:
@@ -162,6 +164,30 @@ with tab_dx:
         df_calculado["Año"] = df_calculado["Fecha de pedido"].dt.year
         df_calculado["Mes"] = df_calculado["Fecha de pedido"].dt.month
         df_calculado["Día"] = df_calculado["Fecha de pedido"].dt.day
+
+        # 🔹 CAMBIO: Se realiza el cruce con la Trazabilidad procesada antes de clasificar
+        if "df_trazabilidad_limpio" in st.session_state:
+            df_traz = st.session_state["df_trazabilidad_limpio"]
+            col_traz = "Solicitud de pedido" if "Solicitud de pedido" in df_traz.columns else "Solped SAP (600)"
+            
+            solpeds_no_cat = set(
+                df_traz[col_traz]
+                .dropna()
+                .astype(str)
+                .str.strip()
+                .str.replace(r"\.0$", "", regex=True)
+            )
+
+            solpeds_me5a = (
+                df_calculado["Solicitud de pedido"]
+                .astype(str)
+                .str.strip()
+                .str.replace(r"\.0$", "", regex=True)
+            )
+
+            df_calculado["En_Trazabilidad"] = solpeds_me5a.isin(solpeds_no_cat)
+        else:
+            df_calculado["En_Trazabilidad"] = False
 
         df_calculado["Tipo Ariba"] = df_calculado.apply(determinar_tipo_ariba, axis=1)
 
@@ -711,7 +737,10 @@ with tab_trazabilidad:
                         st.session_state["df_trazabilidad_cadena"] = df_cadena
                         st.session_state["df_trazabilidad_limpio"] = df_resumen
 
-                        st.success("¡Trazabilidad procesada con éxito!")
+                        # 🔹 CAMBIO: Borrar la caché del pipeline para obligar a recalcular la Pestaña 1
+                        st.session_state.pop("_clave_pipeline", None)
+                        st.success("¡Trazabilidad procesada con éxito! La pestaña Dx Compradores ha sido actualizada.")
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Error al procesar el archivo: {e}")
 
