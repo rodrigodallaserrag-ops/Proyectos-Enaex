@@ -20,6 +20,54 @@ except ImportError:
 
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
+# ==============================================================================
+# CONTROLES Y ESTILOS DE TEMA DINÁMICO (Blanco Brillante / Azul Marino)
+# ==============================================================================
+if "tema" not in st.session_state:
+    st.session_state["tema"] = "dark"  # Estado inicial por defecto: Azul Marino
+
+icono_boton = "☀️ Modo Claro" if st.session_state["tema"] == "dark" else "🌙 Modo Oscuro"
+
+# Botón desplegado en la barra lateral
+if st.sidebar.button(icono_boton, use_container_width=True):
+    st.session_state["tema"] = "light" if st.session_state["tema"] == "dark" else "dark"
+    st.rerun()
+
+# Inyección de CSS según selección
+if st.session_state["tema"] == "dark":
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background-color: #0d1b2a !important;
+            color: #e0e1dd !important;
+        }
+        [data-testid="stSidebar"] {
+            background-color: #1b263b !important;
+        }
+        [data-testid="stHeader"] {
+            background-color: rgba(13, 27, 42, 0.8) !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+else:
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background-color: #ffffff !important;
+            color: #1e293b !important;
+        }
+        [data-testid="stSidebar"] {
+            background-color: #f8fafc !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
 
 # ---- 0. Función de Clasificación Corregida ----
 def determinar_tipo_ariba(row):
@@ -67,7 +115,7 @@ def determinar_tipo_ariba(row):
 if "app_password" in st.secrets:
     if not st.session_state.get("_autenticado"):
         st.title("Dx Compradores — Nivel de Servicio")
-        clave_ingresada = st.text_input("Contraseña de acceso", type="password")
+        clave_ingresada = st.text_input("Contraseña de acceso", type="password", autocomplete="off")
         if st.button("Ingresar"):
             if clave_ingresada == st.secrets["app_password"]:
                 st.session_state["_autenticado"] = True
