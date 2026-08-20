@@ -37,14 +37,14 @@ if st.button(icono_tema, key="theme_toggle", help="Cambiar Modo Claro / Oscuro")
 
 # 3. Inyección de Estilos CSS según el tema seleccionado
 if st.session_state["tema"] == "claro":
-    # MODO CLARO: Interfaz sobria y limpia
+    # MODO CLARO: Inspirado en interfaz sobria y limpia estilo "Productos de Lujo"
     st.markdown("""
         <style>
-        /* 1. Icono Luna/Sol (ubicado a la izquierda para dejar espacio a la animación de carga) */
+        /* 1. Icono Luna/Sol 100% Transparente */
         .st-key-theme_toggle {
             position: fixed !important;
             top: 10px !important;
-            right: 240px !important;
+            right: 180px !important;
             z-index: 999999 !important;
             width: auto !important;
         }
@@ -66,7 +66,7 @@ if st.session_state["tema"] == "claro":
             transform: scale(1.15) !important;
         }
 
-        /* 2. Fondo Blanco Puro y Tipografía General */
+        /* 2. Fondo Blanco Puro y Tipografía Negrita/Limpia */
         .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
             background-color: #FFFFFF !important;
             color: #111111 !important;
@@ -75,27 +75,14 @@ if st.session_state["tema"] == "claro":
             color: #111111 !important;
         }
 
-        /* 3. Inputs y Filtros Multiselect Legibles */
-        input, textarea, div[data-baseweb="select"] {
+        /* 3. Inputs, Selectores y Filtros Estilo "Buscador Limpio" */
+        input, select, textarea, div[data-baseweb="select"] > div {
             background-color: #F4F4F5 !important;
+            color: #111111 !important;
             border: 1px solid #E4E4E7 !important;
             border-radius: 8px !important;
         }
-        div[data-baseweb="select"] > div {
-            background-color: #F4F4F5 !important;
-            color: #111111 !important;
-            border: none !important;
-        }
-        /* Forzar texto interno y etiquetas dentro de selectores */
-        div[data-baseweb="select"] * {
-            color: #111111 !important;
-        }
-        /* Texto de marcador de posición (Choose options) */
-        div[data-baseweb="select"] div[aria-hidden="true"], 
-        div[data-baseweb="select"] input::placeholder {
-            color: #71717A !important;
-        }
-        /* Flechas de desplegables */
+        /* Flechas de desplegables neutrales (sin rojo) */
         div[data-baseweb="select"] svg {
             fill: #52525B !important;
         }
@@ -111,15 +98,8 @@ if st.session_state["tema"] == "claro":
             background-color: #F4F4F5 !important;
             color: #000000 !important;
         }
-        /* Etiquetas seleccionadas (Chips) */
-        span[data-baseweb="tag"] {
-            background-color: #E4E4E7 !important;
-        }
-        span[data-baseweb="tag"] * {
-            color: #111111 !important;
-        }
 
-        /* 4. Botones con texto Blanco legible */
+        /* 4. Botones Sobrios (Neutros, sin saturación roja) */
         div[data-testid="stButton"] > button:not(.st-key-theme_toggle button),
         div[data-testid="stForm"] button {
             background-color: #18181B !important;
@@ -128,11 +108,6 @@ if st.session_state["tema"] == "claro":
             font-weight: 600 !important;
             border-radius: 8px !important;
         }
-        /* Forzar color blanco a los textos dentro del botón (p, span) */
-        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button) *,
-        div[data-testid="stForm"] button * {
-            color: #FFFFFF !important;
-        }
         div[data-testid="stButton"] > button:not(.st-key-theme_toggle button):hover,
         div[data-testid="stForm"] button:hover {
             background-color: #27272A !important;
@@ -140,7 +115,7 @@ if st.session_state["tema"] == "claro":
             border-color: #27272A !important;
         }
 
-        /* 5. Pestañas */
+        /* 5. Pestañas Modernas */
         button[data-baseweb="tab"] {
             color: #71717A !important;
             background: transparent !important;
@@ -152,7 +127,7 @@ if st.session_state["tema"] == "claro":
             font-weight: 700 !important;
         }
 
-        /* 6. Tarjeta Login */
+        /* 6. Tarjeta Login Limpia */
         [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
             background-color: #FFFFFF !important;
             padding: 2.5rem !important;
@@ -163,13 +138,14 @@ if st.session_state["tema"] == "claro":
         </style>
     """, unsafe_allow_html=True)
 else:
-    # MODO OSCURO ORIGINAL
+    # MODO OSCURO ACTUALIZADO: Texto Azul y Bordes Modernos con Glow
     st.markdown("""
         <style>
+        /* 1. Icono Luna/Sol */
         .st-key-theme_toggle {
             position: fixed !important;
             top: 10px !important;
-            right: 240px !important;
+            right: 180px !important;
             z-index: 999999 !important;
             width: auto !important;
         }
@@ -182,7 +158,7 @@ else:
             padding: 0 !important;
             font-size: 1.4rem !important;
             cursor: pointer !important;
-            color: #FF3333 !important;
+            color: #3B82F6 !important;
         }
         .st-key-theme_toggle button:hover {
             background: transparent !important;
@@ -191,41 +167,91 @@ else:
             transform: scale(1.15) !important;
         }
 
+        /* 2. Fondo Dark Slate y Tipografía Azul */
         .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
-            background-color: #0E1117 !important;
-            color: #FF3333 !important;
+            background-color: #0B0F17 !important;
+            color: #60A5FA !important;
         }
 
         p, span, label, h1, h2, h3, h4, h5, h6, div, td, th, caption, .stMarkdown {
-            color: #FF3333 !important;
+            color: #60A5FA !important;
         }
 
-        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button) {
-            background-color: #CC0000 !important;
+        /* 3. Botones en Azul Moderno */
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button),
+        div[data-testid="stForm"] button {
+            background-color: #2563EB !important;
             color: #FFFFFF !important;
-            border: 1px solid #FF4D4D !important;
+            border: 1px solid #3B82F6 !important;
             font-weight: bold !important;
+            border-radius: 8px !important;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3) !important;
         }
-        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button) * {
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button):hover,
+        div[data-testid="stForm"] button:hover {
+            background-color: #1D4ED8 !important;
             color: #FFFFFF !important;
-        }
-        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button):hover {
-            background-color: #FF0000 !important;
-            color: #FFFFFF !important;
-            border-color: #FF6666 !important;
+            border-color: #60A5FA !important;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.5) !important;
         }
 
-        input, select, textarea, div[data-baseweb="select"] {
-            background-color: #1E2329 !important;
-            color: #FF3333 !important;
-            border-color: #CC0000 !important;
+        /* 4. Inputs y Contraseñas (Texto Azul Visible) */
+        input, select, textarea {
+            background-color: #131B2E !important;
+            color: #60A5FA !important;
+            -webkit-text-fill-color: #60A5FA !important;
+            border: 1px solid #2B384E !important;
+            border-radius: 10px !important;
+        }
+        input:focus, select:focus, textarea:focus {
+            border: 1px solid #3B82F6 !important;
+            box-shadow: 0 0 8px rgba(59, 130, 246, 0.4) !important;
         }
 
+        /* 5. Contenedores de Filtros con Bordes Modernos y Efecto Glow */
+        div[data-baseweb="select"] {
+            background-color: #131B2E !important;
+            border: 1px solid #2B384E !important;
+            border-radius: 10px !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+            transition: all 0.2s ease-in-out !important;
+        }
+        div[data-baseweb="select"]:hover {
+            border-color: #3B82F6 !important;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.35) !important;
+        }
+
+        div[data-baseweb="select"] * {
+            color: #60A5FA !important;
+        }
+        div[data-baseweb="select"] svg {
+            fill: #60A5FA !important;
+        }
+
+        /* 6. Desplegables de Opciones de Filtro */
+        div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
+            background-color: #131B2E !important;
+            border: 1px solid #3B82F6 !important;
+            border-radius: 10px !important;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6) !important;
+        }
+
+        li[role="option"] {
+            background-color: #131B2E !important;
+            color: #60A5FA !important;
+        }
+        li[role="option"]:hover, li[aria-selected="true"] {
+            background-color: #1E293B !important;
+            color: #93C5FD !important;
+        }
+
+        /* 7. Tarjeta Login y Formularios */
         [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
-            background-color: #1E2329 !important;
+            background-color: #131B2E !important;
             padding: 2rem !important;
             border-radius: 12px !important;
-            border: 1px solid #CC0000 !important;
+            border: 1px solid #2B384E !important;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -564,7 +590,7 @@ with tab_dx:
     promedio_lead_time = df_f["Lead Time Total"].mean() if "Lead Time Total" in df_f.columns else float("nan")
     pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
-    color_texto_card = "#FF3333" if st.session_state["tema"] == "oscuro" else "#111111"
+    color_texto_card = "#60A5FA" if st.session_state["tema"] == "oscuro" else "#111111"
 
     def tarjeta(titulo: str, valor: str, subtitulo: str = "", fondo: str = "rgba(64,75,85,0.07)", borde: str = "rgba(64,75,85,0.35)") -> str:
         html_sub = f'<div style="font-size:0.78rem;color:{color_texto_card};margin-top:4px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
@@ -630,7 +656,7 @@ with tab_dx:
         fuente = "0.72rem" if compacta else "0.86rem"
         fuente_th = "0.66rem" if compacta else "0.82rem"
 
-        color_texto_tabla = "#FF3333" if st.session_state["tema"] == "oscuro" else "#111111"
+        color_texto_tabla = "#60A5FA" if st.session_state["tema"] == "oscuro" else "#111111"
 
         filas = []
         for i, r in enumerate(tabla.itertuples(index=False)):
