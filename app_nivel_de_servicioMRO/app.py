@@ -18,37 +18,25 @@ try:
 except ImportError:
     HAS_TRAZABILIDAD = False
 
-# Configuración de página
-st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide", page_icon="📊")
+# 🔹 CAMBIO 1: Se agrega page_icon para recuperar el icono en la pestaña y barra superior
+st.set_page_config(
+    page_title="Dx Compradores - Nivel de Servicio",
+    page_icon="📊",  # Puedes reemplazarlo por otro emoji (ej: "🛒") o la ruta a tu logo "logo.png"
+    layout="wide"
+)
 
-# ---- CSS Personalizado para pulir la interfaz visual ----
+# 🔹 CAMBIO 2: Estilos CSS para corregir el recuadro blanco del Login y unificar el tema oscuro
 st.markdown("""
     <style>
-    /* Estilos para el formulario de login */
-    .stForm {
-        background-color: #ffffff;
-        padding: 2.5rem 2rem;
-        border-radius: 10px;
-        box-shadow: 0 4px 18px rgba(0,0,0,0.06);
-        border: 1px solid #e3e5e8;
+    /* Estilizado del contenedor de login para evitar el contraste blanco duro */
+    [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
+        background-color: #1e2329 !important;
+        padding: 2rem !important;
+        border-radius: 12px !important;
+        border: 1px solid #343b44 !important;
     }
-    /* Estilo del botón principal */
-    div.stButton > button, div.stFormSubmitButton > button {
-        background-color: #CC0000 !important;
-        color: #ffffff !important;
-        font-weight: 600 !important;
-        border-radius: 6px !important;
-        border: none !important;
-        padding: 0.5rem 1rem !important;
-        transition: background-color 0.2s ease;
-    }
-    div.stButton > button:hover, div.stFormSubmitButton > button:hover {
-        background-color: #a80000 !important;
-    }
-    /* Estilo general para inputs */
-    .stTextInput input {
-        border-radius: 6px !important;
-        border: 1px solid #d8dbdf !important;
+    div[data-testid="stTextInput"] label {
+        color: #e0e0e0 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -96,34 +84,19 @@ def determinar_tipo_ariba(row):
     return "⚪ OTROS"
 
 
-# ---- Acceso con contraseña (Diseño centrado) ----
+# ---- Acceso con contraseña ----
 if "app_password" in st.secrets:
     if not st.session_state.get("_autenticado"):
-        _, col_login, _ = st.columns([1, 1.2, 1])
-        with col_login:
-            st.markdown("<br><br>", unsafe_allow_html=True)
-            st.markdown(
-                """
-                <div style="text-align: center; margin-bottom: 20px;">
-                    <h2 style="color: #404B55; font-weight: 700; margin-bottom: 4px;">Dx Compradores</h2>
-                    <p style="color: #666; font-size: 0.95rem;">Nivel de Servicio — Iniciar Sesión</p>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-            
-            with st.form("login_form", clear_on_submit=False):
-                clave_ingresada = st.text_input("Contraseña de acceso", type="password", placeholder="Ingrese su clave")
-                btn_ingresar = st.form_submit_button("Ingresar", use_container_width=True)
-                
-                if btn_ingresar:
-                    if clave_ingresada == st.secrets["app_password"]:
-                        st.session_state["_autenticado"] = True
-                        loaders._descargar_onedrive.clear()
-                        st.session_state.pop("_clave_pipeline", None)
-                        st.rerun()
-                    else:
-                        st.error("🔑 Contraseña incorrecta.")
+        st.title("Dx Compradores — Nivel de Servicio")
+        clave_ingresada = st.text_input("Contraseña de acceso", type="password")
+        if st.button("Ingresar"):
+            if clave_ingresada == st.secrets["app_password"]:
+                st.session_state["_autenticado"] = True
+                loaders._descargar_onedrive.clear()
+                st.session_state.pop("_clave_pipeline", None)
+                st.rerun()
+            else:
+                st.error("Contraseña incorrecta.")
         st.stop()
 
 # ---- Pestañas Principales ----
@@ -151,7 +124,7 @@ with tab_dx:
             archivo_centro = "onedrive:centro_sociedad_mro"
             archivo_mrp = "onedrive:responsable_mrp"
 
-            if st.button("🔄 Forzar recarga desde OneDrive ahora", use_container_width=True):
+            if st.button("🔄 Forzar recarga desde OneDrive ahora"):
                 loaders._descargar_onedrive.clear()
                 st.session_state.pop("_clave_pipeline", None)
                 st.rerun()
@@ -293,6 +266,10 @@ with tab_dx:
     if estados:
         df_f = df_f[df_f["Estado Solped"].isin(estados)]
     checkpoints.append(("3. Tras filtro Estado Solped (total)", len(df_f)))
+    checkpoints.append(("3a. Sin pedido (antes de jerarquía)", (df_f["Estado Solped"] == "Sin pedido").sum()))
+    checkpoints.append(("3b. Pedido incompleto (antes de jerarquía)", (df_f["Estado Solped"] == "Pedido incompleto").sum()))
+    checkpoints.append(("3c. Pedido completo (antes de jerarquía)", (df_f["Estado Solped"] == "Pedido completo").sum()))
+    _snapshot("3. Tras Estado Solped", df_f)
 
     # ---- Jerarquía Año / Mes / Día ----
     df_pedido_completo = df_f[df_f["Estado Solped"] == "Pedido completo"]
@@ -318,6 +295,10 @@ with tab_dx:
             cond_fecha &= df_f["Fecha de pedido"].dt.date.isin(fechas)
         df_f = df_f[~es_pedido_completo | (es_pedido_completo & cond_fecha)]
 
+    checkpoints.append(("4a. Sin pedido tras jerarquía", (df_f["Estado Solped"] == "Sin pedido").sum()))
+    checkpoints.append(("4b. Pedido incompleto tras jerarquía", (df_f["Estado Solped"] == "Pedido incompleto").sum()))
+    checkpoints.append(("4c. Pedido completo tras jerarquía", (df_f["Estado Solped"] == "Pedido completo").sum()))
+    checkpoints.append(("4. Total tras jerarquía de fecha", len(df_f)))
     _snapshot("4. Tras jerarquía Año/Mes/Día", df_f)
 
     # ---- Solped MRP y Cumple ----
@@ -329,13 +310,20 @@ with tab_dx:
 
     if solped_mrp:
         df_f = df_f[df_f["Solped MRP"].isin(solped_mrp)]
+    checkpoints.append(("5. Tras filtro Solped MRP", len(df_f)))
+    _snapshot("5. Tras Solped MRP", df_f)
+
     if cumple:
         df_f = df_f[df_f["Cumple"].isin(cumple)]
+    checkpoints.append(("6. Tras filtro Cumple", len(df_f)))
+    _snapshot("6. Tras Cumple", df_f)
 
     st.divider()
     st.subheader("Filtro por días de gestión (Nivel de Servicio)")
 
     if len(df_f):
+        n_negativos = (df_f["Nivel de Servicio"] < 0).sum()
+
         f1, f2 = st.columns([1, 2])
         with f1:
             excluir_negativos = st.checkbox(
@@ -361,11 +349,14 @@ with tab_dx:
 
         df_f = df_f[df_f["Nivel de Servicio"].between(rango_ns[0], rango_ns[1])]
 
+    checkpoints.append(("7. Tras filtro Nivel de Servicio (RESULTADO FINAL)", len(df_f)))
     _snapshot("7. RESULTADO FINAL", df_f)
 
     # ---- Diagnóstico de filtrado ----
     with st.expander("🔍 Diagnóstico de filtrado (para comparar contra el pbix)"):
-        st.write("**Las métricas en cada etapa del filtro**:")
+        st.write("Filas en cada etapa:")
+        st.table(pd.DataFrame(checkpoints, columns=["Etapa", "Filas"]))
+        st.write("**Las 3 métricas en cada etapa del filtro**:")
         st.table(pd.DataFrame(metricas_por_etapa, columns=["Etapa", "Filas", "% Cumplimiento", "Prom. días", "Pos. OC"]))
         st.dataframe(
             df_f[["Solicitud de pedido", "Centro", "Estado Solped", "Fecha de pedido", "Nivel de Servicio", "Cumple", "Solped MRP", "Tipo Ariba"]]
@@ -495,7 +486,10 @@ with tab_dx:
 
     # ---- Tabla por Comprador ----
     st.subheader("Por comprador")
-    st.caption("Asignación por **grupo de compras**.")
+    st.caption(
+        "Asignación por **grupo de compras**: las líneas MRP se reparten entre los "
+        "compradores responsables de cada grupo, en vez de concentrarse en el responsable de MRP."
+    )
     col_comprador = (
         "Comprador (Grupo de compras)"
         if "Comprador (Grupo de compras)" in df_f.columns
@@ -690,13 +684,13 @@ with tab_dx:
         return buffer.getvalue()
 
     st.subheader("Registro semanal")
-    st.caption(f"Prepara el reporte completo como **{nombre_archivo}**.")
+    st.caption(f"Prepara el reporte completo (indicadores, tablas y detalle con comentarios) como **{nombre_archivo}**.")
 
     clave_excel = (len(df_f), int(pd.util.hash_pandas_object(detalle_editado["Comentario"].fillna("")).sum()), pd.Timestamp(fecha_corte))
 
     col_prep, col_desc = st.columns([1, 2])
     with col_prep:
-        if st.button("📄 Preparar Excel", use_container_width=True):
+        if st.button("📄 Preparar Excel"):
             with st.spinner("Generando el Excel..."):
                 try:
                     st.session_state["_excel_bytes"] = generar_excel(detalle_editado)
@@ -708,7 +702,7 @@ with tab_dx:
         excel_listo = st.session_state.get("_excel_bytes") is not None
         excel_desactualizado = st.session_state.get("_excel_clave") != clave_excel
         if excel_listo and excel_desactualizado:
-            st.caption("⚠️ Los filtros cambiaron. Vuelve a preparar para reflejar la selección actual.")
+            st.caption("⚠️ Los filtros cambiaron desde que preparaste este Excel — vuelve a preparar para reflejar la selección actual.")
         if excel_listo:
             st.download_button(
                 f"⬇ Descargar {nombre_archivo}",
@@ -752,7 +746,7 @@ with tab_trazabilidad:
             )
 
         if archivo_trazabilidad:
-            if st.button("🚀 Procesar Trazabilidad", key="btn_procesar_traz", use_container_width=True):
+            if st.button("🚀 Procesar Trazabilidad", key="btn_procesar_traz"):
                 with st.spinner("Procesando trazabilidad y reconstruyendo cadena de eventos..."):
                     try:
                         df_cadena, df_resumen = trazabilidad.procesar_trazabilidad_completa(
