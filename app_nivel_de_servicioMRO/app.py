@@ -67,15 +67,32 @@ def determinar_tipo_ariba(row):
 if "app_password" in st.secrets:
     if not st.session_state.get("_autenticado"):
         st.title("Dx Compradores — Nivel de Servicio")
-        clave_ingresada = st.text_input("Contraseña de acceso", type="password")
-        if st.button("Ingresar"):
-            if clave_ingresada == st.secrets["app_password"]:
-                st.session_state["_autenticado"] = True
-                loaders._descargar_onedrive.clear()
-                st.session_state.pop("_clave_pipeline", None)
-                st.rerun()
-            else:
-                st.error("Contraseña incorrecta.")
+
+        # Oculta íconos e interferencias visuales de contraseña en Edge/Chrome
+        st.markdown(
+            """
+            <style>
+                input[type="password"]::-ms-reveal,
+                input[type="password"]::-ms-clear {
+                    display: none !important;
+                }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        with st.form("form_login", clear_on_submit=False):
+            clave_ingresada = st.text_input("Contraseña de acceso", type="password")
+            btn_ingresar = st.form_submit_button("Ingresar")
+
+            if btn_ingresar:
+                if clave_ingresada == st.secrets["app_password"]:
+                    st.session_state["_autenticado"] = True
+                    loaders._descargar_onedrive.clear()
+                    st.session_state.pop("_clave_pipeline", None)
+                    st.rerun()
+                else:
+                    st.error("Contraseña incorrecta.")
         st.stop()
 
 # ---- Pestañas Principales ----
