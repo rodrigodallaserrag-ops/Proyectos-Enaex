@@ -20,77 +20,6 @@ except ImportError:
 
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
-# ---- Inyección de Estilos CSS (Header Transparente + Modo Oscuro Original) ----
-st.markdown(
-    """
-    <style>
-    /* 1. Header superior transparente para los iconos */
-    [data-testid="stHeader"] {
-        background: transparent !important;
-        background-color: rgba(0, 0, 0, 0) !important;
-    }
-
-    /* 2. MODO OSCURO (se activa solo en tema oscuro manteniendo el modo claro intacto) */
-    @media (prefers-color-scheme: dark) {
-        /* Fondo principal */
-        .stApp {
-            background-color: #0b0e17 !important;
-            color: #e2e8f0 !important;
-        }
-
-        /* Sidebar lateral */
-        [data-testid="stSidebar"] {
-            background-color: #07090f !important;
-            border-right: 1px solid #1e293b !important;
-        }
-
-        /* Títulos de sección */
-        h1, h2, h3, [data-testid="stMarkdownContainer"] h1, [data-testid="stMarkdownContainer"] h2, [data-testid="stMarkdownContainer"] h3 {
-            color: #38bdf8 !important;
-        }
-
-        /* Subtítulos y textos auxiliares */
-        .stCaption, [data-testid="stCaptionContainer"] {
-            color: #94a3b8 !important;
-        }
-
-        /* Desplegables, inputs y selectores */
-        div[data-baseweb="select"] > div, 
-        div[data-baseweb="base-input"],
-        input {
-            background-color: #141c2e !important;
-            border-color: #1e293b !important;
-            color: #e2e8f0 !important;
-            border-radius: 6px !important;
-        }
-
-        /* Pestañas superiores (Tabs) */
-        button[data-baseweb="tab"] {
-            color: #94a3b8 !important;
-            background-color: transparent !important;
-        }
-        button[aria-selected="true"] {
-            color: #ffffff !important;
-            border-bottom: 2px solid #ef4444 !important; /* Borde rojo activo */
-        }
-
-        /* Botones en modo oscuro */
-        .stButton > button {
-            background-color: #2563eb !important;
-            color: #ffffff !important;
-            border: none !important;
-            border-radius: 6px !important;
-        }
-        .stButton > button:hover {
-            background-color: #1d4ed8 !important;
-            color: #ffffff !important;
-        }
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 
 # ---- 0. Función de Clasificación Corregida ----
 def determinar_tipo_ariba(row):
@@ -213,6 +142,7 @@ with tab_dx:
             return (archivo.name, archivo.size)
         return archivo
 
+    # 🔹 CAMBIO: Se añade el estado de la trazabilidad a la clave de caché
     clave_actual = (
         _clave_archivo(archivo_data),
         _clave_archivo(archivo_resp_grupo),
@@ -235,6 +165,7 @@ with tab_dx:
         df_calculado["Mes"] = df_calculado["Fecha de pedido"].dt.month
         df_calculado["Día"] = df_calculado["Fecha de pedido"].dt.day
 
+        # 🔹 CAMBIO: Se realiza el cruce con la Trazabilidad procesada antes de clasificar
         if "df_trazabilidad_limpio" in st.session_state:
             df_traz = st.session_state["df_trazabilidad_limpio"]
             col_traz = "Solicitud de pedido" if "Solicitud de pedido" in df_traz.columns else "Solped SAP (600)"
@@ -621,7 +552,7 @@ with tab_dx:
                     "Comentario", help="Anotación libre para el registro semanal", width="medium"
                 ),
                 "Nivel de Servicio": st.column_config.NumberColumn("Nivel de Servicio (días)"),
-                "Lead Time Total": None,
+                "Lead Time Total": None,  # 👈 Oculto visualmente del frontend
             },
             disabled=[c for c in detalle.columns if c != "Comentario"],
         )
@@ -806,6 +737,7 @@ with tab_trazabilidad:
                         st.session_state["df_trazabilidad_cadena"] = df_cadena
                         st.session_state["df_trazabilidad_limpio"] = df_resumen
 
+                        # 🔹 CAMBIO: Borrar la caché del pipeline para obligar a recalcular la Pestaña 1
                         st.session_state.pop("_clave_pipeline", None)
                         st.success("¡Trazabilidad procesada con éxito! La pestaña Dx Compradores ha sido actualizada.")
                         st.rerun()
