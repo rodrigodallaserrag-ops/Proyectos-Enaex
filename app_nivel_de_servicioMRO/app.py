@@ -37,14 +37,14 @@ if st.button(icono_tema, key="theme_toggle", help="Cambiar Modo Claro / Oscuro")
 
 # 3. Inyección de Estilos CSS según el tema seleccionado
 if st.session_state["tema"] == "claro":
-    # MODO CLARO: Inspirado en interfaz sobria y limpia estilo "Productos de Lujo"
+    # MODO CLARO: Interfaz sobria y limpia
     st.markdown("""
         <style>
-        /* 1. Icono Luna/Sol 100% Transparente */
+        /* 1. Icono Luna/Sol (ubicado a la izquierda para dejar espacio a la animación de carga) */
         .st-key-theme_toggle {
             position: fixed !important;
             top: 10px !important;
-            right: 180px !important;
+            right: 240px !important;
             z-index: 999999 !important;
             width: auto !important;
         }
@@ -66,7 +66,7 @@ if st.session_state["tema"] == "claro":
             transform: scale(1.15) !important;
         }
 
-        /* 2. Fondo Blanco Puro y Tipografía Negrita/Limpia */
+        /* 2. Fondo Blanco Puro y Tipografía General */
         .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
             background-color: #FFFFFF !important;
             color: #111111 !important;
@@ -75,14 +75,27 @@ if st.session_state["tema"] == "claro":
             color: #111111 !important;
         }
 
-        /* 3. Inputs, Selectores y Filtros Estilo "Buscador Limpio" */
-        input, select, textarea, div[data-baseweb="select"] > div {
+        /* 3. Inputs y Filtros Multiselect Legibles */
+        input, textarea, div[data-baseweb="select"] {
             background-color: #F4F4F5 !important;
-            color: #111111 !important;
             border: 1px solid #E4E4E7 !important;
             border-radius: 8px !important;
         }
-        /* Flechas de desplegables neutrales (sin rojo) */
+        div[data-baseweb="select"] > div {
+            background-color: #F4F4F5 !important;
+            color: #111111 !important;
+            border: none !important;
+        }
+        /* Forzar texto interno y etiquetas dentro de selectores */
+        div[data-baseweb="select"] * {
+            color: #111111 !important;
+        }
+        /* Texto de marcador de posición (Choose options) */
+        div[data-baseweb="select"] div[aria-hidden="true"], 
+        div[data-baseweb="select"] input::placeholder {
+            color: #71717A !important;
+        }
+        /* Flechas de desplegables */
         div[data-baseweb="select"] svg {
             fill: #52525B !important;
         }
@@ -98,8 +111,15 @@ if st.session_state["tema"] == "claro":
             background-color: #F4F4F5 !important;
             color: #000000 !important;
         }
+        /* Etiquetas seleccionadas (Chips) */
+        span[data-baseweb="tag"] {
+            background-color: #E4E4E7 !important;
+        }
+        span[data-baseweb="tag"] * {
+            color: #111111 !important;
+        }
 
-        /* 4. Botones Sobrios (Neutros, sin saturación roja) */
+        /* 4. Botones con texto Blanco legible */
         div[data-testid="stButton"] > button:not(.st-key-theme_toggle button),
         div[data-testid="stForm"] button {
             background-color: #18181B !important;
@@ -108,6 +128,11 @@ if st.session_state["tema"] == "claro":
             font-weight: 600 !important;
             border-radius: 8px !important;
         }
+        /* Forzar color blanco a los textos dentro del botón (p, span) */
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button) *,
+        div[data-testid="stForm"] button * {
+            color: #FFFFFF !important;
+        }
         div[data-testid="stButton"] > button:not(.st-key-theme_toggle button):hover,
         div[data-testid="stForm"] button:hover {
             background-color: #27272A !important;
@@ -115,7 +140,7 @@ if st.session_state["tema"] == "claro":
             border-color: #27272A !important;
         }
 
-        /* 5. Pestañas Modernas */
+        /* 5. Pestañas */
         button[data-baseweb="tab"] {
             color: #71717A !important;
             background: transparent !important;
@@ -127,7 +152,7 @@ if st.session_state["tema"] == "claro":
             font-weight: 700 !important;
         }
 
-        /* 6. Tarjeta Login Limpia */
+        /* 6. Tarjeta Login */
         [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
             background-color: #FFFFFF !important;
             padding: 2.5rem !important;
@@ -144,7 +169,7 @@ else:
         .st-key-theme_toggle {
             position: fixed !important;
             top: 10px !important;
-            right: 180px !important;
+            right: 240px !important;
             z-index: 999999 !important;
             width: auto !important;
         }
@@ -180,6 +205,9 @@ else:
             color: #FFFFFF !important;
             border: 1px solid #FF4D4D !important;
             font-weight: bold !important;
+        }
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button) * {
+            color: #FFFFFF !important;
         }
         div[data-testid="stButton"] > button:not(.st-key-theme_toggle button):hover {
             background-color: #FF0000 !important;
