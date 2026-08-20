@@ -18,267 +18,89 @@ try:
 except ImportError:
     HAS_TRAZABILIDAD = False
 
-# 1. Configuración de página con icono
-st.set_page_config(
-    page_title="Dx Compradores - Nivel de Servicio",
-    page_icon="📊",
-    layout="wide"
+st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
+
+# ---- Inyección de Estilos CSS (Header Transparente + Modo Oscuro Original) ----
+st.markdown(
+    """
+    <style>
+    /* 1. Header superior transparente para los iconos */
+    [data-testid="stHeader"] {
+        background: transparent !important;
+        background-color: rgba(0, 0, 0, 0) !important;
+    }
+
+    /* 2. MODO OSCURO (se activa solo en tema oscuro manteniendo el modo claro intacto) */
+    @media (prefers-color-scheme: dark) {
+        /* Fondo principal */
+        .stApp {
+            background-color: #0b0e17 !important;
+            color: #e2e8f0 !important;
+        }
+
+        /* Sidebar lateral */
+        [data-testid="stSidebar"] {
+            background-color: #07090f !important;
+            border-right: 1px solid #1e293b !important;
+        }
+
+        /* Títulos de sección */
+        h1, h2, h3, [data-testid="stMarkdownContainer"] h1, [data-testid="stMarkdownContainer"] h2, [data-testid="stMarkdownContainer"] h3 {
+            color: #38bdf8 !important;
+        }
+
+        /* Subtítulos y textos auxiliares */
+        .stCaption, [data-testid="stCaptionContainer"] {
+            color: #94a3b8 !important;
+        }
+
+        /* Desplegables, inputs y selectores */
+        div[data-baseweb="select"] > div, 
+        div[data-baseweb="base-input"],
+        input {
+            background-color: #141c2e !important;
+            border-color: #1e293b !important;
+            color: #e2e8f0 !important;
+            border-radius: 6px !important;
+        }
+
+        /* Pestañas superiores (Tabs) */
+        button[data-baseweb="tab"] {
+            color: #94a3b8 !important;
+            background-color: transparent !important;
+        }
+        button[aria-selected="true"] {
+            color: #ffffff !important;
+            border-bottom: 2px solid #ef4444 !important; /* Borde rojo activo */
+        }
+
+        /* Botones en modo oscuro */
+        .stButton > button {
+            background-color: #2563eb !important;
+            color: #ffffff !important;
+            border: none !important;
+            border-radius: 6px !important;
+        }
+        .stButton > button:hover {
+            background-color: #1d4ed8 !important;
+            color: #ffffff !important;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-# 2. Control de Estado del Tema (Predeterminado: Claro)
-if "tema" not in st.session_state:
-    st.session_state["tema"] = "claro"
 
-# Botón del tema (Transparente)
-icono_tema = "🌙" if st.session_state["tema"] == "claro" else "☀️"
-if st.button(icono_tema, key="theme_toggle", help="Cambiar Modo Claro / Oscuro"):
-    st.session_state["tema"] = "oscuro" if st.session_state["tema"] == "claro" else "claro"
-    st.rerun()
-
-# 3. Inyección de Estilos CSS según el tema seleccionado
-if st.session_state["tema"] == "claro":
-    # MODO CLARO: Texto azul de alto contraste y componentes legibles sobre fondo blanco
-    st.markdown("""
-        <style>
-        /* 1. Icono Luna/Sol Transparente */
-        .st-key-theme_toggle {
-            position: fixed !important;
-            top: 10px !important;
-            right: 180px !important;
-            z-index: 999999 !important;
-            width: auto !important;
-        }
-        .st-key-theme_toggle button {
-            background: transparent !important;
-            background-color: transparent !important;
-            border: none !important;
-            box-shadow: none !important;
-            outline: none !important;
-            padding: 0 !important;
-            font-size: 1.4rem !important;
-            cursor: pointer !important;
-            color: #1D4ED8 !important;
-        }
-        .st-key-theme_toggle button:hover {
-            background: transparent !important;
-            background-color: transparent !important;
-            border: none !important;
-            transform: scale(1.15) !important;
-        }
-
-        /* 2. Fondo Blanco Puro y Tipografía Azul */
-        .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
-            background-color: #FFFFFF !important;
-            color: #1D4ED8 !important;
-        }
-        p, span, label, h1, h2, h3, h4, h5, h6, div, td, th, caption, .stMarkdown {
-            color: #1D4ED8 !important;
-        }
-
-        /* 3. Inputs, Selectores y Filtros con Texto Azul Legible */
-        input, select, textarea {
-            background-color: #F8FAFC !important;
-            color: #1D4ED8 !important;
-            -webkit-text-fill-color: #1D4ED8 !important;
-            border: 1px solid #CBD5E1 !important;
-            border-radius: 8px !important;
-        }
-
-        div[data-baseweb="select"], div[data-baseweb="select"] > div {
-            background-color: #F8FAFC !important;
-            border-color: #CBD5E1 !important;
-            border-radius: 8px !important;
-        }
-
-        div[data-baseweb="select"] * {
-            color: #1D4ED8 !important;
-            -webkit-text-fill-color: #1D4ED8 !important;
-        }
-
-        div[data-baseweb="select"] svg {
-            fill: #1D4ED8 !important;
-        }
-
-        div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
-            background-color: #FFFFFF !important;
-            border: 1px solid #CBD5E1 !important;
-        }
-
-        li[role="option"] {
-            color: #1D4ED8 !important;
-            background-color: #FFFFFF !important;
-        }
-
-        li[role="option"]:hover, li[aria-selected="true"] {
-            background-color: #EFF6FF !important;
-            color: #1E40AF !important;
-        }
-
-        /* 4. Botones Azules Destacados */
-        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button),
-        div[data-testid="stForm"] button {
-            background-color: #2563EB !important;
-            color: #FFFFFF !important;
-            border: 1px solid #2563EB !important;
-            font-weight: 600 !important;
-            border-radius: 8px !important;
-        }
-        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button) *,
-        div[data-testid="stForm"] button * {
-            color: #FFFFFF !important;
-            -webkit-text-fill-color: #FFFFFF !important;
-        }
-        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button):hover,
-        div[data-testid="stForm"] button:hover {
-            background-color: #1D4ED8 !important;
-            color: #FFFFFF !important;
-            border-color: #1D4ED8 !important;
-        }
-
-        /* 5. Pestañas */
-        button[data-baseweb="tab"] {
-            color: #3B82F6 !important;
-            background: transparent !important;
-            font-weight: 500 !important;
-        }
-        button[aria-selected="true"][data-baseweb="tab"] {
-            color: #1D4ED8 !important;
-            border-bottom: 2px solid #1D4ED8 !important;
-            font-weight: 700 !important;
-        }
-
-        /* 6. Formulario / Tarjeta de Login */
-        [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
-            background-color: #FFFFFF !important;
-            padding: 2.5rem !important;
-            border-radius: 12px !important;
-            border: 1px solid #CBD5E1 !important;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05) !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-else:
-    # MODO OSCURO: Texto Azul y Bordes Modernos con Glow
-    st.markdown("""
-        <style>
-        /* 1. Icono Luna/Sol */
-        .st-key-theme_toggle {
-            position: fixed !important;
-            top: 10px !important;
-            right: 180px !important;
-            z-index: 999999 !important;
-            width: auto !important;
-        }
-        .st-key-theme_toggle button {
-            background: transparent !important;
-            background-color: transparent !important;
-            border: none !important;
-            box-shadow: none !important;
-            outline: none !important;
-            padding: 0 !important;
-            font-size: 1.4rem !important;
-            cursor: pointer !important;
-            color: #3B82F6 !important;
-        }
-        .st-key-theme_toggle button:hover {
-            background: transparent !important;
-            background-color: transparent !important;
-            border: none !important;
-            transform: scale(1.15) !important;
-        }
-
-        /* 2. Fondo Dark Slate y Tipografía Azul */
-        .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
-            background-color: #0B0F17 !important;
-            color: #60A5FA !important;
-        }
-
-        p, span, label, h1, h2, h3, h4, h5, h6, div, td, th, caption, .stMarkdown {
-            color: #60A5FA !important;
-        }
-
-        /* 3. Botones en Azul Moderno */
-        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button),
-        div[data-testid="stForm"] button {
-            background-color: #2563EB !important;
-            color: #FFFFFF !important;
-            border: 1px solid #3B82F6 !important;
-            font-weight: bold !important;
-            border-radius: 8px !important;
-            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3) !important;
-        }
-        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button):hover,
-        div[data-testid="stForm"] button:hover {
-            background-color: #1D4ED8 !important;
-            color: #FFFFFF !important;
-            border-color: #60A5FA !important;
-            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.5) !important;
-        }
-
-        /* 4. Inputs y Contraseñas (Texto Azul Visible) */
-        input, select, textarea {
-            background-color: #131B2E !important;
-            color: #60A5FA !important;
-            -webkit-text-fill-color: #60A5FA !important;
-            border: 1px solid #2B384E !important;
-            border-radius: 10px !important;
-        }
-        input:focus, select:focus, textarea:focus {
-            border: 1px solid #3B82F6 !important;
-            box-shadow: 0 0 8px rgba(59, 130, 246, 0.4) !important;
-        }
-
-        /* 5. Contenedores de Filtros con Bordes Modernos y Efecto Glow */
-        div[data-baseweb="select"] {
-            background-color: #131B2E !important;
-            border: 1px solid #2B384E !important;
-            border-radius: 10px !important;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
-            transition: all 0.2s ease-in-out !important;
-        }
-        div[data-baseweb="select"]:hover {
-            border-color: #3B82F6 !important;
-            box-shadow: 0 0 10px rgba(59, 130, 246, 0.35) !important;
-        }
-
-        div[data-baseweb="select"] * {
-            color: #60A5FA !important;
-        }
-        div[data-baseweb="select"] svg {
-            fill: #60A5FA !important;
-        }
-
-        /* 6. Desplegables de Opciones de Filtro */
-        div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
-            background-color: #131B2E !important;
-            border: 1px solid #3B82F6 !important;
-            border-radius: 10px !important;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6) !important;
-        }
-
-        li[role="option"] {
-            background-color: #131B2E !important;
-            color: #60A5FA !important;
-        }
-        li[role="option"]:hover, li[aria-selected="true"] {
-            background-color: #1E293B !important;
-            color: #93C5FD !important;
-        }
-
-        /* 7. Tarjeta Login y Formularios */
-        [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
-            background-color: #131B2E !important;
-            padding: 2rem !important;
-            border-radius: 12px !important;
-            border: 1px solid #2B384E !important;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-
-# ---- 0. Función de Clasificación ----
+# ---- 0. Función de Clasificación Corregida ----
 def determinar_tipo_ariba(row):
+    """
+    Clasifica las solicitudes garantizando la detección de Ariba No Catalogada:
+    - ⚙️ SAP ERP: Serie 1 (100...), Serie 19, CL...
+    - ⚪ SAP MRP: Serie 5 (500...) o marca de Solped MRP.
+    - 🟢 ARIBA CATALOGADA / DIRECTA: Flujos directos o catalogados con material.
+    - 🔵 ARIBA NO CATALOGADA: Serie 6 sin código de material, en Trazabilidad o sin catálogo.
+    """
     sol = str(row.get("Solicitud de pedido", "")).strip()
     material = str(row.get("Material", "")).strip()
     tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0", "null"])
@@ -603,16 +425,14 @@ with tab_dx:
     promedio_lead_time = df_f["Lead Time Total"].mean() if "Lead Time Total" in df_f.columns else float("nan")
     pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
-    color_texto_card = "#60A5FA" if st.session_state["tema"] == "oscuro" else "#1D4ED8"
-
     def tarjeta(titulo: str, valor: str, subtitulo: str = "", fondo: str = "rgba(64,75,85,0.07)", borde: str = "rgba(64,75,85,0.35)") -> str:
-        html_sub = f'<div style="font-size:0.78rem;color:{color_texto_card};margin-top:4px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
+        html_sub = f'<div style="font-size:0.78rem;color:#555;margin-top:4px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
         return (
             f'<div style="background:{fondo};border:1.5px solid {borde};border-radius:8px;'
             f'padding:12px 18px;text-align:center;">'
-            f'<div style="font-size:0.78rem;color:{color_texto_card};font-weight:600;letter-spacing:.03em;'
+            f'<div style="font-size:0.78rem;color:#404B55;font-weight:600;letter-spacing:.03em;'
             f'text-transform:uppercase;opacity:.85;margin-bottom:4px;">{titulo}</div>'
-            f'<div style="font-size:2rem;font-weight:700;color:{color_texto_card};line-height:1.1;">{valor}</div>'
+            f'<div style="font-size:2rem;font-weight:700;color:#404B55;line-height:1.1;">{valor}</div>'
             f'{html_sub}'
             f'</div>'
         )
@@ -647,7 +467,7 @@ with tab_dx:
     st.divider()
 
     # ---- Estilo corporativo Enaex ----
-    ENAEX_GRIS = "#1E2329" if st.session_state["tema"] == "oscuro" else "#404B55"
+    ENAEX_GRIS = "#404B55"
     ENAEX_ROJO = "#CC0000"
 
     def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bool = False) -> str:
@@ -669,22 +489,20 @@ with tab_dx:
         fuente = "0.72rem" if compacta else "0.86rem"
         fuente_th = "0.66rem" if compacta else "0.82rem"
 
-        color_texto_tabla = "#60A5FA" if st.session_state["tema"] == "oscuro" else "#1D4ED8"
-
         filas = []
         for i, r in enumerate(tabla.itertuples(index=False)):
             es_total = str(r[0]) == "TOTAL"
             if es_total:
                 estilo_fila = f"background:{ENAEX_GRIS};color:#fff;font-weight:700;border-top:2px solid {ENAEX_ROJO};"
             else:
-                fondo = "#ffffff" if (i % 2 == 0 and st.session_state["tema"] == "claro") else ("#f9f9f9" if st.session_state["tema"] == "claro" else "#14181d")
-                estilo_fila = f"background:{fondo};color:{color_texto_tabla};"
+                fondo = "#ffffff" if i % 2 == 0 else "#f4f5f7"
+                estilo_fila = f"background:{fondo};color:{ENAEX_GRIS};"
             celdas = []
             for j, c in enumerate(cols):
                 align = "left" if j == 0 else "right"
                 celdas.append(
                     f'<td style="padding:{pad};text-align:{align};'
-                    f'border-bottom:1px solid #d8dbdf;white-space:nowrap;">{_fmt(c, r[j])}</td>'
+                    f'border-bottom:1px solid #e3e5e8;white-space:nowrap;">{_fmt(c, r[j])}</td>'
                 )
             filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
