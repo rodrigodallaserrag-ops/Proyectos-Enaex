@@ -72,18 +72,3 @@ st.caption(
     "Una vez descargado, ve a la pestaña del reporte principal y súbelo ahí en vez "
     "del .xlsx — el resto del flujo (filtros, tablas, exportación) funciona exactamente igual."
 )
-
-# ==============================================================================
-# OCULTAR NAVEGACIÓN GLOBAL (TRAZABILIDAD ARIBA)
-# ==============================================================================
-st.markdown("""
-    <style>
-    /* Ocultar enlaces del menú lateral que contengan 'trazabilidad' o 'ariba' */
-    [data-testid="stSidebarNav"] a[href*="trazabilidad"],
-    [data-testid="stSidebarNav"] a[href*="Trazabilidad"],
-    [data-testid="stSidebarNav"] a[href*="ariba"],
-    [data-testid="stSidebarNav"] a[href*="Ariba"] {
-        display: none !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
