@@ -33,27 +33,22 @@ if st.button(icono_tema, key="theme_toggle", help="Alternar Modo Claro/Oscuro"):
     st.rerun()
 
 if st.session_state["tema"] == "claro":
-    # MODO CLARO: CSS ajustado
+    # MODO CLARO: CSS ajustado para colocar el icono debajo de los 3 puntos y evitar que sea gigante
     st.markdown("""
         <style>
-        /* TAPADURA VISUAL: Oculta el menú lateral de páginas generadas automáticamente */
-        [data-testid="stSidebarNav"] {
-            display: none !important;
-        }
-        
         .st-key-theme_toggle {
             position: fixed !important;
-            top: 65px !important;
-            right: 15px !important;
+            top: 65px !important; /* Posicionado justo debajo de los 3 puntos */
+            right: 15px !important; /* Esquina superior derecha */
             z-index: 999999 !important;
-            width: 45px !important;
-            height: 45px !important;
+            width: 45px !important; /* Ancho fijo para evitar que sea gigante */
+            height: 45px !important; /* Alto fijo */
             min-width: 0 !important; 
         }
         .st-key-theme_toggle button {
             background: #FFFFFF !important;
             border: 1px solid #E0E0E0 !important;
-            border-radius: 50% !important;
+            border-radius: 50% !important; /* Botón circular */
             box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important;
             font-size: 1.4rem !important;
             padding: 0 !important;
@@ -80,27 +75,22 @@ if st.session_state["tema"] == "claro":
         </style>
     """, unsafe_allow_html=True)
 else:
-    # MODO OSCURO: CSS ajustado
+    # MODO OSCURO: CSS ajustado para colocar el icono debajo de los 3 puntos y evitar que sea gigante
     st.markdown("""
         <style>
-        /* TAPADURA VISUAL: Oculta el menú lateral de páginas generadas automáticamente */
-        [data-testid="stSidebarNav"] {
-            display: none !important;
-        }
-
         .st-key-theme_toggle {
             position: fixed !important;
-            top: 65px !important;
-            right: 15px !important;
+            top: 65px !important; /* Posicionado justo debajo de los 3 puntos */
+            right: 15px !important; /* Esquina superior derecha */
             z-index: 999999 !important;
-            width: 45px !important;
-            height: 45px !important;
+            width: 45px !important; /* Ancho fijo para evitar que sea gigante */
+            height: 45px !important; /* Alto fijo */
             min-width: 0 !important;
         }
         .st-key-theme_toggle button {
             background: #1E2329 !important;
             border: 1px solid #444444 !important;
-            border-radius: 50% !important;
+            border-radius: 50% !important; /* Botón circular */
             box-shadow: 0 2px 5px rgba(0,0,0,0.3) !important;
             font-size: 1.4rem !important;
             padding: 0 !important;
