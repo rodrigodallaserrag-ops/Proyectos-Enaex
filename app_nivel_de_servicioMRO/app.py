@@ -38,7 +38,7 @@ if st.session_state["tema"] == "claro":
         <style>
         .st-key-theme_toggle {
             position: fixed !important;
-            top: 15px !important;
+            top: 65px !important;
             right: 60px !important;
             z-index: 999999 !important;
             width: auto !important;
@@ -63,7 +63,7 @@ else:
         <style>
         .st-key-theme_toggle {
             position: fixed !important;
-            top: 15px !important;
+            top: 65px !important;
             right: 60px !important;
             z-index: 999999 !important;
             width: auto !important;
