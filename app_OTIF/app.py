@@ -1,13 +1,14 @@
 import pandas as pd
 import streamlit as st
+import io
+from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
 st.title("🎯 Dashboard OTIF (On Time, In Full)")
 st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de SAP.")
 
-
 # ==========================================
-# FUNCIÓN EN CACHÉ (Optimizada)
+# FUNCIONES EN CACHÉ (Optimizadas)
 # ==========================================
 @st.cache_data(show_spinner="Procesando cruce de datos SAP...")
 def procesar_otif(file_me2m, file_me80fn):
@@ -40,7 +41,7 @@ def procesar_otif(file_me2m, file_me80fn):
     )
     df_otif['OTIF'] = df_otif['In_Full'] & df_otif['On_Time']
 
-    # 6. Mapeo de estados visuales
+    # 6. Mapeo de estados visuales claros
     df_otif['Estado On Time'] = df_otif.apply(
         lambda r: '🔵 A Tiempo' if r['On_Time'] 
         else ('⏳ Pendiente' if pd.isna(r['Fecha_Ingreso_SAP']) else '🔴 Atrasado'), 
@@ -50,6 +51,31 @@ def procesar_otif(file_me2m, file_me80fn):
     df_otif['Estado OTIF'] = df_otif['OTIF'].map({True: '🔵 Cumple OTIF', False: '🔴 No Cumple'})
 
     return df_otif
+
+@st.cache_data(show_spinner="Preparando archivo Excel formateado...")
+def generar_excel_formateado(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Reporte OTIF')
+        worksheet = writer.sheets['Reporte OTIF']
+        
+        # 1. Activar los autofiltros de Excel en la primera fila
+        worksheet.auto_filter.ref = worksheet.dimensions
+        
+        # 2. Asignar anchos de columna sin saturar la memoria RAM
+        for i, col_name in enumerate(df.columns, 1):
+            col_letter = get_column_letter(i)
+            # Damos espacio extra a los textos largos
+            if col_name in ['Proveedor/Centro suministrador', 'Texto breve']:
+                worksheet.column_dimensions[col_letter].width = 45
+            # Damos un tamaño medio a los estados
+            elif col_name in ['Estado On Time', 'Estado In Full', 'Estado OTIF']:
+                worksheet.column_dimensions[col_letter].width = 20
+            # Tamaño normal al resto
+            else:
+                worksheet.column_dimensions[col_letter].width = 15
+                
+    return output.getvalue()
 
 # ==========================================
 # BARRA LATERAL (Carga)
@@ -92,7 +118,7 @@ if archivo_me2m and archivo_me80fn:
         estados_otif = sorted(df_base['Estado OTIF'].dropna().unique())
         otif_sel = st.multiselect("Estado OTIF", estados_otif)
 
-    # Aplicar Filtros
+    # Aplicar Filtros (esto también afectará al Excel descargado)
     df = df_base.copy()
     if centro_sel:
         df = df[df['Centro'].isin(centro_sel)]
@@ -144,14 +170,14 @@ if archivo_me2m and archivo_me80fn:
 
     st.dataframe(df_mostrar, use_container_width=True, hide_index=True, column_config=config_columnas)
 
-    # Descarga ligera y legible para Excel
-    csv_bytes = df_mostrar.to_csv(index=False, sep=';', encoding='utf-8-sig').encode('utf-8-sig')
+    # Generamos el Excel en caché a partir del DataFrame YA FILTRADO
+    excel_bytes = generar_excel_formateado(df_mostrar)
 
     st.download_button(
-        label="📥 Descargar Reporte Completo (Formato Excel/CSV)",
-        data=csv_bytes,
-        file_name="Reporte_OTIF_SAP.csv",
-        mime="text/csv"
+        label="📊 Descargar Reporte en Excel (.xlsx)",
+        data=excel_bytes,
+        file_name="Reporte_OTIF_SAP.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
     st.info("👈 Sube los archivos ME2M y ME80FN para desplegar las métricas.")
