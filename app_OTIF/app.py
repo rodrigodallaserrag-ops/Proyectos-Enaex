@@ -37,7 +37,7 @@ st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de
 # FUNCIONES EN CACHÉ (Optimizadas)
 # ==========================================
 @st.cache_data(show_spinner="Procesando cruce de datos SAP y Mapeos...")
-def procesar_otif(file_me2m, file_me80fn):
+def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
     # 1. Carga de los archivos SAP
     df_me2m = pd.read_excel(file_me2m, engine="openpyxl")
     cols_me80fn = ['Documento compras', 'Posición', 'Fe.contabilización']
@@ -47,9 +47,9 @@ def procesar_otif(file_me2m, file_me80fn):
     if 'Indicador de borrado' in df_me2m.columns:
         df_me2m = df_me2m[df_me2m['Indicador de borrado'].isna()].copy()
 
-    # 2. Carga de Archivos de Mapeo Locales
+    # 2. Carga de Archivos de Mapeo Locales (Cargados vía Streamlit)
     try:
-        df_centro = pd.read_excel("CENTRO_SOCIEDAD Compras MRO.xlsx", engine="openpyxl")
+        df_centro = pd.read_excel(file_centro, engine="openpyxl")
         df_centro['Título'] = df_centro['Título'].astype(str)
         df_me2m['Centro'] = df_me2m['Centro'].astype(str)
         df_me2m = pd.merge(df_me2m, df_centro[['Título', 'Nombre Centro', 'Nombre Centro 2']], 
@@ -59,7 +59,7 @@ def procesar_otif(file_me2m, file_me80fn):
         df_me2m['Nombre Centro 2'] = df_me2m['Centro']
         
     try:
-        df_grupo = pd.read_excel("Responsable_Grupo_Compras.xlsx", engine="openpyxl")
+        df_grupo = pd.read_excel(file_grupo, engine="openpyxl")
         df_grupo['Grupo de Compras'] = df_grupo['Grupo de Compras'].astype(str)
         df_me2m['Grupo de compras'] = df_me2m['Grupo de compras'].astype(str)
         df_me2m = pd.merge(df_me2m, df_grupo[['Grupo de Compras', 'Responsable.title']], 
@@ -184,6 +184,8 @@ with st.sidebar:
     st.header("📂 Carga de Datos")
     archivo_me2m = st.file_uploader("1. Sube ME2M (.xlsx)", type=["xlsx"])
     archivo_me80fn = st.file_uploader("2. Sube ME80FN (.xlsx)", type=["xlsx"])
+    archivo_grupo = st.file_uploader("3. Sube Responsable Grupo (.xlsx)", type=["xlsx"])
+    archivo_centro = st.file_uploader("4. Sube Centro Sociedad (.xlsx)", type=["xlsx"])
     
     # Botón de cierre
     st.divider()
@@ -194,8 +196,8 @@ with st.sidebar:
 # ==========================================
 # CUERPO PRINCIPAL
 # ==========================================
-if archivo_me2m and archivo_me80fn:
-    df_base = procesar_otif(archivo_me2m, archivo_me80fn)
+if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
+    df_base = procesar_otif(archivo_me2m, archivo_me80fn, archivo_centro, archivo_grupo)
 
     # Filtro de semana en el sidebar 
     with st.sidebar:
@@ -327,4 +329,4 @@ if archivo_me2m and archivo_me80fn:
         use_container_width=True
     )
 else:
-    st.info("👈 Sube los archivos ME2M y ME80FN para desplegar las métricas correspondientes.")
+    st.info("👈 Sube los 4 archivos en la barra lateral para desplegar las métricas correspondientes.")
