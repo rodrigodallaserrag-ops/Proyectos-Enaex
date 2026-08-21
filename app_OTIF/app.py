@@ -6,25 +6,28 @@ st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
 st.title("🎯 Dashboard OTIF (On Time, In Full)")
 st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de SAP.")
 
-# Función para generar archivo Excel formateado (.xlsx) con filtros y anchos ajustados
+# ==========================================
+# FUNCIONES EN CACHÉ (Para no trabar la app)
+# ==========================================
+
+@st.cache_data(show_spinner="Generando archivo Excel listo para descargar...")
 def generar_excel_formateado(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Reporte OTIF')
         worksheet = writer.sheets['Reporte OTIF']
         
-        # 1. Activar auto-filtros en la primera fila (encabezados)
+        # 1. Activar auto-filtros en la primera fila
         worksheet.auto_filter.ref = worksheet.dimensions
         
-        # 2. Auto-ajustar el ancho de las columnas según el contenido
+        # 2. Asignar un ancho fijo estándar para no sobrecargar procesando 100,000 filas
         for col in worksheet.columns:
-            max_len = max(len(str(cell.value or '')) for cell in col)
             col_letter = col[0].column_letter
-            worksheet.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 50)
+            worksheet.column_dimensions[col_letter].width = 25
             
     return output.getvalue()
 
-@st.cache_data(show_spinner="Procesando archivos...")
+@st.cache_data(show_spinner="Procesando cruce de datos...")
 def procesar_otif(file_me2m, file_me80fn):
     df_me2m = pd.read_excel(file_me2m, engine="openpyxl")
     df_me80fn = pd.read_excel(file_me80fn, engine="openpyxl")
@@ -56,12 +59,17 @@ def procesar_otif(file_me2m, file_me80fn):
 
     return df_otif
 
-# Carga en barra lateral
+# ==========================================
+# BARRA LATERAL (Carga)
+# ==========================================
 with st.sidebar:
     st.header("📂 Carga de Datos")
     archivo_me2m = st.file_uploader("1. Sube ME2M (.xlsx)", type=["xlsx"])
     archivo_me80fn = st.file_uploader("2. Sube ME80FN (.xlsx)", type=["xlsx"])
 
+# ==========================================
+# CUERPO PRINCIPAL
+# ==========================================
 if archivo_me2m and archivo_me80fn:
     df_base = procesar_otif(archivo_me2m, archivo_me80fn)
 
@@ -81,7 +89,7 @@ if archivo_me2m and archivo_me80fn:
         proveedores = sorted(df_base['Proveedor/Centro suministrador'].dropna().astype(str).unique())
         prov_sel = st.multiselect("Proveedor", proveedores)
 
-    # Filtrar
+    # Filtrar datos
     df = df_base.copy()
     if centro_sel:
         df = df[df['Centro'].isin(centro_sel)]
@@ -112,14 +120,16 @@ if archivo_me2m and archivo_me80fn:
     cols_mostrar = [
         'Documento compras', 'Posición', 'Centro', 'Proveedor/Centro suministrador',
         'Texto breve', 'Cantidad de pedido', 'Por entregar (cantidad)', 
-        'Fecha entrega estad.', 'Fecha_Ingreso_SAP', 'On_Time', 'In_Full', 'OTIF'
+        'Fecha_Estadistica', 'Fecha_Ingreso_SAP', 'On_Time', 'In_Full', 'OTIF'
     ]
-    st.dataframe(df[[c for c in cols_mostrar if c in df.columns]], use_container_width=True, hide_index=True)
+    # Filtramos solo las columnas que queremos mostrar
+    df_mostrar = df[[c for c in cols_mostrar if c in df.columns]]
+    st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
 
-    # Generación de Excel en memoria
-    excel_bytes = generar_excel_formateado(df)
+    # Generación de Excel (ahora optimizada)
+    excel_bytes = generar_excel_formateado(df_mostrar)
 
-    # Botón de Descarga Excel (.xlsx)
+    # Botón de Descarga
     st.download_button(
         label="📊 Descargar Reporte en Excel (.xlsx)",
         data=excel_bytes,
