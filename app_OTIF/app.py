@@ -39,7 +39,7 @@ def procesar_otif(file_me2m, file_me80fn):
     )
     df_otif['OTIF'] = df_otif['In_Full'] & df_otif['On_Time']
 
-    # 6. Mapeo de estados visuales claros (reemplaza las casillas vacías)
+    # 6. Mapeo de estados visuales
     df_otif['Estado On Time'] = df_otif.apply(
         lambda r: '🔵 A Tiempo' if r['On_Time'] 
         else ('⏳ Pendiente' if pd.isna(r['Fecha_Ingreso_SAP']) else '🔴 Atrasado'), 
@@ -66,19 +66,30 @@ if archivo_me2m and archivo_me80fn:
 
     # Filtros
     st.markdown("**🔍 Filtros de Análisis**")
+    
+    # Fila 1: Filtros Generales
     f_col1, f_col2, f_col3 = st.columns(3)
-
     with f_col1:
         centros = sorted(df_base['Centro'].dropna().unique())
         centro_sel = st.multiselect("Centro Logístico", centros)
-
     with f_col2:
         grupos = sorted(df_base['Grupo de compras'].dropna().unique())
         grupo_sel = st.multiselect("Grupo de Compras", grupos)
-
     with f_col3:
         proveedores = sorted(df_base['Proveedor/Centro suministrador'].dropna().astype(str).unique())
         prov_sel = st.multiselect("Proveedor", proveedores)
+
+    # Fila 2: Filtros de Estados OTIF
+    f_col4, f_col5, f_col6 = st.columns(3)
+    with f_col4:
+        estados_on_time = sorted(df_base['Estado On Time'].dropna().unique())
+        on_time_sel = st.multiselect("Estado On Time", estados_on_time)
+    with f_col5:
+        estados_in_full = sorted(df_base['Estado In Full'].dropna().unique())
+        in_full_sel = st.multiselect("Estado In Full", estados_in_full)
+    with f_col6:
+        estados_otif = sorted(df_base['Estado OTIF'].dropna().unique())
+        otif_sel = st.multiselect("Estado OTIF", estados_otif)
 
     # Aplicar Filtros
     df = df_base.copy()
@@ -88,6 +99,12 @@ if archivo_me2m and archivo_me80fn:
         df = df[df['Grupo de compras'].isin(grupo_sel)]
     if prov_sel:
         df = df[df['Proveedor/Centro suministrador'].astype(str).isin(prov_sel)]
+    if on_time_sel:
+        df = df[df['Estado On Time'].isin(on_time_sel)]
+    if in_full_sel:
+        df = df[df['Estado In Full'].isin(in_full_sel)]
+    if otif_sel:
+        df = df[df['Estado OTIF'].isin(otif_sel)]
 
     # KPIs
     total_lineas = len(df)
@@ -115,7 +132,7 @@ if archivo_me2m and archivo_me80fn:
     ]
     df_mostrar = df[[c for c in cols_mostrar if c in df.columns]]
 
-    # Configuración de columnas para ampliar ancho y mostrar texto completo
+    # Configuración de columnas para ampliar ancho en la vista web
     config_columnas = {
         "Proveedor/Centro suministrador": st.column_config.TextColumn("Proveedor/Centro suministrador", width="large"),
         "Texto breve": st.column_config.TextColumn("Texto breve", width="large"),
