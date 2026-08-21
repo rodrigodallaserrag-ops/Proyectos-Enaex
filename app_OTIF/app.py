@@ -5,9 +5,9 @@ from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
 
-# ==========================================
+# =========================================
 # SISTEMA DE LOGIN (Contraseña)
-# ==========================================
+# =========================================
 # 1. Creamos la variable de estado si no existe
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
