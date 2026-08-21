@@ -9,13 +9,13 @@ st.title("🎯 Dashboard OTIF (On Time, In Full)")
 st.markdown("Analiza el cumplimiento de entregas de los proveedores.")
 
 # ==========================================
-# 2. FUNCIÓN DE PROCESAMIENTO (Caché para que sea rápido)
+# 2. FUNCIÓN DE PROCESAMIENTO
 # ==========================================
 @st.cache_data(show_spinner="Procesando cruce de datos...")
 def procesar_otif(file_me2m, file_me80fn):
-    # Leer los archivos
-    df_me2m = pd.read_excel(file_me2m)
-    df_me80fn = pd.read_excel(file_me80fn)
+    # Se especifica engine="openpyxl" para evitar errores de lectura
+    df_me2m = pd.read_excel(file_me2m, engine="openpyxl")
+    df_me80fn = pd.read_excel(file_me80fn, engine="openpyxl")
 
     # Agrupar recepciones (ME80FN) por OC y Posición
     df_recepciones = df_me80fn.groupby(['Documento compras', 'Posición']).agg(
@@ -23,27 +23,22 @@ def procesar_otif(file_me2m, file_me80fn):
         Fecha_Real_Entrega=('Fe.contabilización', 'max')
     ).reset_index()
 
-    # Cruzar ME2M con las recepciones (Left join)
+    # Cruzar ME2M con recepciones (Left join)
     df_otif = pd.merge(df_me2m, df_recepciones, on=['Documento compras', 'Posición'], how='left')
 
-    # Rellenar con 0 las cantidades de lo que aún no ha llegado nada
+    # Rellenar con 0 las cantidades sin entregas registradas
     df_otif['Cantidad_Recibida'] = df_otif['Cantidad_Recibida'].fillna(0)
 
-    # Asegurar formato de fechas
+    # Convertir formato de fechas
     df_otif['Fecha de entrega'] = pd.to_datetime(df_otif['Fecha de entrega']).dt.date
     df_otif['Fecha_Real_Entrega'] = pd.to_datetime(df_otif['Fecha_Real_Entrega']).dt.date
 
-    # Lógica de los indicadores
-    # In Full: Recibió todo lo pedido
+    # Lógica OTIF
     df_otif['In_Full'] = df_otif['Cantidad_Recibida'] >= df_otif['Cantidad de pedido']
-    
-    # On Time: Tiene fecha de entrega real y llegó antes o igual a la promesa
     df_otif['On_Time'] = df_otif.apply(
         lambda x: True if pd.notna(x['Fecha_Real_Entrega']) and (x['Fecha_Real_Entrega'] <= x['Fecha de entrega']) else False, 
         axis=1
     )
-    
-    # OTIF: Cumple In Full y On Time simultáneamente
     df_otif['OTIF'] = df_otif['In_Full'] & df_otif['On_Time']
 
     return df_otif
@@ -62,7 +57,6 @@ with st.sidebar:
 # 4. CUERPO PRINCIPAL (Filtros y KPIs)
 # ==========================================
 if archivo_me2m and archivo_me80fn:
-    # Procesar los datos
     df_resultado = procesar_otif(archivo_me2m, archivo_me80fn)
 
     st.divider()
@@ -98,7 +92,6 @@ if archivo_me2m and archivo_me80fn:
     st.divider()
     st.subheader("📊 Resumen General")
     
-    # Usamos las tarjetas nativas de Streamlit (metrics) que son muy limpias
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     kpi1.metric("Líneas de Pedido", f"{total_lineas:,}")
     kpi2.metric("⏱️ On Time (A Tiempo)", f"{pct_on_time:.1f}%")
@@ -109,18 +102,15 @@ if archivo_me2m and archivo_me80fn:
     st.divider()
     st.subheader("📋 Detalle de Órdenes de Compra")
     
-    # Preparamos una tabla más limpia para mostrar al usuario
     columnas_mostrar = [
         'Documento compras', 'Posición', 'Centro', 'Proveedor/Centro suministrador', 
         'Texto breve', 'Cantidad de pedido', 'Cantidad_Recibida', 
         'Fecha de entrega', 'Fecha_Real_Entrega', 'On_Time', 'In_Full', 'OTIF'
     ]
     
-    # Dejamos solo las columnas que importan y renombramos algunas para que se vean mejor
     df_mostrar = df_filtrado[[c for c in columnas_mostrar if c in df_filtrado.columns]].copy()
     
     st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
 
 else:
-    # Mensaje de bienvenida si no hay archivos cargados
     st.warning("👈 Por favor, sube los archivos **ME2M** y **ME80FN** en el menú de la izquierda para comenzar.")
