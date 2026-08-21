@@ -1,4 +1,3 @@
-import io
 import pandas as pd
 import streamlit as st
 
@@ -7,30 +6,15 @@ st.title("🎯 Dashboard OTIF (On Time, In Full)")
 st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de SAP.")
 
 # ==========================================
-# FUNCIONES EN CACHÉ (Para no trabar la app)
+# FUNCIÓN EN CACHÉ (Optimizada para memoria)
 # ==========================================
-
-@st.cache_data(show_spinner="Generando archivo Excel listo para descargar...")
-def generar_excel_formateado(df):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Reporte OTIF')
-        worksheet = writer.sheets['Reporte OTIF']
-        
-        # 1. Activar auto-filtros en la primera fila
-        worksheet.auto_filter.ref = worksheet.dimensions
-        
-        # 2. Asignar un ancho fijo estándar para no sobrecargar procesando 100,000 filas
-        for col in worksheet.columns:
-            col_letter = col[0].column_letter
-            worksheet.column_dimensions[col_letter].width = 25
-            
-    return output.getvalue()
-
 @st.cache_data(show_spinner="Procesando cruce de datos...")
 def procesar_otif(file_me2m, file_me80fn):
+    # Leemos los Excel
     df_me2m = pd.read_excel(file_me2m, engine="openpyxl")
-    df_me80fn = pd.read_excel(file_me80fn, engine="openpyxl")
+    # Para ME80FN, solo nos interesan ciertas columnas para ahorrar memoria
+    cols_me80fn = ['Documento compras', 'Posición', 'Fe.contabilización']
+    df_me80fn = pd.read_excel(file_me80fn, engine="openpyxl", usecols=lambda c: c in cols_me80fn)
 
     # 1. Descartar posiciones anuladas en SAP
     if 'Indicador de borrado' in df_me2m.columns:
@@ -122,19 +106,19 @@ if archivo_me2m and archivo_me80fn:
         'Texto breve', 'Cantidad de pedido', 'Por entregar (cantidad)', 
         'Fecha_Estadistica', 'Fecha_Ingreso_SAP', 'On_Time', 'In_Full', 'OTIF'
     ]
-    # Filtramos solo las columnas que queremos mostrar
     df_mostrar = df[[c for c in cols_mostrar if c in df.columns]]
     st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
 
-    # Generación de Excel (ahora optimizada)
-    excel_bytes = generar_excel_formateado(df_mostrar)
+    # ==========================================
+    # DESCARGA LIGERA Y FORMATEADA (BOM UTF-8 y Semicolon)
+    # ==========================================
+    csv_bytes = df_mostrar.to_csv(index=False, sep=';', encoding='utf-8-sig').encode('utf-8-sig')
 
-    # Botón de Descarga
     st.download_button(
-        label="📊 Descargar Reporte en Excel (.xlsx)",
-        data=excel_bytes,
-        file_name="Reporte_OTIF_SAP.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        label="📥 Descargar Reporte Completo (Formato Excel/CSV)",
+        data=csv_bytes,
+        file_name="Reporte_OTIF_SAP.csv",
+        mime="text/csv"
     )
 else:
     st.info("👈 Sube los archivos ME2M y ME80FN para desplegar las métricas.")
