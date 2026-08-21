@@ -4,6 +4,35 @@ import io
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
+
+# ==========================================
+# SISTEMA DE LOGIN (Contraseña)
+# ==========================================
+# 1. Creamos la variable de estado si no existe
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+
+# 2. Si no está autenticado, mostramos la pantalla de login
+if not st.session_state["autenticado"]:
+    st.title("🔒 Acceso Restringido")
+    st.markdown("Por favor, ingresa la contraseña para acceder al Dashboard.")
+    
+    clave = st.text_input("Contraseña de acceso", type="password")
+    
+    if st.button("Ingresar"):
+        if clave == "ENAEX2026":
+            st.session_state["autenticado"] = True
+            st.rerun() # Recarga la página para mostrar el dashboard
+        elif clave != "":
+            st.error("❌ Contraseña incorrecta. Intenta nuevamente.")
+            
+    # Detenemos la ejecución de la app aquí para que no se vea nada del dashboard
+    st.stop()
+
+
+# ==========================================
+# SI YA INICIÓ SESIÓN, CONTINÚA EL DASHBOARD
+# ==========================================
 st.title("🎯 Dashboard OTIF (On Time, In Full)")
 st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de SAP.")
 
@@ -65,13 +94,10 @@ def generar_excel_formateado(df):
         # 2. Asignar anchos de columna sin saturar la memoria RAM
         for i, col_name in enumerate(df.columns, 1):
             col_letter = get_column_letter(i)
-            # Damos espacio extra a los textos largos
             if col_name in ['Proveedor/Centro suministrador', 'Texto breve']:
                 worksheet.column_dimensions[col_letter].width = 45
-            # Damos un tamaño medio a los estados
             elif col_name in ['Estado On Time', 'Estado In Full', 'Estado OTIF']:
                 worksheet.column_dimensions[col_letter].width = 20
-            # Tamaño normal al resto
             else:
                 worksheet.column_dimensions[col_letter].width = 15
                 
@@ -84,6 +110,12 @@ with st.sidebar:
     st.header("📂 Carga de Datos")
     archivo_me2m = st.file_uploader("1. Sube ME2M (.xlsx)", type=["xlsx"])
     archivo_me80fn = st.file_uploader("2. Sube ME80FN (.xlsx)", type=["xlsx"])
+    
+    # Botón para cerrar sesión
+    st.divider()
+    if st.button("Cerrar Sesión"):
+        st.session_state["autenticado"] = False
+        st.rerun()
 
 # ==========================================
 # CUERPO PRINCIPAL
