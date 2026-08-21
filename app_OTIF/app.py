@@ -211,4 +211,4 @@ if archivo_me2m and archivo_me80fn:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
-    st.info("👈 Sube los archivos ME2M y ME80FN para desplegar las métricas.")
+    st.info("👈 Sube los archivos ME2M y ME80FN para desplegar las métricas correspondientes.")
