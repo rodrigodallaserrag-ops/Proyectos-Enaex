@@ -6,13 +6,11 @@ st.title("🎯 Dashboard OTIF (On Time, In Full)")
 st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de SAP.")
 
 # ==========================================
-# FUNCIÓN EN CACHÉ (Optimizada para memoria)
+# FUNCIÓN EN CACHÉ (Optimizada)
 # ==========================================
-@st.cache_data(show_spinner="Procesando cruce de datos...")
+@st.cache_data(show_spinner="Procesando cruce de datos SAP...")
 def procesar_otif(file_me2m, file_me80fn):
-    # Leemos los Excel
     df_me2m = pd.read_excel(file_me2m, engine="openpyxl")
-    # Para ME80FN, solo nos interesan ciertas columnas para ahorrar memoria
     cols_me80fn = ['Documento compras', 'Posición', 'Fe.contabilización']
     df_me80fn = pd.read_excel(file_me80fn, engine="openpyxl", usecols=lambda c: c in cols_me80fn)
 
@@ -20,7 +18,7 @@ def procesar_otif(file_me2m, file_me80fn):
     if 'Indicador de borrado' in df_me2m.columns:
         df_me2m = df_me2m[df_me2m['Indicador de borrado'].isna()].copy()
 
-    # 2. Obtener fecha de la última recepción real en ME80FN
+    # 2. Última fecha de recepción real en ME80FN
     df_recepciones = df_me80fn.groupby(['Documento compras', 'Posición']).agg(
         Fecha_Ingreso_SAP=('Fe.contabilización', 'max')
     ).reset_index()
@@ -32,7 +30,7 @@ def procesar_otif(file_me2m, file_me80fn):
     df_otif['Fecha_Estadistica'] = pd.to_datetime(df_otif['Fecha entrega estad.'], errors='coerce').dt.date
     df_otif['Fecha_Ingreso_SAP'] = pd.to_datetime(df_otif['Fecha_Ingreso_SAP'], errors='coerce').dt.date
 
-    # 5. Evaluación de Reglas
+    # 5. Cálculo de Reglas OTIF
     df_otif['In_Full'] = df_otif['Por entregar (cantidad)'] == 0
     df_otif['On_Time'] = (
         df_otif['Fecha_Ingreso_SAP'].notna() & 
@@ -40,6 +38,15 @@ def procesar_otif(file_me2m, file_me80fn):
         (df_otif['Fecha_Ingreso_SAP'] <= df_otif['Fecha_Estadistica'])
     )
     df_otif['OTIF'] = df_otif['In_Full'] & df_otif['On_Time']
+
+    # 6. Mapeo de estados visuales claros (reemplaza las casillas vacías)
+    df_otif['Estado On Time'] = df_otif.apply(
+        lambda r: '🔵 A Tiempo' if r['On_Time'] 
+        else ('⏳ Pendiente' if pd.isna(r['Fecha_Ingreso_SAP']) else '🔴 Atrasado'), 
+        axis=1
+    )
+    df_otif['Estado In Full'] = df_otif['In_Full'].map({True: '🔵 Completo', False: '🔴 Incompleto'})
+    df_otif['Estado OTIF'] = df_otif['OTIF'].map({True: '🔵 Cumple OTIF', False: '🔴 No Cumple'})
 
     return df_otif
 
@@ -73,7 +80,7 @@ if archivo_me2m and archivo_me80fn:
         proveedores = sorted(df_base['Proveedor/Centro suministrador'].dropna().astype(str).unique())
         prov_sel = st.multiselect("Proveedor", proveedores)
 
-    # Filtrar datos
+    # Aplicar Filtros
     df = df_base.copy()
     if centro_sel:
         df = df[df['Centro'].isin(centro_sel)]
@@ -104,14 +111,22 @@ if archivo_me2m and archivo_me80fn:
     cols_mostrar = [
         'Documento compras', 'Posición', 'Centro', 'Proveedor/Centro suministrador',
         'Texto breve', 'Cantidad de pedido', 'Por entregar (cantidad)', 
-        'Fecha_Estadistica', 'Fecha_Ingreso_SAP', 'On_Time', 'In_Full', 'OTIF'
+        'Fecha_Estadistica', 'Fecha_Ingreso_SAP', 'Estado On Time', 'Estado In Full', 'Estado OTIF'
     ]
     df_mostrar = df[[c for c in cols_mostrar if c in df.columns]]
-    st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
 
-    # ==========================================
-    # DESCARGA LIGERA Y FORMATEADA (BOM UTF-8 y Semicolon)
-    # ==========================================
+    # Configuración de columnas para ampliar ancho y mostrar texto completo
+    config_columnas = {
+        "Proveedor/Centro suministrador": st.column_config.TextColumn("Proveedor/Centro suministrador", width="large"),
+        "Texto breve": st.column_config.TextColumn("Texto breve", width="large"),
+        "Estado On Time": st.column_config.TextColumn("On Time", width="medium"),
+        "Estado In Full": st.column_config.TextColumn("In Full", width="medium"),
+        "Estado OTIF": st.column_config.TextColumn("OTIF", width="medium"),
+    }
+
+    st.dataframe(df_mostrar, use_container_width=True, hide_index=True, column_config=config_columnas)
+
+    # Descarga ligera y legible para Excel
     csv_bytes = df_mostrar.to_csv(index=False, sep=';', encoding='utf-8-sig').encode('utf-8-sig')
 
     st.download_button(
