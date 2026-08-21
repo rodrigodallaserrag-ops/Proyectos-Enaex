@@ -1,68 +1,53 @@
 import pandas as pd
 import streamlit as st
 
-# Configuración de la página
 st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
-st.title("🎯 Dashboard OTIF - Nivel de Servicio")
+st.title("🎯 Dashboard OTIF (On Time, In Full)")
+st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de SAP.")
 
-# Función de procesamiento con limpieza de registros borrados
-@st.cache_data(show_spinner="Procesando datos de SAP...")
+@st.cache_data(show_spinner="Procesando archivos...")
 def procesar_otif(file_me2m, file_me80fn):
     df_me2m = pd.read_excel(file_me2m, engine="openpyxl")
     df_me80fn = pd.read_excel(file_me80fn, engine="openpyxl")
 
-    # 1. Filtrar posiciones borradas en SAP (L o S)
+    # 1. Descartar posiciones anuladas en SAP
     if 'Indicador de borrado' in df_me2m.columns:
         df_me2m = df_me2m[df_me2m['Indicador de borrado'].isna()].copy()
 
-    # 2. Agrupar recepciones reales en ME80FN
+    # 2. Obtener la fecha de la última recepción real en ME80FN
     df_recepciones = df_me80fn.groupby(['Documento compras', 'Posición']).agg(
-        Cantidad_Recibida=('Cantidad', 'sum'),
-        Fecha_Real_Entrega=('Fe.contabilización', 'max')
+        Fecha_Ingreso_SAP=('Fe.contabilización', 'max')
     ).reset_index()
 
     # 3. Cruzar ME2M con ME80FN
     df_otif = pd.merge(df_me2m, df_recepciones, on=['Documento compras', 'Posición'], how='left')
 
-    # 4. Normalizar datos
-    df_otif['Cantidad_Recibida'] = df_otif['Cantidad_Recibida'].fillna(0)
-    df_otif['Fecha de entrega'] = pd.to_datetime(df_otif['Fecha de entrega']).dt.date
-    df_otif['Fecha_Real_Entrega'] = pd.to_datetime(df_otif['Fecha_Real_Entrega']).dt.date
+    # 4. Formato de fechas
+    df_otif['Fecha_Estadistica'] = pd.to_datetime(df_otif['Fecha entrega estad.'], errors='coerce').dt.date
+    df_otif['Fecha_Ingreso_SAP'] = pd.to_datetime(df_otif['Fecha_Ingreso_SAP'], errors='coerce').dt.date
 
-    # 5. Lógica de Indicadores
-    df_otif['In_Full'] = df_otif['Cantidad_Recibida'] >= df_otif['Cantidad de pedido']
-    df_otif['On_Time'] = df_otif.apply(
-        lambda x: True if pd.notna(x['Fecha_Real_Entrega']) and (x['Fecha_Real_Entrega'] <= x['Fecha de entrega']) else False, 
-        axis=1
+    # 5. Evaluación de Reglas
+    df_otif['In_Full'] = df_otif['Por entregar (cantidad)'] == 0
+    df_otif['On_Time'] = (
+        df_otif['Fecha_Ingreso_SAP'].notna() & 
+        df_otif['Fecha_Estadistica'].notna() & 
+        (df_otif['Fecha_Ingreso_SAP'] <= df_otif['Fecha_Estadistica'])
     )
     df_otif['OTIF'] = df_otif['In_Full'] & df_otif['On_Time']
 
-    # Etiqueta de estado simplificada
-    def definir_estado(row):
-        if row['OTIF']:
-            return "Cumple OTIF"
-        elif not row['In_Full'] and row['On_Time']:
-            return "Solo A Tiempo (Incompleto)"
-        elif row['In_Full'] and not row['On_Time']:
-            return "Solo Completo (Atrasado)"
-        else:
-            return "Incumple Ambos"
-
-    df_otif['Estado_OTIF'] = df_otif.apply(definir_estado, axis=1)
-
     return df_otif
 
-# Barra Lateral
+# Carga en barra lateral
 with st.sidebar:
-    st.header("📂 Carga de Archivos")
-    archivo_me2m = st.file_uploader("1. Reporte ME2M (.xlsx)", type=["xlsx"])
-    archivo_me80fn = st.file_uploader("2. Reporte ME80FN (.xlsx)", type=["xlsx"])
+    st.header("📂 Carga de Datos")
+    archivo_me2m = st.file_uploader("1. Sube ME2M (.xlsx)", type=["xlsx"])
+    archivo_me80fn = st.file_uploader("2. Sube ME80FN (.xlsx)", type=["xlsx"])
 
 if archivo_me2m and archivo_me80fn:
     df_base = procesar_otif(archivo_me2m, archivo_me80fn)
 
-    # Filtros Superiores
-    st.markdown("### 🔍 Filtros de Análisis")
+    # Filtros
+    st.markdown("**🔍 Filtros de Análisis**")
     f_col1, f_col2, f_col3 = st.columns(3)
 
     with f_col1:
@@ -77,7 +62,7 @@ if archivo_me2m and archivo_me80fn:
         proveedores = sorted(df_base['Proveedor/Centro suministrador'].dropna().astype(str).unique())
         prov_sel = st.multiselect("Proveedor", proveedores)
 
-    # Filtrado dinámico
+    # Filtrar
     df = df_base.copy()
     if centro_sel:
         df = df[df['Centro'].isin(centro_sel)]
@@ -86,7 +71,7 @@ if archivo_me2m and archivo_me80fn:
     if prov_sel:
         df = df[df['Proveedor/Centro suministrador'].astype(str).isin(prov_sel)]
 
-    # Cálculo de Métricas
+    # KPIs
     total_lineas = len(df)
     pct_on_time = (df['On_Time'].sum() / total_lineas * 100) if total_lineas > 0 else 0
     pct_in_full = (df['In_Full'].sum() / total_lineas * 100) if total_lineas > 0 else 0
@@ -94,48 +79,25 @@ if archivo_me2m and archivo_me80fn:
 
     st.divider()
 
-    # Tarjetas Métricas
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    kpi1.metric("Líneas Activas", f"{total_lineas:,}")
-    kpi2.metric("⏱️ % On Time", f"{pct_on_time:.1f}%")
-    kpi3.metric("📦 % In Full", f"{pct_in_full:.1f}%")
-    kpi4.metric("⭐ Nivel OTIF", f"{pct_otif:.1f}%")
+    st.markdown("**📊 Indicadores de Cumplimiento**")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Líneas Activas", f"{total_lineas:,}")
+    k2.metric("⏱️ On Time", f"{pct_on_time:.1f}%")
+    k3.metric("📦 In Full", f"{pct_in_full:.1f}%")
+    k4.metric("⭐ OTIF Global", f"{pct_otif:.1f}%")
 
     st.divider()
 
-    # Visualizaciones Gráficas
-    g_col1, g_col2 = st.columns([1, 2])
+    # Tabla de Detalle
+    st.markdown("**📋 Detalle de Posiciones**")
+    cols_mostrar = [
+        'Documento compras', 'Posición', 'Centro', 'Proveedor/Centro suministrador',
+        'Texto breve', 'Cantidad de pedido', 'Por entregar (cantidad)', 
+        'Fecha entrega estad.', 'Fecha_Ingreso_SAP', 'On_Time', 'In_Full', 'OTIF'
+    ]
+    st.dataframe(df[[c for c in cols_mostrar if c in df.columns]], use_container_width=True, hide_index=True)
 
-    with g_col1:
-        st.markdown("#### Distribución de Cumplimiento")
-        conteo_estados = df['Estado_OTIF'].value_counts()
-        st.bar_chart(conteo_estados, color="#0068c9")
-
-    with g_col2:
-        st.markdown("#### Top 10 Proveedores con Menor OTIF (%)")
-        if total_lineas > 0:
-            prov_otif = df.groupby('Proveedor/Centro suministrador').agg(
-                Total=('OTIF', 'count'),
-                OTIF_OK=('OTIF', 'sum')
-            )
-            prov_otif = prov_otif[prov_otif['Total'] >= 5]  # Mínimo 5 pedidos
-            prov_otif['% OTIF'] = (prov_otif['OTIF_OK'] / prov_otif['Total']) * 100
-            top_peores = prov_otif.sort_values(by='% OTIF').head(10)['% OTIF']
-            st.bar_chart(top_peores, color="#ff2b2b")
-
-    st.divider()
-
-    # Tabla de Detalle y Exportación
-    st.markdown("#### 📋 Detalle de Posiciones")
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-    # Botón Descargar Resultados
-    csv_data = df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Descargar Reporte OTIF en CSV",
-        data=csv_data,
-        file_name="Reporte_OTIF_Filtrado.csv",
-        mime="text/csv"
-    )
+    # Descarga
+    st.download_button("📥 Descargar Reporte CSV", data=df.to_csv(index=False).encode('utf-8'), file_name="OTIF_SAP.csv", mime="text/csv")
 else:
-    st.info("💡 Por favor, sube los archivos en el menú lateral para actualizar el panel.")
+    st.info("👈 Sube los archivos ME2M y ME80FN para desplegar las métricas.")
