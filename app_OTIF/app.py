@@ -1,9 +1,28 @@
+import io
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
 st.title("🎯 Dashboard OTIF (On Time, In Full)")
 st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de SAP.")
+
+# Función para generar archivo Excel formateado (.xlsx) con filtros y anchos ajustados
+def generar_excel_formateado(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Reporte OTIF')
+        worksheet = writer.sheets['Reporte OTIF']
+        
+        # 1. Activar auto-filtros en la primera fila (encabezados)
+        worksheet.auto_filter.ref = worksheet.dimensions
+        
+        # 2. Auto-ajustar el ancho de las columnas según el contenido
+        for col in worksheet.columns:
+            max_len = max(len(str(cell.value or '')) for cell in col)
+            col_letter = col[0].column_letter
+            worksheet.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 50)
+            
+    return output.getvalue()
 
 @st.cache_data(show_spinner="Procesando archivos...")
 def procesar_otif(file_me2m, file_me80fn):
@@ -14,7 +33,7 @@ def procesar_otif(file_me2m, file_me80fn):
     if 'Indicador de borrado' in df_me2m.columns:
         df_me2m = df_me2m[df_me2m['Indicador de borrado'].isna()].copy()
 
-    # 2. Obtener la fecha de la última recepción real en ME80FN
+    # 2. Obtener fecha de la última recepción real en ME80FN
     df_recepciones = df_me80fn.groupby(['Documento compras', 'Posición']).agg(
         Fecha_Ingreso_SAP=('Fe.contabilización', 'max')
     ).reset_index()
@@ -97,7 +116,15 @@ if archivo_me2m and archivo_me80fn:
     ]
     st.dataframe(df[[c for c in cols_mostrar if c in df.columns]], use_container_width=True, hide_index=True)
 
-    # Descarga
-    st.download_button("📥 Descargar Reporte CSV", data=df.to_csv(index=False).encode('utf-8'), file_name="OTIF_SAP.csv", mime="text/csv")
+    # Generación de Excel en memoria
+    excel_bytes = generar_excel_formateado(df)
+
+    # Botón de Descarga Excel (.xlsx)
+    st.download_button(
+        label="📊 Descargar Reporte en Excel (.xlsx)",
+        data=excel_bytes,
+        file_name="Reporte_OTIF_SAP.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 else:
     st.info("👈 Sube los archivos ME2M y ME80FN para desplegar las métricas.")
