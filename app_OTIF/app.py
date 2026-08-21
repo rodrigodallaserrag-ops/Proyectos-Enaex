@@ -5,13 +5,12 @@ from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
 
-
+# ==========================================
 # SISTEMA DE LOGIN (Contraseña)
-# 1. Creamos la variable de estado si no existe
+# ==========================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 
-# 2. Si no está autenticado, mostramos la pantalla de login
 if not st.session_state["autenticado"]:
     st.title("🔒 Acceso Restringido")
     st.markdown("Por favor, ingresa la contraseña para acceder al Dashboard.")
@@ -21,11 +20,10 @@ if not st.session_state["autenticado"]:
     if st.button("Ingresar"):
         if clave == "ENAEX2026":
             st.session_state["autenticado"] = True
-            st.rerun() # Recarga la página para mostrar el dashboard
+            st.rerun()
         elif clave != "":
             st.error("❌ Contraseña incorrecta. Intenta nuevamente.")
             
-    # Detenemos la ejecución de la app aquí para que no se vea nada del dashboard
     st.stop()
 
 
@@ -33,34 +31,70 @@ if not st.session_state["autenticado"]:
 # SI YA INICIÓ SESIÓN, CONTINÚA EL DASHBOARD
 # ==========================================
 st.title("🎯 Dashboard OTIF (On Time, In Full)")
-st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de SAP.")
+st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de SAP y mapeos locales.")
 
 # ==========================================
 # FUNCIONES EN CACHÉ (Optimizadas)
 # ==========================================
-@st.cache_data(show_spinner="Procesando cruce de datos SAP...")
+@st.cache_data(show_spinner="Procesando cruce de datos SAP y Mapeos...")
 def procesar_otif(file_me2m, file_me80fn):
+    # 1. Carga de los archivos SAP
     df_me2m = pd.read_excel(file_me2m, engine="openpyxl")
     cols_me80fn = ['Documento compras', 'Posición', 'Fe.contabilización']
     df_me80fn = pd.read_excel(file_me80fn, engine="openpyxl", usecols=lambda c: c in cols_me80fn)
 
-    # 1. Descartar posiciones anuladas en SAP
+    # Descartar posiciones anuladas en SAP
     if 'Indicador de borrado' in df_me2m.columns:
         df_me2m = df_me2m[df_me2m['Indicador de borrado'].isna()].copy()
 
-    # 2. Última fecha de recepción real en ME80FN
+    # 2. Carga de Archivos de Mapeo Locales (Deben estar en la misma carpeta)
+    try:
+        df_centro = pd.read_excel("CENTRO_SOCIEDAD Compras MRO.xlsx", engine="openpyxl")
+        df_centro['Título'] = df_centro['Título'].astype(str)
+        df_me2m['Centro'] = df_me2m['Centro'].astype(str)
+        df_me2m = pd.merge(df_me2m, df_centro[['Título', 'Nombre Centro', 'Nombre Centro 2']], 
+                           left_on='Centro', right_on='Título', how='left')
+    except Exception:
+        # Prevención en caso de que el archivo no esté
+        df_me2m['Nombre Centro'] = df_me2m['Centro']
+        df_me2m['Nombre Centro 2'] = df_me2m['Centro']
+        
+    try:
+        df_grupo = pd.read_excel("Responsable_Grupo_Compras.xlsx", engine="openpyxl")
+        df_grupo['Grupo de Compras'] = df_grupo['Grupo de Compras'].astype(str)
+        df_me2m['Grupo de compras'] = df_me2m['Grupo de compras'].astype(str)
+        df_me2m = pd.merge(df_me2m, df_grupo[['Grupo de Compras', 'Responsable.title']], 
+                           left_on='Grupo de compras', right_on='Grupo de Compras', how='left')
+        df_me2m.rename(columns={'Responsable.title': 'Comprador'}, inplace=True)
+    except Exception:
+        df_me2m['Comprador'] = df_me2m['Grupo de compras']
+
+    # Llenar vacíos si algún código nuevo no está en los excels de mapeo
+    df_me2m['Nombre Centro'] = df_me2m['Nombre Centro'].fillna(df_me2m['Centro'])
+    df_me2m['Nombre Centro 2'] = df_me2m['Nombre Centro 2'].fillna(df_me2m['Centro'])
+    df_me2m['Comprador'] = df_me2m['Comprador'].fillna(df_me2m['Grupo de compras'])
+
+    # 3. Última fecha de recepción real en ME80FN
     df_recepciones = df_me80fn.groupby(['Documento compras', 'Posición']).agg(
         Fecha_Ingreso_SAP=('Fe.contabilización', 'max')
     ).reset_index()
 
-    # 3. Cruzar ME2M con ME80FN
+    # 4. Cruzar ME2M con ME80FN
     df_otif = pd.merge(df_me2m, df_recepciones, on=['Documento compras', 'Posición'], how='left')
 
-    # 4. Formato de fechas
+    # 5. Formato de fechas y cálculo de Semana/Año
     df_otif['Fecha_Estadistica'] = pd.to_datetime(df_otif['Fecha entrega estad.'], errors='coerce').dt.date
     df_otif['Fecha_Ingreso_SAP'] = pd.to_datetime(df_otif['Fecha_Ingreso_SAP'], errors='coerce').dt.date
 
-    # 5. Cálculo de Reglas OTIF
+    def get_week_year(d):
+        if pd.isna(d):
+            return 'Sin Fecha'
+        iso = d.isocalendar()
+        return f"{iso[1]}{iso[0]}" # Formato: Semana + Año (ej: 72026)
+        
+    df_otif['Semana/Año'] = df_otif['Fecha_Estadistica'].apply(get_week_year)
+
+    # 6. Cálculo de Reglas OTIF
     df_otif['In_Full'] = df_otif['Por entregar (cantidad)'] == 0
     df_otif['On_Time'] = (
         df_otif['Fecha_Ingreso_SAP'].notna() & 
@@ -69,7 +103,7 @@ def procesar_otif(file_me2m, file_me80fn):
     )
     df_otif['OTIF'] = df_otif['In_Full'] & df_otif['On_Time']
 
-    # 6. Mapeo de estados visuales claros
+    # 7. Mapeo de estados visuales
     df_otif['Estado On Time'] = df_otif.apply(
         lambda r: '🔵 A Tiempo' if r['On_Time'] 
         else ('⏳ Pendiente' if pd.isna(r['Fecha_Ingreso_SAP']) else '🔴 Atrasado'), 
@@ -80,27 +114,70 @@ def procesar_otif(file_me2m, file_me80fn):
 
     return df_otif
 
-@st.cache_data(show_spinner="Preparando archivo Excel formateado...")
-def generar_excel_formateado(df):
+# Función genérica para crear las tablas resumen con totales
+def generar_tabla_resumen(df_filtrado, col_agrupacion, nombre_columna):
+    if df_filtrado.empty:
+        return pd.DataFrame(columns=[nombre_columna, 'Pos. OC', 'OTIF'])
+        
+    res = df_filtrado.groupby(col_agrupacion).agg(
+        Pos_OC=('OTIF', 'count'),
+        OTIF_pct=('OTIF', 'mean')
+    ).reset_index()
+    
+    res.rename(columns={col_agrupacion: nombre_columna, 'Pos_OC': 'Pos. OC'}, inplace=True)
+    
+    # Calcular Totales
+    total_pos = res['Pos. OC'].sum()
+    total_pct = df_filtrado['OTIF'].mean()
+    
+    total_row = pd.DataFrame({
+        nombre_columna: ['Total general'],
+        'Pos. OC': [total_pos],
+        'OTIF_pct': [total_pct]
+    })
+    
+    res = pd.concat([res, total_row], ignore_index=True)
+    
+    # Darle formato de porcentaje a la columna OTIF (ej: "87%")
+    res['OTIF'] = (res['OTIF_pct'] * 100).fillna(0).round(0).astype(int).astype(str) + "%"
+    res = res.drop(columns=['OTIF_pct'])
+    
+    # Ordenar excluyendo la fila "Total general"
+    res_body = res.iloc[:-1].sort_values(by='Pos. OC', ascending=False)
+    res_final = pd.concat([res_body, res.iloc[[-1]]])
+    
+    return res_final
+
+@st.cache_data(show_spinner="Preparando Excel Resumen Multitabla...")
+def generar_excel_resumen(df_detalle, df_t1, df_t2, df_t3):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Reporte OTIF')
-        worksheet = writer.sheets['Reporte OTIF']
-        
-        # 1. Activar los autofiltros de Excel en la primera fila
-        worksheet.auto_filter.ref = worksheet.dimensions
-        
-        # 2. Asignar anchos de columna sin saturar la memoria RAM
-        for i, col_name in enumerate(df.columns, 1):
+        # Pestaña 1: Detalle Completo
+        df_detalle.to_excel(writer, index=False, sheet_name='Detalle Posiciones')
+        ws0 = writer.sheets['Detalle Posiciones']
+        ws0.auto_filter.ref = ws0.dimensions
+        for i, col_name in enumerate(df_detalle.columns, 1):
             col_letter = get_column_letter(i)
-            if col_name in ['Proveedor/Centro suministrador', 'Texto breve']:
-                worksheet.column_dimensions[col_letter].width = 45
-            elif col_name in ['Estado On Time', 'Estado In Full', 'Estado OTIF']:
-                worksheet.column_dimensions[col_letter].width = 20
+            if col_name in ['Proveedor/Centro suministrador', 'Texto breve', 'Comprador']:
+                ws0.column_dimensions[col_letter].width = 40
             else:
-                worksheet.column_dimensions[col_letter].width = 15
+                ws0.column_dimensions[col_letter].width = 18
+
+        # Configuración común para las pestañas resumen
+        def format_summary_sheet(sheet_name, df_res):
+            df_res.to_excel(writer, index=False, sheet_name=sheet_name)
+            ws = writer.sheets[sheet_name]
+            ws.column_dimensions['A'].width = 35
+            ws.column_dimensions['B'].width = 15
+            ws.column_dimensions['C'].width = 15
+
+        # Pestañas 2, 3 y 4: Resúmenes
+        format_summary_sheet('Resumen Comprador', df_t1)
+        format_summary_sheet('Resumen Planta', df_t2)
+        format_summary_sheet('Resumen Planta Macro', df_t3)
                 
     return output.getvalue()
+
 
 # ==========================================
 # BARRA LATERAL (Carga)
@@ -110,7 +187,7 @@ with st.sidebar:
     archivo_me2m = st.file_uploader("1. Sube ME2M (.xlsx)", type=["xlsx"])
     archivo_me80fn = st.file_uploader("2. Sube ME80FN (.xlsx)", type=["xlsx"])
     
-    # Botón para cerrar sesión
+    # Botón de cierre
     st.divider()
     if st.button("Cerrar Sesión"):
         st.session_state["autenticado"] = False
@@ -122,10 +199,18 @@ with st.sidebar:
 if archivo_me2m and archivo_me80fn:
     df_base = procesar_otif(archivo_me2m, archivo_me80fn)
 
-    # Filtros
+    # Inyectar el filtro de semana en el sidebar (ya que ahora tenemos la variable calculada)
+    with st.sidebar:
+        st.divider()
+        st.markdown("**📅 Filtro de Tiempo**")
+        semanas_disp = sorted([s for s in df_base['Semana/Año'].unique() if s != 'Sin Fecha'])
+        if 'Sin Fecha' in df_base['Semana/Año'].unique():
+            semanas_disp.append('Sin Fecha')
+        semana_sel = st.multiselect("Semana / Año", semanas_disp)
+
+    # Filtros Horizontales Principales
     st.markdown("**🔍 Filtros de Análisis**")
     
-    # Fila 1: Filtros Generales
     f_col1, f_col2, f_col3 = st.columns(3)
     with f_col1:
         centros = sorted(df_base['Centro'].dropna().unique())
@@ -137,19 +222,7 @@ if archivo_me2m and archivo_me80fn:
         proveedores = sorted(df_base['Proveedor/Centro suministrador'].dropna().astype(str).unique())
         prov_sel = st.multiselect("Proveedor", proveedores)
 
-    # Fila 2: Filtros de Estados OTIF
-    f_col4, f_col5, f_col6 = st.columns(3)
-    with f_col4:
-        estados_on_time = sorted(df_base['Estado On Time'].dropna().unique())
-        on_time_sel = st.multiselect("Estado On Time", estados_on_time)
-    with f_col5:
-        estados_in_full = sorted(df_base['Estado In Full'].dropna().unique())
-        in_full_sel = st.multiselect("Estado In Full", estados_in_full)
-    with f_col6:
-        estados_otif = sorted(df_base['Estado OTIF'].dropna().unique())
-        otif_sel = st.multiselect("Estado OTIF", estados_otif)
-
-    # Aplicar Filtros (esto también afectará al Excel descargado)
+    # Aplicar todos los filtros
     df = df_base.copy()
     if centro_sel:
         df = df[df['Centro'].isin(centro_sel)]
@@ -157,12 +230,8 @@ if archivo_me2m and archivo_me80fn:
         df = df[df['Grupo de compras'].isin(grupo_sel)]
     if prov_sel:
         df = df[df['Proveedor/Centro suministrador'].astype(str).isin(prov_sel)]
-    if on_time_sel:
-        df = df[df['Estado On Time'].isin(on_time_sel)]
-    if in_full_sel:
-        df = df[df['Estado In Full'].isin(in_full_sel)]
-    if otif_sel:
-        df = df[df['Estado OTIF'].isin(otif_sel)]
+    if semana_sel:
+        df = df[df['Semana/Año'].isin(semana_sel)]
 
     # KPIs
     total_lineas = len(df)
@@ -181,34 +250,61 @@ if archivo_me2m and archivo_me80fn:
 
     st.divider()
 
-    # Tabla de Detalle
-    st.markdown("**📋 Detalle de Posiciones**")
+    # ==========================================
+    # NUEVO: TABLAS RESUMEN
+    # ==========================================
+    st.markdown("**📊 Tablas de Cumplimiento (Resumen)**")
+    
+    col_t1, col_t2, col_t3 = st.columns(3)
+    
+    # Generar dataframes de las 3 tablas
+    df_t1 = generar_tabla_resumen(df, 'Comprador', 'Comprador')
+    df_t2 = generar_tabla_resumen(df, 'Nombre Centro', 'Planta')
+    df_t3 = generar_tabla_resumen(df, 'Nombre Centro 2', 'Planta Macro')
+    
+    with col_t1:
+        st.dataframe(df_t1, hide_index=True, use_container_width=True)
+    with col_t2:
+        st.dataframe(df_t2, hide_index=True, use_container_width=True)
+    with col_t3:
+        st.dataframe(df_t3, hide_index=True, use_container_width=True)
+
+    st.divider()
+
+    # ==========================================
+    # TABLA DE DETALLE
+    # ==========================================
+    st.markdown("**📋 Detalle de Posiciones y Trazabilidad**")
     cols_mostrar = [
-        'Documento compras', 'Posición', 'Centro', 'Proveedor/Centro suministrador',
-        'Texto breve', 'Cantidad de pedido', 'Por entregar (cantidad)', 
-        'Fecha_Estadistica', 'Fecha_Ingreso_SAP', 'Estado On Time', 'Estado In Full', 'Estado OTIF'
+        'Documento compras', 'Posición', 'Semana/Año', 'Centro', 'Nombre Centro', 
+        'Comprador', 'Proveedor/Centro suministrador', 'Texto breve', 'Cantidad de pedido', 
+        'Por entregar (cantidad)', 'Fecha_Estadistica', 'Fecha_Ingreso_SAP', 
+        'Estado On Time', 'Estado In Full', 'Estado OTIF'
     ]
     df_mostrar = df[[c for c in cols_mostrar if c in df.columns]]
 
-    # Configuración de columnas para ampliar ancho en la vista web
     config_columnas = {
-        "Proveedor/Centro suministrador": st.column_config.TextColumn("Proveedor/Centro suministrador", width="large"),
+        "Proveedor/Centro suministrador": st.column_config.TextColumn("Proveedor", width="large"),
         "Texto breve": st.column_config.TextColumn("Texto breve", width="large"),
-        "Estado On Time": st.column_config.TextColumn("On Time", width="medium"),
-        "Estado In Full": st.column_config.TextColumn("In Full", width="medium"),
-        "Estado OTIF": st.column_config.TextColumn("OTIF", width="medium"),
+        "Comprador": st.column_config.TextColumn("Comprador", width="medium"),
     }
-
     st.dataframe(df_mostrar, use_container_width=True, hide_index=True, column_config=config_columnas)
 
-    # Generamos el Excel en caché a partir del DataFrame YA FILTRADO
-    excel_bytes = generar_excel_formateado(df_mostrar)
+    # ==========================================
+    # DESCARGA DEL SÚPER EXCEL
+    # ==========================================
+    st.divider()
+    st.markdown("### 📥 Descarga de Reportes")
+    
+    # Un solo botón que descarga 1 archivo Excel con 4 pestañas perfectas
+    excel_bytes = generar_excel_resumen(df_mostrar, df_t1, df_t2, df_t3)
 
     st.download_button(
-        label="📊 Descargar Reporte en Excel (.xlsx)",
+        label="📊 Descargar Reporte de Trazabilidad y Resumen (.xlsx)",
         data=excel_bytes,
-        file_name="Reporte_OTIF_SAP.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        file_name="Trazabilidad_OTIF_Semanal.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
     )
 else:
     st.info("👈 Sube los archivos ME2M y ME80FN para desplegar las métricas correspondientes.")
