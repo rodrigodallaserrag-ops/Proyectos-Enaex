@@ -47,7 +47,7 @@ def procesar_otif(file_me2m, file_me80fn):
     if 'Indicador de borrado' in df_me2m.columns:
         df_me2m = df_me2m[df_me2m['Indicador de borrado'].isna()].copy()
 
-    # 2. Carga de Archivos de Mapeo Locales (Deben estar en la misma carpeta)
+    # 2. Carga de Archivos de Mapeo Locales
     try:
         df_centro = pd.read_excel("CENTRO_SOCIEDAD Compras MRO.xlsx", engine="openpyxl")
         df_centro['Título'] = df_centro['Título'].astype(str)
@@ -55,7 +55,6 @@ def procesar_otif(file_me2m, file_me80fn):
         df_me2m = pd.merge(df_me2m, df_centro[['Título', 'Nombre Centro', 'Nombre Centro 2']], 
                            left_on='Centro', right_on='Título', how='left')
     except Exception:
-        # Prevención en caso de que el archivo no esté
         df_me2m['Nombre Centro'] = df_me2m['Centro']
         df_me2m['Nombre Centro 2'] = df_me2m['Centro']
         
@@ -69,7 +68,7 @@ def procesar_otif(file_me2m, file_me80fn):
     except Exception:
         df_me2m['Comprador'] = df_me2m['Grupo de compras']
 
-    # Llenar vacíos si algún código nuevo no está en los excels de mapeo
+    # Llenar vacíos 
     df_me2m['Nombre Centro'] = df_me2m['Nombre Centro'].fillna(df_me2m['Centro'])
     df_me2m['Nombre Centro 2'] = df_me2m['Nombre Centro 2'].fillna(df_me2m['Centro'])
     df_me2m['Comprador'] = df_me2m['Comprador'].fillna(df_me2m['Grupo de compras'])
@@ -82,17 +81,19 @@ def procesar_otif(file_me2m, file_me80fn):
     # 4. Cruzar ME2M con ME80FN
     df_otif = pd.merge(df_me2m, df_recepciones, on=['Documento compras', 'Posición'], how='left')
 
-    # 5. Formato de fechas y cálculo de Semana/Año
+    # 5. Formato de fechas y cálculo de Semana (Formato visual dd/mm/aa)
     df_otif['Fecha_Estadistica'] = pd.to_datetime(df_otif['Fecha entrega estad.'], errors='coerce').dt.date
     df_otif['Fecha_Ingreso_SAP'] = pd.to_datetime(df_otif['Fecha_Ingreso_SAP'], errors='coerce').dt.date
 
-    def get_week_year(d):
-        if pd.isna(d):
+    def formatear_semana(fecha_val):
+        if pd.isna(fecha_val):
             return 'Sin Fecha'
-        iso = d.isocalendar()
-        return f"{iso[1]}{iso[0]}" # Formato: Semana + Año (ej: 72026)
+        d = pd.to_datetime(fecha_val)
+        lunes = d - pd.Timedelta(days=d.weekday())
+        sem = d.isocalendar()[1]
+        return f"Sem {sem:02d} - {lunes.strftime('%d/%m/%y')}"
         
-    df_otif['Semana/Año'] = df_otif['Fecha_Estadistica'].apply(get_week_year)
+    df_otif['Semana/Año'] = df_otif['Fecha_Estadistica'].apply(formatear_semana)
 
     # 6. Cálculo de Reglas OTIF
     df_otif['In_Full'] = df_otif['Por entregar (cantidad)'] == 0
@@ -152,7 +153,6 @@ def generar_tabla_resumen(df_filtrado, col_agrupacion, nombre_columna):
 def generar_excel_resumen(df_detalle, df_t1, df_t2, df_t3):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Pestaña 1: Detalle Completo
         df_detalle.to_excel(writer, index=False, sheet_name='Detalle Posiciones')
         ws0 = writer.sheets['Detalle Posiciones']
         ws0.auto_filter.ref = ws0.dimensions
@@ -163,7 +163,6 @@ def generar_excel_resumen(df_detalle, df_t1, df_t2, df_t3):
             else:
                 ws0.column_dimensions[col_letter].width = 18
 
-        # Configuración común para las pestañas resumen
         def format_summary_sheet(sheet_name, df_res):
             df_res.to_excel(writer, index=False, sheet_name=sheet_name)
             ws = writer.sheets[sheet_name]
@@ -171,7 +170,6 @@ def generar_excel_resumen(df_detalle, df_t1, df_t2, df_t3):
             ws.column_dimensions['B'].width = 15
             ws.column_dimensions['C'].width = 15
 
-        # Pestañas 2, 3 y 4: Resúmenes
         format_summary_sheet('Resumen Comprador', df_t1)
         format_summary_sheet('Resumen Planta', df_t2)
         format_summary_sheet('Resumen Planta Macro', df_t3)
@@ -199,7 +197,7 @@ with st.sidebar:
 if archivo_me2m and archivo_me80fn:
     df_base = procesar_otif(archivo_me2m, archivo_me80fn)
 
-    # Inyectar el filtro de semana en el sidebar (ya que ahora tenemos la variable calculada)
+    # Filtro de semana en el sidebar 
     with st.sidebar:
         st.divider()
         st.markdown("**📅 Filtro de Tiempo**")
@@ -208,10 +206,10 @@ if archivo_me2m and archivo_me80fn:
             semanas_disp.append('Sin Fecha')
         semana_sel = st.multiselect("Semana / Año", semanas_disp)
 
-    # Filtros Horizontales Principales
     st.markdown("**🔍 Filtros de Análisis**")
     
-    f_col1, f_col2, f_col3 = st.columns(3)
+    # FILA 1: Entidades (Centro, Grupo, Comprador, Proveedor)
+    f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     with f_col1:
         centros = sorted(df_base['Centro'].dropna().unique())
         centro_sel = st.multiselect("Centro Logístico", centros)
@@ -219,17 +217,40 @@ if archivo_me2m and archivo_me80fn:
         grupos = sorted(df_base['Grupo de compras'].dropna().unique())
         grupo_sel = st.multiselect("Grupo de Compras", grupos)
     with f_col3:
+        compradores = sorted(df_base['Comprador'].dropna().astype(str).unique())
+        comprador_sel = st.multiselect("Comprador", compradores)
+    with f_col4:
         proveedores = sorted(df_base['Proveedor/Centro suministrador'].dropna().astype(str).unique())
         prov_sel = st.multiselect("Proveedor", proveedores)
 
-    # Aplicar todos los filtros
+    # FILA 2: Estados OTIF
+    f_col5, f_col6, f_col7 = st.columns(3)
+    with f_col5:
+        estados_on_time = sorted(df_base['Estado On Time'].dropna().unique())
+        on_time_sel = st.multiselect("Estado On Time", estados_on_time)
+    with f_col6:
+        estados_in_full = sorted(df_base['Estado In Full'].dropna().unique())
+        in_full_sel = st.multiselect("Estado In Full", estados_in_full)
+    with f_col7:
+        estados_otif = sorted(df_base['Estado OTIF'].dropna().unique())
+        otif_sel = st.multiselect("Estado OTIF", estados_otif)
+
+    # APLICAR TODOS LOS FILTROS
     df = df_base.copy()
     if centro_sel:
         df = df[df['Centro'].isin(centro_sel)]
     if grupo_sel:
         df = df[df['Grupo de compras'].isin(grupo_sel)]
+    if comprador_sel:
+        df = df[df['Comprador'].isin(comprador_sel)]
     if prov_sel:
         df = df[df['Proveedor/Centro suministrador'].astype(str).isin(prov_sel)]
+    if on_time_sel:
+        df = df[df['Estado On Time'].isin(on_time_sel)]
+    if in_full_sel:
+        df = df[df['Estado In Full'].isin(in_full_sel)]
+    if otif_sel:
+        df = df[df['Estado OTIF'].isin(otif_sel)]
     if semana_sel:
         df = df[df['Semana/Año'].isin(semana_sel)]
 
@@ -251,7 +272,7 @@ if archivo_me2m and archivo_me80fn:
     st.divider()
 
     # ==========================================
-    # NUEVO: TABLAS RESUMEN
+    # TABLAS RESUMEN TIPO PIVOT
     # ==========================================
     st.markdown("**📊 Tablas de Cumplimiento (Resumen)**")
     
@@ -296,7 +317,6 @@ if archivo_me2m and archivo_me80fn:
     st.divider()
     st.markdown("### 📥 Descarga de Reportes")
     
-    # Un solo botón que descarga 1 archivo Excel con 4 pestañas perfectas
     excel_bytes = generar_excel_resumen(df_mostrar, df_t1, df_t2, df_t3)
 
     st.download_button(
