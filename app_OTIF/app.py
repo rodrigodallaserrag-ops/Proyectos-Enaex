@@ -73,6 +73,22 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
     df_me2m['Nombre Centro 2'] = df_me2m['Nombre Centro 2'].fillna(df_me2m['Centro'])
     df_me2m['Comprador'] = df_me2m['Comprador'].fillna(df_me2m['Grupo de compras'])
 
+    # ==========================================
+    # NUEVA REGLA: AGRUPACIÓN VISTA DE CENTRO
+    # ==========================================
+    def agrupar_centro_logistico(nombre):
+        n_upper = str(nombre).upper()
+        if 'PRILLEX' in n_upper:
+            return 'Prillex'
+        elif 'RIO LOA' in n_upper or 'RÍO LOA' in n_upper:
+            return 'Rio Loa'
+        elif 'TEATINOS' in n_upper:
+            return 'Teatinos'
+        else:
+            return 'Plantas de servicio'
+            
+    df_me2m['Nombre Centro 2'] = df_me2m['Nombre Centro 2'].apply(agrupar_centro_logistico)
+
     # 3. Última fecha de recepción real en ME80FN
     df_recepciones = df_me80fn.groupby(['Documento compras', 'Posición']).agg(
         Fecha_Ingreso_SAP=('Fe.contabilización', 'max')
@@ -297,7 +313,7 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     df_t1 = generar_tabla_resumen(df_comp, 'Comprador', 'Comprador (Grupo de compras)')
 
     # 2. Preparar datos de Plantas
-    # Tabla fija (Nombre Centro 2 / Plantas de servicio)
+    # Tabla fija (Nombre Centro 2 / Plantas de servicio ahora agrupa en las 4 categorías solicitadas)
     df_t2 = generar_tabla_resumen(df, 'Nombre Centro 2', 'Centro')
     
     # Tabla dinámica (Nombre Centro)
