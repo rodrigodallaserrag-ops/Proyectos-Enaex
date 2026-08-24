@@ -222,7 +222,12 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
         grupos = sorted(df_base['Grupo de compras'].dropna().unique())
         grupo_sel = st.multiselect("Grupo de Compras", grupos)
     with f_col3:
-        compradores = sorted(df_base['Comprador'].dropna().astype(str).unique())
+        # Exclusivamente mostrar las 4 compradoras objetivas en el filtro
+        nombres_permitidos = ['Consuelo', 'Sofia', 'Sofía', 'Felipe', 'Constanza']
+        compradores = sorted([
+            c for c in df_base['Comprador'].dropna().astype(str).unique() 
+            if any(n in c for n in nombres_permitidos)
+        ])
         comprador_sel = st.multiselect("Comprador", compradores)
     with f_col4:
         proveedores = sorted(df_base['Proveedor/Centro suministrador'].dropna().astype(str).unique())
