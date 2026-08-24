@@ -1,6 +1,7 @@
 import pandas as pd
 import streamlit as st
 import io
+import requests
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
@@ -92,19 +93,38 @@ st.title("🎯 Dashboard OTIF (On Time, In Full)")
 st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de SAP y mapeos locales.")
 
 # ==========================================
-# FUNCIONES EN CACHÉ
+# FUNCIONES EN CACHÉ Y DESCARGA
 # ==========================================
+def obtener_buffer_archivo(origen):
+    """
+    Simula un navegador para descargar archivos de SharePoint y evitar el Error 403.
+    """
+    if isinstance(origen, str) and origen.startswith("http"):
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+        }
+        response = requests.get(origen, headers=headers)
+        response.raise_for_status()
+        return io.BytesIO(response.content)
+    return origen
+
 @st.cache_data(show_spinner="Cargando y procesando datos...")
 def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
-    df_me2m = pd.read_excel(file_me2m, engine="openpyxl")
+    # Convertir las URLs o archivos en buffers leíbles antes de pasarlos a pandas
+    buffer_me2m = obtener_buffer_archivo(file_me2m)
+    buffer_me80fn = obtener_buffer_archivo(file_me80fn)
+    buffer_centro = obtener_buffer_archivo(file_centro)
+    buffer_grupo = obtener_buffer_archivo(file_grupo)
+
+    df_me2m = pd.read_excel(buffer_me2m, engine="openpyxl")
     cols_me80fn = ['Documento compras', 'Posición', 'Fe.contabilización']
-    df_me80fn = pd.read_excel(file_me80fn, engine="openpyxl", usecols=lambda c: c in cols_me80fn)
+    df_me80fn = pd.read_excel(buffer_me80fn, engine="openpyxl", usecols=lambda c: c in cols_me80fn)
 
     if 'Indicador de borrado' in df_me2m.columns:
         df_me2m = df_me2m[df_me2m['Indicador de borrado'].isna()].copy()
 
     try:
-        df_centro = pd.read_excel(file_centro, engine="openpyxl")
+        df_centro = pd.read_excel(buffer_centro, engine="openpyxl")
         df_centro['Título'] = df_centro['Título'].astype(str)
         df_me2m['Centro'] = df_me2m['Centro'].astype(str)
         df_me2m = pd.merge(df_me2m, df_centro[['Título', 'Nombre Centro', 'Nombre Centro 2']], 
@@ -114,7 +134,7 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
         df_me2m['Nombre Centro 2'] = df_me2m['Centro']
         
     try:
-        df_grupo = pd.read_excel(file_grupo, engine="openpyxl")
+        df_grupo = pd.read_excel(buffer_grupo, engine="openpyxl")
         df_grupo['Grupo de Compras'] = df_grupo['Grupo de Compras'].astype(str)
         df_me2m['Grupo de compras'] = df_me2m['Grupo de compras'].astype(str)
         df_me2m = pd.merge(df_me2m, df_grupo[['Grupo de Compras', 'Responsable.title']], 
