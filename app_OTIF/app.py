@@ -24,16 +24,25 @@ LOCAL_PATHS = {
 }
 
 # ==========================================
-# INYECCIÓN DE CSS (Adaptable a Claro/Oscuro)
+# INYECCIÓN DE CSS (Adaptable a Claro/Oscuro con Scroll)
 # ==========================================
 st.markdown("""
 <style>
+    /* Nuevo contenedor para agregar la barra de scroll */
+    .table-container {
+        max-height: 400px;  /* Altura máxima antes de que aparezca el scroll */
+        overflow-y: auto;   /* Habilita el scroll vertical */
+        margin-bottom: 20px;
+        border: 1px solid rgba(128, 128, 128, 0.2);
+        border-radius: 5px;
+    }
+    
     table.custom-summary-table {
         width: 100%;
         border-collapse: collapse;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        margin-bottom: 20px;
         font-size: 14px;
+        margin-bottom: 0px; 
     }
     table.custom-summary-table thead th {
         background-color: #3b4852 !important;
@@ -42,6 +51,10 @@ st.markdown("""
         padding: 10px 12px;
         border: none;
         font-weight: 600;
+        /* Hacemos que el encabezado se quede fijo arriba al scrollear */
+        position: sticky;
+        top: 0;
+        z-index: 10;
     }
     table.custom-summary-table thead th:first-child {
         text-align: left;
@@ -60,6 +73,18 @@ st.markdown("""
         font-weight: bold;
         border-top: 3px solid #d93836 !important;
         border-bottom: none;
+    }
+    
+    /* Pequeño ajuste para que el scrollbar se vea bien en navegadores webkit */
+    .table-container::-webkit-scrollbar {
+        width: 8px;
+    }
+    .table-container::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.1); 
+    }
+    .table-container::-webkit-scrollbar-thumb {
+        background: rgba(128, 128, 128, 0.5); 
+        border-radius: 4px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -96,9 +121,6 @@ st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de
 # FUNCIONES EN CACHÉ Y DESCARGA
 # ==========================================
 def obtener_buffer_archivo(origen):
-    """
-    Simula un navegador para descargar archivos de SharePoint y evitar el Error 403.
-    """
     if isinstance(origen, str) and origen.startswith("http"):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
@@ -110,7 +132,6 @@ def obtener_buffer_archivo(origen):
 
 @st.cache_data(show_spinner="Cargando y procesando datos...")
 def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
-    # Convertir las URLs o archivos en buffers leíbles antes de pasarlos a pandas
     buffer_me2m = obtener_buffer_archivo(file_me2m)
     buffer_me80fn = obtener_buffer_archivo(file_me80fn)
     buffer_centro = obtener_buffer_archivo(file_centro)
@@ -255,8 +276,10 @@ def generar_excel_resumen(df_detalle, df_t1, df_t2, df_t3):
     return output.getvalue()
 
 def renderizar_tabla_html(df):
-    html = df.to_html(index=False, classes="custom-summary-table")
-    st.markdown(html, unsafe_allow_html=True)
+    html_table = df.to_html(index=False, classes="custom-summary-table")
+    # Envolvemos la tabla en un div con clase "table-container"
+    html_final = f'<div class="table-container">{html_table}</div>'
+    st.markdown(html_final, unsafe_allow_html=True)
 
 
 # ==========================================
