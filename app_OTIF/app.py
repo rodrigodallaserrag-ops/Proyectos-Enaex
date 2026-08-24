@@ -1,7 +1,6 @@
 import pandas as pd
 import streamlit as st
 import io
-import os
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
@@ -9,12 +8,11 @@ st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
 # ==========================================
 # CONFIGURACIÓN DE RUTAS Y ENLACES ONEDRIVE
 # ==========================================
-# Reemplaza estas URLs por los enlaces directos de descarga de OneDrive/SharePoint (?download=1)
 ONEDRIVE_URLS = {
-    "me2m": "https://tu-empresa.sharepoint.com/link_a_me2m.xlsx?download=1",
-    "me80fn": "https://tu-empresa.sharepoint.com/link_a_me80fn.xlsx?download=1",
-    "grupo": "https://tu-empresa.sharepoint.com/link_a_grupo.xlsx?download=1",
-    "centro": "https://tu-empresa.sharepoint.com/link_a_centro.xlsx?download=1"
+    "me2m": "https://empresassk-my.sharepoint.com/:x:/g/personal/rodrigo_dallaserra_enaex_com/IQCsqrxqNHT5QbsHdXTEX6j3ATbS-oKte1km1xtAm4xtMrY?download=1",
+    "me80fn": "https://empresassk-my.sharepoint.com/:x:/g/personal/rodrigo_dallaserra_enaex_com/IQD0KZXh49t6QJiNk-8Db8GLAQEodvYZizKumm57X2B8PBo?download=1",
+    "grupo": "https://empresassk-my.sharepoint.com/:x:/g/personal/rodrigo_dallaserra_enaex_com/IQCWw06SLb9DT7t5WVOemA19AT663LxrU6u9e7ZXygjKGDE?download=1",
+    "centro": "https://empresassk-my.sharepoint.com/:x:/g/personal/rodrigo_dallaserra_enaex_com/IQB6Ny2KoGQURp6nWehTspgGAfwNUsxEcW4xzfszzAfUtAM?download=1"
 }
 
 LOCAL_PATHS = {
@@ -98,7 +96,6 @@ st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de
 # ==========================================
 @st.cache_data(show_spinner="Cargando y procesando datos...")
 def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
-    # Carga de los archivos SAP
     df_me2m = pd.read_excel(file_me2m, engine="openpyxl")
     cols_me80fn = ['Documento compras', 'Posición', 'Fe.contabilización']
     df_me80fn = pd.read_excel(file_me80fn, engine="openpyxl", usecols=lambda c: c in cols_me80fn)
@@ -106,7 +103,6 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
     if 'Indicador de borrado' in df_me2m.columns:
         df_me2m = df_me2m[df_me2m['Indicador de borrado'].isna()].copy()
 
-    # Mapeos Locales
     try:
         df_centro = pd.read_excel(file_centro, engine="openpyxl")
         df_centro['Título'] = df_centro['Título'].astype(str)
@@ -305,7 +301,6 @@ if listos_para_procesar:
         st.error(f"❌ Error al cargar los datos desde {origen_datos}: {e}")
         st.stop()
 
-    # Filtro de tiempo en la barra lateral
     with st.sidebar:
         st.markdown("**📅 Filtro de Tiempo**")
         semanas_disp = sorted([s for s in df_base['Semana/Año'].unique() if s != 'Sin Fecha'])
@@ -344,7 +339,6 @@ if listos_para_procesar:
         estados_otif = sorted(df_base['Estado OTIF'].dropna().unique())
         otif_sel = st.multiselect("Estado OTIF", estados_otif)
 
-    # APLICAR FILTROS
     df = df_base.copy()
     if centro_sel:
         df = df[df['Nombre Centro 2'].isin(centro_sel)]
@@ -363,7 +357,6 @@ if listos_para_procesar:
     if semana_sel:
         df = df[df['Semana/Año'].isin(semana_sel)]
 
-    # KPIs
     total_lineas = len(df)
     pct_on_time = (df['On_Time'].sum() / total_lineas * 100) if total_lineas > 0 else 0
     pct_in_full = (df['In_Full'].sum() / total_lineas * 100) if total_lineas > 0 else 0
@@ -380,7 +373,6 @@ if listos_para_procesar:
 
     st.divider()
 
-    # TABLAS RESUMEN
     compradores_obj = [
         'Consuelo Valenzuela Fuenzalida', 
         'Sofia Oporto Oporto', 
@@ -411,7 +403,6 @@ if listos_para_procesar:
 
     st.divider()
 
-    # DETALLE
     st.markdown("**📋 Detalle de Posiciones y Trazabilidad**")
     cols_mostrar = [
         'Documento compras', 'Posición', 'Semana/Año', 'Centro', 'Nombre Centro', 
@@ -428,7 +419,6 @@ if listos_para_procesar:
     }
     st.dataframe(df_mostrar, use_container_width=True, hide_index=True, column_config=config_columnas)
 
-    # DESCARGA EXCEL
     st.divider()
     st.markdown("### 📥 Descarga de Reportes")
     
