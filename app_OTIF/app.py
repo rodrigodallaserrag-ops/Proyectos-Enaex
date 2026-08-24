@@ -279,7 +279,7 @@ def renderizar_tabla_html(df):
 
 
 # ==========================================
-# BARRA LATERAL: ORIGEN DE DATOS
+# BARRA LATERAL: ORIGEN DE DATOS Y FILTRO TIEMPO
 # ==========================================
 with st.sidebar:
     st.header("Origen de datos")
@@ -315,10 +315,6 @@ with st.sidebar:
         file_grupo = LOCAL_PATHS["grupo"]
         file_centro = LOCAL_PATHS["centro"]
 
-    st.divider()
-    if st.button("Cerrar Sesión", use_container_width=True):
-        st.session_state["autenticado"] = False
-        st.rerun()
 
 # ==========================================
 # PROCESAMIENTO Y RENDERIZADO
@@ -340,11 +336,21 @@ if listos_para_procesar:
         st.error(f"❌ Error al cargar los datos: {e}")
         st.stop()
 
-    # Pre-calcular listas para los filtros
-    semanas_disp = sorted([s for s in df_base['Semana/Año'].unique() if s != 'Sin Fecha'])
-    if 'Sin Fecha' in df_base['Semana/Año'].unique():
-        semanas_disp.append('Sin Fecha')
+    # Devolvemos el filtro de tiempo a la barra lateral
+    with st.sidebar:
+        st.divider()
+        st.markdown("**📅 Filtro de Tiempo**")
+        semanas_disp = sorted([s for s in df_base['Semana/Año'].unique() if s != 'Sin Fecha'])
+        if 'Sin Fecha' in df_base['Semana/Año'].unique():
+            semanas_disp.append('Sin Fecha')
+        semana_sel = st.multiselect("Semana / Año", semanas_disp, placeholder="Vacío = Todas las semanas")
         
+        st.divider()
+        if st.button("Cerrar Sesión", use_container_width=True):
+            st.session_state["autenticado"] = False
+            st.rerun()
+
+    # Pre-calcular listas para los filtros
     centros = sorted(df_base['Nombre Centro 2'].dropna().unique())
     grupos = sorted(df_base['Grupo de compras'].dropna().unique())
     nombres_permitidos = ['Consuelo', 'Sofia', 'Sofía', 'Felipe', 'Constanza']
@@ -357,7 +363,7 @@ if listos_para_procesar:
     estados_in_full = sorted(df_base['Estado In Full'].dropna().unique())
     estados_otif = sorted(df_base['Estado OTIF'].dropna().unique())
 
-    st.info("💡 **Solución al 'congelamiento':** Los filtros ahora están dentro de un **Panel**. Puedes agregar o quitar decenas de etiquetas con total fluidez. El sistema no se colgará porque solo procesará los datos cuando presiones el botón **Aplicar Filtros**.")
+    st.info("💡 **Solución al 'congelamiento':** Los filtros complejos ahora están dentro de un **Panel**. Puedes agregar o quitar las etiquetas que necesites con total fluidez. Solo debes dar clic en el botón **Aplicar Filtros** para ver los resultados.")
 
     # ==========================================
     # NUEVO PANEL DE FILTROS (ST.FORM)
@@ -377,15 +383,13 @@ if listos_para_procesar:
             prov_sel = st.multiselect("Proveedor", proveedores, placeholder="Vacío = Todos")
 
         # Fila 2 de filtros
-        f_col5, f_col6, f_col7, f_col8 = st.columns(4)
+        f_col5, f_col6, f_col7 = st.columns(3)
         with f_col5:
             on_time_sel = st.multiselect("Estado On Time", estados_on_time, placeholder="Vacío = Todos")
         with f_col6:
             in_full_sel = st.multiselect("Estado In Full", estados_in_full, placeholder="Vacío = Todos")
         with f_col7:
             otif_sel = st.multiselect("Estado OTIF", estados_otif, placeholder="Vacío = Todos")
-        with f_col8:
-            semana_sel = st.multiselect("Semana / Año", semanas_disp, placeholder="Vacío = Todas")
 
         btn_aplicar = st.form_submit_button("🔄 Aplicar Filtros", type="primary", use_container_width=True)
 
