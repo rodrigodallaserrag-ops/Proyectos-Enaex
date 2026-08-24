@@ -232,7 +232,8 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     # FILA 1: Entidades (Centro, Grupo, Comprador, Proveedor)
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     with f_col1:
-        centros = sorted(df_base['Centro'].dropna().unique())
+        # AQUÍ ESTÁ EL CAMBIO PRINCIPAL: Ahora filtra y muestra por "Nombre Centro 2"
+        centros = sorted(df_base['Nombre Centro 2'].dropna().unique())
         centro_sel = st.multiselect("Centro Logístico", centros)
     with f_col2:
         grupos = sorted(df_base['Grupo de compras'].dropna().unique())
@@ -264,7 +265,8 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     # APLICAR TODOS LOS FILTROS
     df = df_base.copy()
     if centro_sel:
-        df = df[df['Centro'].isin(centro_sel)]
+        # EL SEGUNDO CAMBIO ESTÁ ACÁ: Aplica la regla al campo correcto
+        df = df[df['Nombre Centro 2'].isin(centro_sel)]
     if grupo_sel:
         df = df[df['Grupo de compras'].isin(grupo_sel)]
     if comprador_sel:
