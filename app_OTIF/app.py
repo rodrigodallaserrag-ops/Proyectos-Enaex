@@ -6,6 +6,437 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
 
 # ==========================================
+# ESTILOS CSS PERSONALIZADOS (Modo Claro)
+# ==========================================
+st.markdown("""
+<style>
+    /* Contenedor Flex de Tarjetas KPI */
+    .kpi-container {
+        display: flex;
+        gap: 16px;
+        margin-top: 10px;
+        margin-bottom: 20px;
+    }
+    
+    /* Estilo base de cada Tarjeta KPI para Modo Claro */
+    .kpi-card {
+        border-radius: 8px;
+        padding: 18px 14px;
+        text-align: center;
+        flex: 1;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+        background-color: #ffffff;
+    }
+    .kpi-title {
+        font-size: 11px;
+        font-weight: 700;
+        color: #5c6c7b;
+        text-transform: uppercase;
+        letter-spacing: 0.9px;
+        margin-bottom: 8px;
+    }
+    .kpi-value {
+        font-size: 32px;
+        font-weight: 800;
+        color: #212529;
+        line-height: 1.1;
+    }
+    .kpi-subtext {
+        font-size: 11px;
+        color: #88929c;
+        margin-top: 6px;
+    }
+    
+    /* Bordes y fondos según estado en Modo Claro */
+    .kpi-neutral {
+        border: 1px solid #d1d5db;
+    }
+    .kpi-good {
+        border: 2px solid #198754;
+        background-color: #f6fcf8;
+    }
+    .kpi-bad {
+        border: 2px solid #dc3545;
+        background-color: #fdf6f6;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+def render_kpi_card(title, value, subtext="", status="neutral"):
+    sub_html = f'<div class="kpi-subtext">{subtext}</div>' if subtext else ''
+    return f"""
+    <div class="kpi-card kpi-{status}">
+        <div class="kpi-title">{title}</div>
+        <div class="kpi-value">{value}</div>
+        {sub_html}
+    </div>
+    """
+
+def generar_tabla_html(df):
+    """Genera una tabla HTML con el formato exacto solicitado (Estilo PBI)"""
+    html = '''
+    <style>
+    .custom-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: "Source Sans Pro", sans-serif;
+        font-size: 14px;
+        margin-bottom: 1.5rem;
+        background-color: white;
+    }
+    .custom-table th {
+        background-color: #36414c;
+        color: #ffffff;
+        font-weight: 600;
+        padding: 10px 15px;
+        text-align: right;
+        border: 1px solid #e0e0e0;
+    }
+    .custom-table th:first-child {
+        text-align: left;
+    }
+    .custom-table td {
+        padding: 10px 15px;
+        text-align: right;
+        border: 1px solid #e0e0e0;
+        color: #333333;
+    }
+    .custom-table td:first-child {
+        text-align: left;
+    }
+    .custom-table tr:nth-child(even) {
+        background-color: #f9f9f9;
+    }
+    .custom-table tr.total-row {
+        background-color: #36414c !important;
+        border-top: 3px solid #c00000;
+    }
+    .custom-table tr.total-row td {
+        color: #ffffff !important;
+        font-weight: bold;
+    }
+    </style>
+    <table class="custom-table">
+    '''
+    
+    # Encabezados
+    html += '<thead><tr>'
+    for col in df.columns:
+        html += f'<th>{col}</th>'
+    html += '</tr></thead><tbody>'
+    
+    # Filas
+    for i, row in df.iterrows():
+        is_total = (row[df.columns[0]] == 'TOTAL')
+        row_class = 'total-row' if is_total else ''
+        html += f'<tr class="{row_class}">'
+        for val in row:
+            html += f'<td>{val}</td>'
+        html += '</tr>'
+        
+    html += '</tbody></table>'
+    return html
+
+# ==========================================
+# SISTEMA DE LOGIN (Contraseña)
+# ==========================================
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+
+if not st.session_state["autenticado"]:
+    st.title("🔒 Acceso Restringido")
+    st.markdown("Por favor, ingresa la contraseña para acceder al Dashboard.")
+    
+    clave = st.text_input("Contraseña de acceso", type="password")
+    
+    if st.button("Ingresar"):
+        if clave == "ENAEX2026":
+            st.session_state["autenticado"] = True
+            st.rerun()
+        elif clave != "":
+            st.error("❌ Contraseña incorrecta. Intenta nuevamente.")
+            
+    st.stop()
+
+
+# ==========================================
+# SI YA INICIÓ SESIÓN, CONTINÚA EL DASHBOARD
+# ==========================================
+st.title("🎯 Dashboard OTIF (On Time, In Full)")
+st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de SAP y mapeos locales.")
+
+# ==========================================
+# FUNCIONES EN CACHÉ (Optimizadas)
+# ==========================================
+@st.cache_data(show_spinner="Procesando cruce de datos SAP y Mapeos...")
+def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
+    # 1. Carga de los archivos SAP
+    df_me2m = pd.read_excel(file_me2m, engine="openpyxl")
+    cols_me80fn = ['Documento compras', 'Posición', 'Fe.contabilización']
+    df_me80fn = pd.read_excel(file_me80fn, engine="openpyxl", usecols=lambda c: c in cols_me80fn)
+
+    # Descartar posiciones anuladas en SAP
+    if 'Indicador de borrado' in df_me2m.columns:
+        df_me2m = df_me2m[df_me2m['Indicador de borrado'].isna()].copy()
+
+    # 2. Carga de Archivos de Mapeo Locales
+    try:
+        df_centro = pd.read_excel(file_centro, engine="openpyxl")
+        df_centro['Título'] = df_centro['Título'].astype(str)
+        df_me2m['Centro'] = df_me2m['Centro'].astype(str)
+        df_me2m = pd.merge(df_me2m, df_centro[['Título', 'Nombre Centro', 'Nombre Centro 2']], 
+                           left_on='Centro', right_on='Título', how='left')
+    except Exception:
+        df_me2m['Nombre Centro'] = df_me2m['Centro']
+        df_me2m['Nombre Centro 2'] = df_me2m['Centro']
+        
+    try:
+        df_grupo = pd.read_excel(file_grupo, engine="openpyxl")
+        df_grupo['Grupo de Compras'] = df_grupo['Grupo de Compras'].astype(str)
+        df_me2m['Grupo de compras'] = df_me2m['Grupo de compras'].astype(str)
+        df_me2m = pd.merge(df_me2m, df_grupo[['Grupo de Compras', 'Responsable.title']], 
+                           left_on='Grupo de compras', right_on='Grupo de Compras', how='left')
+        df_me2m.rename(columns={'Responsable.title': 'Comprador'}, inplace=True)
+    except Exception:
+        df_me2m['Comprador'] = df_me2m['Grupo de compras']
+
+    # Llenar vacíos 
+    df_me2m['Nombre Centro'] = df_me2m['Nombre Centro'].fillna(df_me2m['Centro'])
+    df_me2m['Nombre Centro 2'] = df_me2m['Nombre Centro 2'].fillna(df_me2m['Centro'])
+    df_me2m['Comprador'] = df_me2m['Comprador'].fillna(df_me2m['Grupo de compras'])
+
+    # ==========================================
+    # REGLA DE AGRUPACIÓN CENTROS LOGÍSTICOS
+    # ==========================================
+    def agrupar_centro_logistico(nombre):
+        n_upper = str(nombre).upper()
+        if 'PRILLEX' in n_upper:
+            return 'Prillex'
+        elif 'RIO LOA' in n_upper or 'RÍO LOA' in n_upper:
+            return 'Rio Loa'
+        elif 'TEATINOS' in n_upper:
+            return 'Teatinos'
+        else:
+            return 'Plantas de servicio'
+            
+    df_me2m['Nombre Centro 2'] = df_me2m['Nombre Centro 2'].apply(agrupar_centro_logistico)
+
+    # 3. Última fecha de recepción real en ME80FN
+    df_recepciones = df_me80fn.groupby(['Documento compras', 'Posición']).agg(
+        Fecha_Ingreso_SAP=('Fe.contabilización', 'max')
+    ).reset_index()
+
+    # 4. Cruzar ME2M con ME80FN
+    df_otif = pd.merge(df_me2m, df_recepciones, on=['Documento compras', 'Posición'], how='left')
+
+    # 5. Formato de fechas y cálculo de Semana (Formato visual dd/mm/aa)
+    df_otif['Fecha_Estadistica'] = pd.to_datetime(df_otif['Fecha entrega estad.'], errors='coerce').dt.date
+    df_otif['Fecha_Ingreso_SAP'] = pd.to_datetime(df_otif['Fecha_Ingreso_SAP'], errors='coerce').dt.date
+
+    def formatear_semana(fecha_val):
+        if pd.isna(fecha_val):
+            return 'Sin Fecha'
+        d = pd.to_datetime(fecha_val)
+        lunes = d - pd.Timedelta(days=d.weekday())
+        sem = d.isocalendar()[1]
+        return f"Sem {sem:02d} - {lunes.strftime('%d/%m/%y')}"
+        
+    df_otif['Semana/Año'] = df_otif['Fecha_Estadistica'].apply(formatear_semana)
+
+    # 6. Cálculo de Reglas OTIF
+    df_otif['In_Full'] = df_otif['Por entregar (cantidad)'] == 0
+    df_otif['On_Time'] = (
+        df_otif['Fecha_Ingreso_SAP'].notna() & 
+        df_otif['Fecha_Estadistica'].notna() & 
+        (df_otif['Fecha_Ingreso_SAP'] <= df_otif['Fecha_Estadistica'])
+    )
+    df_otif['OTIF'] = df_otif['In_Full'] & df_otif['On_Time']
+
+    # 7. Mapeo de estados visuales
+    df_otif['Estado On Time'] = df_otif.apply(
+        lambda r: '🔵 A Tiempo' if r['On_Time'] 
+        else ('⏳ Pendiente' if pd.isna(r['Fecha_Ingreso_SAP']) else '🔴 Atrasado'), 
+        axis=1
+    )
+    df_otif['Estado In Full'] = df_otif['In_Full'].map({True: '🔵 Completo', False: '🔴 Incompleto'})
+    df_otif['Estado OTIF'] = df_otif['OTIF'].map({True: '🔵 Cumple OTIF', False: '🔴 No Cumple'})
+
+    return df_otif
+
+# Función genérica para crear las tablas resumen con totales y formato numérico adaptado a los nombres nuevos
+def generar_tabla_resumen(df_filtrado, col_agrupacion, nombre_columna):
+    if df_filtrado.empty:
+        return pd.DataFrame(columns=[nombre_columna, '% Cumplimiento', 'Pos. OC generadas'])
+        
+    res = df_filtrado.groupby(col_agrupacion).agg(
+        Pos_OC=('OTIF', 'count'),
+        OTIF_pct=('OTIF', 'mean')
+    ).reset_index()
+    
+    res.rename(columns={col_agrupacion: nombre_columna, 'Pos_OC': 'Pos. OC generadas'}, inplace=True)
+    
+    # Calcular Totales
+    total_pos = res['Pos. OC generadas'].sum()
+    total_pct = df_filtrado['OTIF'].mean()
+    
+    total_row = pd.DataFrame({
+        nombre_columna: ['TOTAL'],
+        'Pos. OC generadas': [total_pos],
+        'OTIF_pct': [total_pct]
+    })
+    
+    res = pd.concat([res, total_row], ignore_index=True)
+    
+    # Darle formato de porcentaje a la columna
+    res['% Cumplimiento'] = (res['OTIF_pct'] * 100).fillna(0).round(0).astype(int).astype(str) + "%"
+    res = res.drop(columns=['OTIF_pct'])
+    
+    # Reordenar columnas para calzar con el diseño deseado
+    res = res[[nombre_columna, '% Cumplimiento', 'Pos. OC generadas']]
+    
+    # Ordenar excluyendo la fila "TOTAL"
+    res_body = res.iloc[:-1].sort_values(by='Pos. OC generadas', ascending=False)
+    res_final = pd.concat([res_body, res.iloc[[-1]]])
+    
+    # Aplicar formato de miles a la columna de Posiciones
+    res_final['Pos. OC generadas'] = res_final['Pos. OC generadas'].apply(lambda x: f"{x:,}")
+    
+    return res_final
+
+@st.cache_data(show_spinner="Preparando Excel Resumen Multitabla...")
+def generar_excel_resumen(df_detalle, df_t1, df_t2, df_t3):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_detalle.to_excel(writer, index=False, sheet_name='Detalle Posiciones')
+        ws0 = writer.sheets['Detalle Posiciones']
+        ws0.auto_filter.ref = ws0.dimensions
+        for i, col_name in enumerate(df_detalle.columns, 1):
+            col_letter = get_column_letter(i)
+            if col_name in ['Proveedor/Centro suministrador', 'Texto breve', 'Comprador']:
+                ws0.column_dimensions[col_letter].width = 40
+            else:
+                ws0.column_dimensions[col_letter].width = 18
+
+        def format_summary_sheet(sheet_name, df_res):
+            df_res.to_excel(writer, index=False, sheet_name=sheet_name)
+            ws = writer.sheets[sheet_name]
+            ws.column_dimensions['A'].width = 35
+            ws.column_dimensions['B'].width = 15
+            ws.column_dimensions['C'].width = 15
+
+        format_summary_sheet('Resumen Comprador', df_t1)
+        format_summary_sheet('Resumen Planta Macro', df_t2)
+        format_summary_sheet('Resumen Detalle Centro', df_t3)
+                
+    return output.getvalue()
+
+
+# ==========================================
+# BARRA LATERAL (Carga)
+# ==========================================
+with st.sidebar:
+    st.header("📂 Carga de Datos")
+    archivo_me2m = st.file_uploader("1. Sube ME2M (.xlsx)", type=["xlsx"])
+    archivo_me80fn = st.file_uploader("2. Sube ME80FN (.xlsx)", type=["xlsx"])
+    archivo_grupo = st.file_uploader("3. Sube Responsable Grupo (.xlsx)", type=["xlsx"])
+    archivo_centro = st.file_uploader("4. Sube Centro Sociedad (.xlsx)", type=["xlsx"])
+    
+    # Botón de cierre
+    st.divider()
+    if st.button("Cerrar Sesión"):
+        st.session_state["autenticado"] = False
+        st.rerun()
+
+# ==========================================
+# CUERPO PRINCIPAL
+# ==========================================
+if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
+    df_base = procesar_otif(archivo_me2m, archivo_me80fn, archivo_centro, archivo_grupo)
+
+    # Filtro de semana en el sidebar 
+    with st.sidebar:
+        st.divider()
+        st.markdown("**📅 Filtro de Tiempo**")
+        semanas_disp = sorted([s for s in df_base['Semana/Año'].unique() if s != 'Sin Fecha'])
+        if 'Sin Fecha' in df_base['Semana/Año'].unique():
+            semanas_disp.append('Sin Fecha')
+        semana_sel = st.multiselect("Semana / Año", semanas_disp)
+
+    st.markdown("**🔍 Filtros de Análisis**")
+    
+    # FILA 1: Entidades (Centro, Grupo, Comprador, Proveedor)
+    f_col1, f_col2, f_col3, f_col4Comprendo perfectamente. Para lograr esa consistencia visual y solucionar el problema del "modo blanco que se ve en modo oscuro", he realizado dos ajustes principales:
+
+1. **Formato de Tablas (Estilo `image_19f56a.png`):** Reemplacé el uso del `st.dataframe` nativo para las tablas de resumen por renderizado HTML con CSS inyectado. Esto permite tener exactamente el encabezado gris oscuro, el fondo blanco en las filas y la fila final de "TOTAL" resaltada con la línea roja superior, tal como en el otro reporte.
+2. **Corrección de Tema (Modo Claro):** Agregué variables de CSS que fuerzan los fondos de la aplicación a blanco y el texto a gris oscuro/negro para que los elementos no se pierdan o queden invisibles. 
+
+*(Nota: Para que los filtros y selectores de Streamlit se vean 100% nativos en modo claro, te recomiendo también crear un archivo `.streamlit/config.toml` en tu proyecto con el texto `[theme] base="light"`, pero el código a continuación ya fuerza el diseño visual de los datos).*
+
+Aquí tienes el código completo con las mejoras aplicadas:
+
+```python
+import pandas as pd
+import streamlit as st
+import io
+from openpyxl.utils import get_column_letter
+
+st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
+
+# ==========================================
+# INYECCIÓN DE CSS (Tema Claro + Formato Tablas)
+# ==========================================
+st.markdown("""
+<style>
+    /* Forzar fondo claro y textos oscuros generales */
+    .stApp {
+        background-color: #ffffff;
+        color: #333333;
+    }
+    h1, h2, h3, p, span {
+        color: #333333 !important;
+    }
+
+    /* Estilos específicos para replicar la tabla del otro reporte */
+    table.custom-summary-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        margin-bottom: 20px;
+        font-size: 14px;
+    }
+    table.custom-summary-table thead th {
+        background-color: #3b4852 !important; /* Gris oscuro para el header */
+        color: #ffffff !important;
+        text-align: right;
+        padding: 10px 12px;
+        border: none;
+        font-weight: 600;
+    }
+    table.custom-summary-table thead th:first-child {
+        text-align: left; /* La primera columna alineada a la izquierda */
+    }
+    table.custom-summary-table tbody td {
+        padding: 10px 12px;
+        text-align: right;
+        border-bottom: 1px solid #f0f0f0;
+        background-color: #ffffff;
+        color: #333333;
+    }
+    table.custom-summary-table tbody td:first-child {
+        text-align: left;
+    }
+    /* Estilo para la última fila (TOTAL) */
+    table.custom-summary-table tbody tr:last-child td {
+        background-color: #3b4852 !important;
+        color: #ffffff !important;
+        font-weight: bold;
+        border-top: 3px solid #d93836 !important; /* Línea roja */
+        border-bottom: none;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ==========================================
 # SISTEMA DE LOGIN (Contraseña)
 # ==========================================
 if "autenticado" not in st.session_state:
@@ -195,6 +626,11 @@ def generar_excel_resumen(df_detalle, df_t1, df_t2, df_t3):
                 
     return output.getvalue()
 
+# Función para renderizar el DataFrame como la tabla HTML estilizada
+def renderizar_tabla_html(df):
+    html = df.to_html(index=False, classes="custom-summary-table")
+    st.markdown(html, unsafe_allow_html=True)
+
 
 # ==========================================
 # BARRA LATERAL (Carga)
@@ -232,14 +668,12 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     # FILA 1: Entidades (Centro, Grupo, Comprador, Proveedor)
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     with f_col1:
-        # AQUÍ ESTÁ EL CAMBIO PRINCIPAL: Ahora filtra y muestra por "Nombre Centro 2"
         centros = sorted(df_base['Nombre Centro 2'].dropna().unique())
         centro_sel = st.multiselect("Centro Logístico", centros)
     with f_col2:
         grupos = sorted(df_base['Grupo de compras'].dropna().unique())
         grupo_sel = st.multiselect("Grupo de Compras", grupos)
     with f_col3:
-        # Exclusivamente mostrar las 4 compradoras objetivas en el filtro
         nombres_permitidos = ['Consuelo', 'Sofia', 'Sofía', 'Felipe', 'Constanza']
         compradores = sorted([
             c for c in df_base['Comprador'].dropna().astype(str).unique() 
@@ -265,7 +699,6 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     # APLICAR TODOS LOS FILTROS
     df = df_base.copy()
     if centro_sel:
-        # EL SEGUNDO CAMBIO ESTÁ ACÁ: Aplica la regla al campo correcto
         df = df[df['Nombre Centro 2'].isin(centro_sel)]
     if grupo_sel:
         df = df[df['Grupo de compras'].isin(grupo_sel)]
@@ -303,7 +736,7 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     # TABLAS RESUMEN (Nuevo Layout)
     # ==========================================
     
-    # 1. Preparar datos de Comprador (Filtrando para que muestre solo los objetivos)
+    # 1. Preparar datos de Comprador
     compradores_obj = [
         'Consuelo Valenzuela Fuenzalida', 
         'Sofia Oporto Oporto', 
@@ -315,15 +748,12 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     df_t1 = generar_tabla_resumen(df_comp, 'Comprador', 'Comprador (Grupo de compras)')
 
     # 2. Preparar datos de Plantas
-    # Tabla fija (Nombre Centro 2 / Plantas de servicio ahora agrupa en las 4 categorías solicitadas)
     df_t2 = generar_tabla_resumen(df, 'Nombre Centro 2', 'Centro')
-    
-    # Tabla dinámica (Nombre Centro)
     df_t3 = generar_tabla_resumen(df, 'Nombre Centro', 'Centro (Macro)')
 
-    # 3. Dibujar Layout
+    # 3. Dibujar Layout renderizando a HTML
     st.markdown("### Por comprador")
-    st.dataframe(df_t1, hide_index=True, use_container_width=True)
+    renderizar_tabla_html(df_t1)
 
     st.write("") # Espacio en blanco
 
@@ -331,12 +761,12 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     with col_izq:
         st.markdown("### Por centro logístico")
         st.caption("Vista fija — el total calza con la vista por comprador.")
-        st.dataframe(df_t2, hide_index=True, use_container_width=True)
+        renderizar_tabla_html(df_t2)
         
     with col_der:
         st.markdown("### Detalle por centro")
         st.caption("Centros activos según los filtros aplicados.")
-        st.dataframe(df_t3, hide_index=True, use_container_width=True)
+        renderizar_tabla_html(df_t3)
 
     st.divider()
 
@@ -357,6 +787,7 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
         "Texto breve": st.column_config.TextColumn("Texto breve", width="large"),
         "Comprador": st.column_config.TextColumn("Comprador", width="medium"),
     }
+    # La tabla general la mantenemos con st.dataframe para no perder el scroll y filtrado nativo
     st.dataframe(df_mostrar, use_container_width=True, hide_index=True, column_config=config_columnas)
 
     # ==========================================
