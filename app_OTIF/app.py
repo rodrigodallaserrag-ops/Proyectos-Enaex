@@ -1,16 +1,34 @@
 import pandas as pd
 import streamlit as st
 import io
+import os
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
+
+# ==========================================
+# CONFIGURACIÓN DE RUTAS Y ENLACES ONEDRIVE
+# ==========================================
+# Reemplaza estas URLs por los enlaces directos de descarga de OneDrive/SharePoint (?download=1)
+ONEDRIVE_URLS = {
+    "me2m": "https://tu-empresa.sharepoint.com/link_a_me2m.xlsx?download=1",
+    "me80fn": "https://tu-empresa.sharepoint.com/link_a_me80fn.xlsx?download=1",
+    "grupo": "https://tu-empresa.sharepoint.com/link_a_grupo.xlsx?download=1",
+    "centro": "https://tu-empresa.sharepoint.com/link_a_centro.xlsx?download=1"
+}
+
+LOCAL_PATHS = {
+    "me2m": "data/ME2M.xlsx",
+    "me80fn": "data/ME80FN.xlsx",
+    "grupo": "data/Grupo.xlsx",
+    "centro": "data/Centro.xlsx"
+}
 
 # ==========================================
 # INYECCIÓN DE CSS (Adaptable a Claro/Oscuro)
 # ==========================================
 st.markdown("""
 <style>
-    /* Estilos específicos para la tabla resumen que se adaptan al tema activo */
     table.custom-summary-table {
         width: 100%;
         border-collapse: collapse;
@@ -19,7 +37,7 @@ st.markdown("""
         font-size: 14px;
     }
     table.custom-summary-table thead th {
-        background-color: #3b4852 !important; /* Gris oscuro para el header (se ve bien en ambos modos) */
+        background-color: #3b4852 !important;
         color: #ffffff !important;
         text-align: right;
         padding: 10px 12px;
@@ -27,30 +45,28 @@ st.markdown("""
         font-weight: 600;
     }
     table.custom-summary-table thead th:first-child {
-        text-align: left; /* La primera columna alineada a la izquierda */
+        text-align: left;
     }
     table.custom-summary-table tbody td {
         padding: 10px 12px;
         text-align: right;
-        border-bottom: 1px solid rgba(128, 128, 128, 0.2); /* Borde sutil semi-transparente */
-        /* Al no definir background-color ni color, hereda los del tema (claro u oscuro) */
+        border-bottom: 1px solid rgba(128, 128, 128, 0.2);
     }
     table.custom-summary-table tbody td:first-child {
         text-align: left;
     }
-    /* Estilo para la última fila (TOTAL) */
     table.custom-summary-table tbody tr:last-child td {
         background-color: #3b4852 !important;
         color: #ffffff !important;
         font-weight: bold;
-        border-top: 3px solid #d93836 !important; /* Línea roja */
+        border-top: 3px solid #d93836 !important;
         border-bottom: none;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# SISTEMA DE LOGIN (Contraseña)
+# SISTEMA DE LOGIN
 # ==========================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -72,26 +88,25 @@ if not st.session_state["autenticado"]:
 
 
 # ==========================================
-# SI YA INICIÓ SESIÓN, CONTINÚA EL DASHBOARD
+# DASHBOARD PRINCIPAL
 # ==========================================
 st.title("🎯 Dashboard OTIF (On Time, In Full)")
 st.markdown("Medición del nivel de servicio de proveedores cruzando archivos de SAP y mapeos locales.")
 
 # ==========================================
-# FUNCIONES EN CACHÉ (Optimizadas)
+# FUNCIONES EN CACHÉ
 # ==========================================
-@st.cache_data(show_spinner="Procesando cruce de datos SAP y Mapeos...")
+@st.cache_data(show_spinner="Cargando y procesando datos...")
 def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
-    # 1. Carga de los archivos SAP
+    # Carga de los archivos SAP
     df_me2m = pd.read_excel(file_me2m, engine="openpyxl")
     cols_me80fn = ['Documento compras', 'Posición', 'Fe.contabilización']
     df_me80fn = pd.read_excel(file_me80fn, engine="openpyxl", usecols=lambda c: c in cols_me80fn)
 
-    # Descartar posiciones anuladas en SAP
     if 'Indicador de borrado' in df_me2m.columns:
         df_me2m = df_me2m[df_me2m['Indicador de borrado'].isna()].copy()
 
-    # 2. Carga de Archivos de Mapeo Locales
+    # Mapeos Locales
     try:
         df_centro = pd.read_excel(file_centro, engine="openpyxl")
         df_centro['Título'] = df_centro['Título'].astype(str)
@@ -112,14 +127,10 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
     except Exception:
         df_me2m['Comprador'] = df_me2m['Grupo de compras']
 
-    # Llenar vacíos 
     df_me2m['Nombre Centro'] = df_me2m['Nombre Centro'].fillna(df_me2m['Centro'])
     df_me2m['Nombre Centro 2'] = df_me2m['Nombre Centro 2'].fillna(df_me2m['Centro'])
     df_me2m['Comprador'] = df_me2m['Comprador'].fillna(df_me2m['Grupo de compras'])
 
-    # ==========================================
-    # NUEVA REGLA: AGRUPACIÓN VISTA DE CENTRO
-    # ==========================================
     def agrupar_centro_logistico(nombre):
         n_upper = str(nombre).upper()
         if 'PRILLEX' in n_upper:
@@ -133,15 +144,12 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
             
     df_me2m['Nombre Centro 2'] = df_me2m['Nombre Centro 2'].apply(agrupar_centro_logistico)
 
-    # 3. Última fecha de recepción real en ME80FN
     df_recepciones = df_me80fn.groupby(['Documento compras', 'Posición']).agg(
         Fecha_Ingreso_SAP=('Fe.contabilización', 'max')
     ).reset_index()
 
-    # 4. Cruzar ME2M con ME80FN
     df_otif = pd.merge(df_me2m, df_recepciones, on=['Documento compras', 'Posición'], how='left')
 
-    # 5. Formato de fechas y cálculo de Semana (Formato visual dd/mm/aa)
     df_otif['Fecha_Estadistica'] = pd.to_datetime(df_otif['Fecha entrega estad.'], errors='coerce').dt.date
     df_otif['Fecha_Ingreso_SAP'] = pd.to_datetime(df_otif['Fecha_Ingreso_SAP'], errors='coerce').dt.date
 
@@ -155,7 +163,6 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
         
     df_otif['Semana/Año'] = df_otif['Fecha_Estadistica'].apply(formatear_semana)
 
-    # 6. Cálculo de Reglas OTIF
     df_otif['In_Full'] = df_otif['Por entregar (cantidad)'] == 0
     df_otif['On_Time'] = (
         df_otif['Fecha_Ingreso_SAP'].notna() & 
@@ -164,7 +171,6 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
     )
     df_otif['OTIF'] = df_otif['In_Full'] & df_otif['On_Time']
 
-    # 7. Mapeo de estados visuales
     df_otif['Estado On Time'] = df_otif.apply(
         lambda r: '🔵 A Tiempo' if r['On_Time'] 
         else ('⏳ Pendiente' if pd.isna(r['Fecha_Ingreso_SAP']) else '🔴 Atrasado'), 
@@ -175,7 +181,6 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
 
     return df_otif
 
-# Función genérica para crear las tablas resumen con totales y formato numérico
 def generar_tabla_resumen(df_filtrado, col_agrupacion, nombre_columna):
     if df_filtrado.empty:
         return pd.DataFrame(columns=[nombre_columna, 'Pos. OC', 'OTIF'])
@@ -187,7 +192,6 @@ def generar_tabla_resumen(df_filtrado, col_agrupacion, nombre_columna):
     
     res.rename(columns={col_agrupacion: nombre_columna, 'Pos_OC': 'Pos. OC'}, inplace=True)
     
-    # Calcular Totales
     total_pos = res['Pos. OC'].sum()
     total_pct = df_filtrado['OTIF'].mean()
     
@@ -198,21 +202,16 @@ def generar_tabla_resumen(df_filtrado, col_agrupacion, nombre_columna):
     })
     
     res = pd.concat([res, total_row], ignore_index=True)
-    
-    # Darle formato de porcentaje a la columna OTIF (ej: "87%")
     res['OTIF'] = (res['OTIF_pct'] * 100).fillna(0).round(0).astype(int).astype(str) + "%"
     res = res.drop(columns=['OTIF_pct'])
     
-    # Ordenar excluyendo la fila "TOTAL"
     res_body = res.iloc[:-1].sort_values(by='Pos. OC', ascending=False)
     res_final = pd.concat([res_body, res.iloc[[-1]]])
-    
-    # Aplicar formato de miles a la columna de Posiciones (ej: 10,999)
     res_final['Pos. OC'] = res_final['Pos. OC'].apply(lambda x: f"{x:,}")
     
     return res_final
 
-@st.cache_data(show_spinner="Preparando Excel Resumen Multitabla...")
+@st.cache_data(show_spinner="Preparando Excel Resumen...")
 def generar_excel_resumen(df_detalle, df_t1, df_t2, df_t3):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -239,37 +238,75 @@ def generar_excel_resumen(df_detalle, df_t1, df_t2, df_t3):
                 
     return output.getvalue()
 
-# Función para renderizar el DataFrame como la tabla HTML estilizada
 def renderizar_tabla_html(df):
     html = df.to_html(index=False, classes="custom-summary-table")
     st.markdown(html, unsafe_allow_html=True)
 
 
 # ==========================================
-# BARRA LATERAL (Carga)
+# BARRA LATERAL: ORIGEN DE DATOS
 # ==========================================
 with st.sidebar:
-    st.header("📂 Carga de Datos")
-    archivo_me2m = st.file_uploader("1. Sube ME2M (.xlsx)", type=["xlsx"])
-    archivo_me80fn = st.file_uploader("2. Sube ME80FN (.xlsx)", type=["xlsx"])
-    archivo_grupo = st.file_uploader("3. Sube Responsable Grupo (.xlsx)", type=["xlsx"])
-    archivo_centro = st.file_uploader("4. Sube Centro Sociedad (.xlsx)", type=["xlsx"])
-    
-    # Botón de cierre
+    st.header("Origen de datos")
+    origen_datos = st.radio(
+        "Selecciona el origen:",
+        ["OneDrive (automático)", "Subir archivos", "Archivos locales (data/)"],
+        label_visibility="collapsed"
+    )
+
+    file_me2m, file_me80fn, file_grupo, file_centro = None, None, None, None
+
+    if origen_datos == "OneDrive (automático)":
+        if st.button("🔄 Forzar recarga desde OneDrive ahora", use_container_width=True):
+            st.cache_data.clear()
+            st.toast("Caché borrada. Volviendo a descargar desde OneDrive...")
+            st.rerun()
+            
+        file_me2m = ONEDRIVE_URLS["me2m"]
+        file_me80fn = ONEDRIVE_URLS["me80fn"]
+        file_grupo = ONEDRIVE_URLS["grupo"]
+        file_centro = ONEDRIVE_URLS["centro"]
+
+    elif origen_datos == "Subir archivos":
+        st.markdown("**📂 Carga manual de archivos**")
+        file_me2m = st.file_uploader("1. Sube ME2M (.xlsx)", type=["xlsx"])
+        file_me80fn = st.file_uploader("2. Sube ME80FN (.xlsx)", type=["xlsx"])
+        file_grupo = st.file_uploader("3. Sube Responsable Grupo (.xlsx)", type=["xlsx"])
+        file_centro = st.file_uploader("4. Sube Centro Sociedad (.xlsx)", type=["xlsx"])
+
+    elif origen_datos == "Archivos locales (data/)":
+        file_me2m = LOCAL_PATHS["me2m"]
+        file_me80fn = LOCAL_PATHS["me80fn"]
+        file_grupo = LOCAL_PATHS["grupo"]
+        file_centro = LOCAL_PATHS["centro"]
+
     st.divider()
-    if st.button("Cerrar Sesión"):
+    if st.button("Cerrar Sesión", use_container_width=True):
         st.session_state["autenticado"] = False
         st.rerun()
 
 # ==========================================
-# CUERPO PRINCIPAL
+# PROCESAMIENTO Y RENDERIZADO
 # ==========================================
-if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
-    df_base = procesar_otif(archivo_me2m, archivo_me80fn, archivo_centro, archivo_grupo)
+listos_para_procesar = False
 
-    # Filtro de semana en el sidebar 
+if origen_datos == "Subir archivos":
+    if file_me2m and file_me80fn and file_grupo and file_centro:
+        listos_para_procesar = True
+    else:
+        st.info("👈 Sube los 4 archivos en la barra lateral para desplegar las métricas.")
+else:
+    listos_para_procesar = True
+
+if listos_para_procesar:
+    try:
+        df_base = procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo)
+    except Exception as e:
+        st.error(f"❌ Error al cargar los datos desde {origen_datos}: {e}")
+        st.stop()
+
+    # Filtro de tiempo en la barra lateral
     with st.sidebar:
-        st.divider()
         st.markdown("**📅 Filtro de Tiempo**")
         semanas_disp = sorted([s for s in df_base['Semana/Año'].unique() if s != 'Sin Fecha'])
         if 'Sin Fecha' in df_base['Semana/Año'].unique():
@@ -278,7 +315,6 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
 
     st.markdown("**🔍 Filtros de Análisis**")
     
-    # FILA 1: Entidades (Centro, Grupo, Comprador, Proveedor)
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     with f_col1:
         centros = sorted(df_base['Nombre Centro 2'].dropna().unique())
@@ -297,7 +333,6 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
         proveedores = sorted(df_base['Proveedor/Centro suministrador'].dropna().astype(str).unique())
         prov_sel = st.multiselect("Proveedor", proveedores)
 
-    # FILA 2: Estados OTIF
     f_col5, f_col6, f_col7 = st.columns(3)
     with f_col5:
         estados_on_time = sorted(df_base['Estado On Time'].dropna().unique())
@@ -309,7 +344,7 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
         estados_otif = sorted(df_base['Estado OTIF'].dropna().unique())
         otif_sel = st.multiselect("Estado OTIF", estados_otif)
 
-    # APLICAR TODOS LOS FILTROS
+    # APLICAR FILTROS
     df = df_base.copy()
     if centro_sel:
         df = df[df['Nombre Centro 2'].isin(centro_sel)]
@@ -345,11 +380,7 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
 
     st.divider()
 
-    # ==========================================
-    # TABLAS RESUMEN (Nuevo Layout)
-    # ==========================================
-    
-    # 1. Preparar datos de Comprador
+    # TABLAS RESUMEN
     compradores_obj = [
         'Consuelo Valenzuela Fuenzalida', 
         'Sofia Oporto Oporto', 
@@ -359,16 +390,13 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     df_comp = df[df['Comprador'].isin(compradores_obj)]
     
     df_t1 = generar_tabla_resumen(df_comp, 'Comprador', 'Comprador (Grupo de compras)')
-
-    # 2. Preparar datos de Plantas
     df_t2 = generar_tabla_resumen(df, 'Nombre Centro 2', 'Centro')
     df_t3 = generar_tabla_resumen(df, 'Nombre Centro', 'Centro (Macro)')
 
-    # 3. Dibujar Layout renderizando a HTML
     st.markdown("### Por comprador")
     renderizar_tabla_html(df_t1)
 
-    st.write("") # Espacio en blanco
+    st.write("")
 
     col_izq, col_der = st.columns(2)
     with col_izq:
@@ -383,9 +411,7 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
 
     st.divider()
 
-    # ==========================================
-    # TABLA DE DETALLE
-    # ==========================================
+    # DETALLE
     st.markdown("**📋 Detalle de Posiciones y Trazabilidad**")
     cols_mostrar = [
         'Documento compras', 'Posición', 'Semana/Año', 'Centro', 'Nombre Centro', 
@@ -400,12 +426,9 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
         "Texto breve": st.column_config.TextColumn("Texto breve", width="large"),
         "Comprador": st.column_config.TextColumn("Comprador", width="medium"),
     }
-    # La tabla general la mantenemos con st.dataframe para no perder el scroll y filtrado nativo
     st.dataframe(df_mostrar, use_container_width=True, hide_index=True, column_config=config_columnas)
 
-    # ==========================================
-    # DESCARGA DEL SÚPER EXCEL
-    # ==========================================
+    # DESCARGA EXCEL
     st.divider()
     st.markdown("### 📥 Descarga de Reportes")
     
@@ -418,5 +441,3 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
-else:
-    st.info("👈 Sube los 4 archivos en la barra lateral para desplegar las métricas correspondientes.")
