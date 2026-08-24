@@ -6,20 +6,11 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
 
 # ==========================================
-# INYECCIÓN DE CSS (Tema Claro + Formato Tablas)
+# INYECCIÓN DE CSS (Adaptable a Claro/Oscuro)
 # ==========================================
 st.markdown("""
 <style>
-    /* Forzar fondo claro y textos oscuros generales */
-    .stApp {
-        background-color: #ffffff;
-        color: #333333;
-    }
-    h1, h2, h3, p, span {
-        color: #333333 !important;
-    }
-
-    /* Estilos específicos para replicar la tabla del otro reporte */
+    /* Estilos específicos para la tabla resumen que se adaptan al tema activo */
     table.custom-summary-table {
         width: 100%;
         border-collapse: collapse;
@@ -28,7 +19,7 @@ st.markdown("""
         font-size: 14px;
     }
     table.custom-summary-table thead th {
-        background-color: #3b4852 !important; /* Gris oscuro para el header */
+        background-color: #3b4852 !important; /* Gris oscuro para el header (se ve bien en ambos modos) */
         color: #ffffff !important;
         text-align: right;
         padding: 10px 12px;
@@ -41,9 +32,8 @@ st.markdown("""
     table.custom-summary-table tbody td {
         padding: 10px 12px;
         text-align: right;
-        border-bottom: 1px solid #f0f0f0;
-        background-color: #ffffff;
-        color: #333333;
+        border-bottom: 1px solid rgba(128, 128, 128, 0.2); /* Borde sutil semi-transparente */
+        /* Al no definir background-color ni color, hereda los del tema (claro u oscuro) */
     }
     table.custom-summary-table tbody td:first-child {
         text-align: left;
