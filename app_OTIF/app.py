@@ -30,8 +30,8 @@ st.markdown("""
 <style>
     /* Nuevo contenedor para agregar la barra de scroll */
     .table-container {
-        max-height: 400px;  /* Altura máxima antes de que aparezca el scroll */
-        overflow-y: auto;   /* Habilita el scroll vertical */
+        max-height: 400px;
+        overflow-y: auto;
         margin-bottom: 20px;
         border: 1px solid rgba(128, 128, 128, 0.2);
         border-radius: 5px;
@@ -51,7 +51,6 @@ st.markdown("""
         padding: 10px 12px;
         border: none;
         font-weight: 600;
-        /* Hacemos que el encabezado se quede fijo arriba al scrollear */
         position: sticky;
         top: 0;
         z-index: 10;
@@ -75,7 +74,6 @@ st.markdown("""
         border-bottom: none;
     }
     
-    /* Pequeño ajuste para que el scrollbar se vea bien en navegadores webkit */
     .table-container::-webkit-scrollbar {
         width: 8px;
     }
@@ -277,7 +275,6 @@ def generar_excel_resumen(df_detalle, df_t1, df_t2, df_t3):
 
 def renderizar_tabla_html(df):
     html_table = df.to_html(index=False, classes="custom-summary-table")
-    # Envolvemos la tabla en un div con clase "table-container"
     html_final = f'<div class="table-container">{html_table}</div>'
     st.markdown(html_final, unsafe_allow_html=True)
 
@@ -341,7 +338,7 @@ if listos_para_procesar:
     try:
         df_base = procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo)
     except Exception as e:
-        st.error(f"❌ Error al cargar los datos desde {origen_datos}: {e}")
+        st.error(f"❌ Error al cargar los datos: {e}")
         st.stop()
 
     with st.sidebar:
@@ -349,48 +346,46 @@ if listos_para_procesar:
         semanas_disp = sorted([s for s in df_base['Semana/Año'].unique() if s != 'Sin Fecha'])
         if 'Sin Fecha' in df_base['Semana/Año'].unique():
             semanas_disp.append('Sin Fecha')
-        # AÑADIDO KEY AQUÍ
-        semana_sel = st.multiselect("Semana / Año", semanas_disp, key="ms_semanas")
+        # Placeholder añadido para guiar al usuario
+        semana_sel = st.multiselect("Semana / Año", semanas_disp, placeholder="Vacío = Todas las semanas")
 
     st.markdown("**🔍 Filtros de Análisis**")
+    
+    # NUEVO: Mensaje explicativo para evitar el bug visual de Streamlit
+    st.info("💡 **Tip de uso:** Para evitar saturar los filtros y prevenir errores, **no es necesario usar 'Select all'**. Si dejas un filtro en blanco, el Dashboard analizará automáticamente **todos** los datos de esa categoría.")
     
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     with f_col1:
         centros = sorted(df_base['Nombre Centro 2'].dropna().unique())
-        # AÑADIDO KEY AQUÍ
-        centro_sel = st.multiselect("Centro Logístico", centros, key="ms_centros")
+        centro_sel = st.multiselect("Centro Logístico", centros, placeholder="Vacío = Todos")
     with f_col2:
         grupos = sorted(df_base['Grupo de compras'].dropna().unique())
-        # AÑADIDO KEY AQUÍ
-        grupo_sel = st.multiselect("Grupo de Compras", grupos, key="ms_grupos")
+        grupo_sel = st.multiselect("Grupo de Compras", grupos, placeholder="Vacío = Todos")
     with f_col3:
         nombres_permitidos = ['Consuelo', 'Sofia', 'Sofía', 'Felipe', 'Constanza']
         compradores = sorted([
             c for c in df_base['Comprador'].dropna().astype(str).unique() 
             if any(n in c for n in nombres_permitidos)
         ])
-        # AÑADIDO KEY AQUÍ
-        comprador_sel = st.multiselect("Comprador", compradores, key="ms_compradores")
+        comprador_sel = st.multiselect("Comprador", compradores, placeholder="Vacío = Todos")
     with f_col4:
         proveedores = sorted(df_base['Proveedor/Centro suministrador'].dropna().astype(str).unique())
-        # AÑADIDO KEY AQUÍ
-        prov_sel = st.multiselect("Proveedor", proveedores, key="ms_proveedores")
+        prov_sel = st.multiselect("Proveedor", proveedores, placeholder="Vacío = Todos")
 
     f_col5, f_col6, f_col7 = st.columns(3)
     with f_col5:
         estados_on_time = sorted(df_base['Estado On Time'].dropna().unique())
-        # AÑADIDO KEY AQUÍ
-        on_time_sel = st.multiselect("Estado On Time", estados_on_time, key="ms_ontime")
+        on_time_sel = st.multiselect("Estado On Time", estados_on_time, placeholder="Vacío = Todos")
     with f_col6:
         estados_in_full = sorted(df_base['Estado In Full'].dropna().unique())
-        # AÑADIDO KEY AQUÍ
-        in_full_sel = st.multiselect("Estado In Full", estados_in_full, key="ms_infull")
+        in_full_sel = st.multiselect("Estado In Full", estados_in_full, placeholder="Vacío = Todos")
     with f_col7:
         estados_otif = sorted(df_base['Estado OTIF'].dropna().unique())
-        # AÑADIDO KEY AQUÍ
-        otif_sel = st.multiselect("Estado OTIF", estados_otif, key="ms_otif")
+        otif_sel = st.multiselect("Estado OTIF", estados_otif, placeholder="Vacío = Todos")
 
     df = df_base.copy()
+    
+    # La lógica original ya funciona perfecto con filtros vacíos (ignora el filtrado y trae todo)
     if centro_sel:
         df = df[df['Nombre Centro 2'].isin(centro_sel)]
     if grupo_sel:
