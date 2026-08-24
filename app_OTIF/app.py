@@ -6,6 +6,78 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
 
 # ==========================================
+# ESTILOS CSS PERSONALIZADOS (Estilo Días de Gestión)
+# ==========================================
+st.markdown("""
+<style>
+    /* Estilo del fondo estilo Días de Gestión */
+    .stApp {
+        background-color: #0b0f17;
+    }
+    
+    /* Contenedor Flex de Tarjetas KPI */
+    .kpi-container {
+        display: flex;
+        gap: 16px;
+        margin-top: 10px;
+        margin-bottom: 20px;
+    }
+    
+    /* Estilo base de cada Tarjeta KPI */
+    .kpi-card {
+        border-radius: 8px;
+        padding: 18px 14px;
+        text-align: center;
+        flex: 1;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    .kpi-title {
+        font-size: 11px;
+        font-weight: 700;
+        color: #7d8590;
+        text-transform: uppercase;
+        letter-spacing: 0.9px;
+        margin-bottom: 8px;
+    }
+    .kpi-value {
+        font-size: 32px;
+        font-weight: 800;
+        color: #e6edf3;
+        line-height: 1.1;
+    }
+    .kpi-subtext {
+        font-size: 11px;
+        color: #6e7681;
+        margin-top: 6px;
+    }
+    
+    /* Bordes y fondos según estado */
+    .kpi-neutral {
+        border: 1px solid #1f293d;
+        background-color: rgba(22, 27, 38, 0.7);
+    }
+    .kpi-good {
+        border: 1.5px solid #116b3d;
+        background-color: rgba(10, 45, 25, 0.5);
+    }
+    .kpi-bad {
+        border: 1.5px solid #851818;
+        background-color: rgba(60, 10, 15, 0.5);
+    }
+</style>
+""", unsafe_allow_html=True)
+
+def render_kpi_card(title, value, subtext="", status="neutral"):
+    sub_html = f'<div class="kpi-subtext">{subtext}</div>' if subtext else ''
+    return f"""
+    <div class="kpi-card kpi-{status}">
+        <div class="kpi-title">{title}</div>
+        <div class="kpi-value">{value}</div>
+        {sub_html}
+    </div>
+    """
+
+# ==========================================
 # SISTEMA DE LOGIN (Contraseña)
 # ==========================================
 if "autenticado" not in st.session_state:
@@ -74,7 +146,7 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
     df_me2m['Comprador'] = df_me2m['Comprador'].fillna(df_me2m['Grupo de compras'])
 
     # ==========================================
-    # NUEVA REGLA: AGRUPACIÓN VISTA DE CENTRO
+    # REGLA DE AGRUPACIÓN CENTROS LOGÍSTICOS
     # ==========================================
     def agrupar_centro_logistico(nombre):
         n_upper = str(nombre).upper()
@@ -155,7 +227,7 @@ def generar_tabla_resumen(df_filtrado, col_agrupacion, nombre_columna):
     
     res = pd.concat([res, total_row], ignore_index=True)
     
-    # Darle formato de porcentaje a la columna OTIF (ej: "87%")
+    # Darle formato de porcentaje a la columna OTIF
     res['OTIF'] = (res['OTIF_pct'] * 100).fillna(0).round(0).astype(int).astype(str) + "%"
     res = res.drop(columns=['OTIF_pct'])
     
@@ -163,7 +235,7 @@ def generar_tabla_resumen(df_filtrado, col_agrupacion, nombre_columna):
     res_body = res.iloc[:-1].sort_values(by='Pos. OC', ascending=False)
     res_final = pd.concat([res_body, res.iloc[[-1]]])
     
-    # Aplicar formato de miles a la columna de Posiciones (ej: 10,999)
+    # Aplicar formato de miles a la columna de Posiciones
     res_final['Pos. OC'] = res_final['Pos. OC'].apply(lambda x: f"{x:,}")
     
     return res_final
@@ -232,14 +304,12 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     # FILA 1: Entidades (Centro, Grupo, Comprador, Proveedor)
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     with f_col1:
-        # AQUÍ ESTÁ EL CAMBIO PRINCIPAL: Ahora filtra y muestra por "Nombre Centro 2"
         centros = sorted(df_base['Nombre Centro 2'].dropna().unique())
         centro_sel = st.multiselect("Centro Logístico", centros)
     with f_col2:
         grupos = sorted(df_base['Grupo de compras'].dropna().unique())
         grupo_sel = st.multiselect("Grupo de Compras", grupos)
     with f_col3:
-        # Exclusivamente mostrar las 4 compradoras objetivas en el filtro
         nombres_permitidos = ['Consuelo', 'Sofia', 'Sofía', 'Felipe', 'Constanza']
         compradores = sorted([
             c for c in df_base['Comprador'].dropna().astype(str).unique() 
@@ -262,10 +332,9 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
         estados_otif = sorted(df_base['Estado OTIF'].dropna().unique())
         otif_sel = st.multiselect("Estado OTIF", estados_otif)
 
-    # APLICAR TODOS LOS FILTROS
+    # APLICAR FILTROS
     df = df_base.copy()
     if centro_sel:
-        # EL SEGUNDO CAMBIO ESTÁ ACÁ: Aplica la regla al campo correcto
         df = df[df['Nombre Centro 2'].isin(centro_sel)]
     if grupo_sel:
         df = df[df['Grupo de compras'].isin(grupo_sel)]
@@ -282,7 +351,7 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     if semana_sel:
         df = df[df['Semana/Año'].isin(semana_sel)]
 
-    # KPIs
+    # CÁLCULOS KPI
     total_lineas = len(df)
     pct_on_time = (df['On_Time'].sum() / total_lineas * 100) if total_lineas > 0 else 0
     pct_in_full = (df['In_Full'].sum() / total_lineas * 100) if total_lineas > 0 else 0
@@ -290,20 +359,29 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
 
     st.divider()
 
-    st.markdown("**📊 Indicadores de Cumplimiento**")
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Líneas Activas", f"{total_lineas:,}")
-    k2.metric("⏱️ On Time", f"{pct_on_time:.1f}%")
-    k3.metric("📦 In Full", f"{pct_in_full:.1f}%")
-    k4.metric("⭐ OTIF Global", f"{pct_otif:.1f}%")
+    # ==========================================
+    # TARJETAS VISUALES ESTILO DÍAS DE GESTIÓN
+    # ==========================================
+    card_lineas = render_kpi_card("Líneas Activas", f"{total_lineas:,}", "Posiciones OC", "neutral")
+    card_ontime = render_kpi_card("% Cumplimiento On Time", f"{pct_on_time:.0f}%", "Métrica de Tiempo", "good" if pct_on_time >= 80 else "bad")
+    card_infull = render_kpi_card("% Cumplimiento In Full", f"{pct_in_full:.0f}%", "Métrica de Cantidad", "good" if pct_in_full >= 80 else "bad")
+    card_otif = render_kpi_card("Nivel de Servicio OTIF", f"{pct_otif:.0f}%", "Cumplimiento SLA Global", "good" if pct_otif >= 75 else "bad")
+
+    html_cards = f"""
+    <div class="kpi-container">
+        {card_lineas}
+        {card_ontime}
+        {card_infull}
+        {card_otif}
+    </div>
+    """
+    st.markdown(html_cards, unsafe_allow_html=True)
 
     st.divider()
 
     # ==========================================
-    # TABLAS RESUMEN (Nuevo Layout)
+    # TABLAS RESUMEN
     # ==========================================
-    
-    # 1. Preparar datos de Comprador (Filtrando para que muestre solo los objetivos)
     compradores_obj = [
         'Consuelo Valenzuela Fuenzalida', 
         'Sofia Oporto Oporto', 
@@ -313,24 +391,18 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     df_comp = df[df['Comprador'].isin(compradores_obj)]
     
     df_t1 = generar_tabla_resumen(df_comp, 'Comprador', 'Comprador (Grupo de compras)')
-
-    # 2. Preparar datos de Plantas
-    # Tabla fija (Nombre Centro 2 / Plantas de servicio ahora agrupa en las 4 categorías solicitadas)
     df_t2 = generar_tabla_resumen(df, 'Nombre Centro 2', 'Centro')
-    
-    # Tabla dinámica (Nombre Centro)
     df_t3 = generar_tabla_resumen(df, 'Nombre Centro', 'Centro (Macro)')
 
-    # 3. Dibujar Layout
     st.markdown("### Por comprador")
     st.dataframe(df_t1, hide_index=True, use_container_width=True)
 
-    st.write("") # Espacio en blanco
+    st.write("")
 
     col_izq, col_der = st.columns(2)
     with col_izq:
         st.markdown("### Por centro logístico")
-        st.caption("Vista fija — el total calza con la vista por comprador.")
+        st.caption("Vista agrupada por Prillex, Rio Loa, Teatinos y Plantas de servicio.")
         st.dataframe(df_t2, hide_index=True, use_container_width=True)
         
     with col_der:
@@ -360,7 +432,7 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     st.dataframe(df_mostrar, use_container_width=True, hide_index=True, column_config=config_columnas)
 
     # ==========================================
-    # DESCARGA DEL SÚPER EXCEL
+    # DESCARGA DE REPORTES
     # ==========================================
     st.divider()
     st.markdown("### 📥 Descarga de Reportes")
