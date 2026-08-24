@@ -28,7 +28,6 @@ LOCAL_PATHS = {
 # ==========================================
 st.markdown("""
 <style>
-    /* Nuevo contenedor para agregar la barra de scroll */
     .table-container {
         max-height: 400px;
         overflow-y: auto;
@@ -341,51 +340,58 @@ if listos_para_procesar:
         st.error(f"❌ Error al cargar los datos: {e}")
         st.stop()
 
-    with st.sidebar:
-        st.markdown("**📅 Filtro de Tiempo**")
-        semanas_disp = sorted([s for s in df_base['Semana/Año'].unique() if s != 'Sin Fecha'])
-        if 'Sin Fecha' in df_base['Semana/Año'].unique():
-            semanas_disp.append('Sin Fecha')
-        # Placeholder añadido para guiar al usuario
-        semana_sel = st.multiselect("Semana / Año", semanas_disp, placeholder="Vacío = Todas las semanas")
+    # Pre-calcular listas para los filtros
+    semanas_disp = sorted([s for s in df_base['Semana/Año'].unique() if s != 'Sin Fecha'])
+    if 'Sin Fecha' in df_base['Semana/Año'].unique():
+        semanas_disp.append('Sin Fecha')
+        
+    centros = sorted(df_base['Nombre Centro 2'].dropna().unique())
+    grupos = sorted(df_base['Grupo de compras'].dropna().unique())
+    nombres_permitidos = ['Consuelo', 'Sofia', 'Sofía', 'Felipe', 'Constanza']
+    compradores = sorted([
+        c for c in df_base['Comprador'].dropna().astype(str).unique() 
+        if any(n in c for n in nombres_permitidos)
+    ])
+    proveedores = sorted(df_base['Proveedor/Centro suministrador'].dropna().astype(str).unique())
+    estados_on_time = sorted(df_base['Estado On Time'].dropna().unique())
+    estados_in_full = sorted(df_base['Estado In Full'].dropna().unique())
+    estados_otif = sorted(df_base['Estado OTIF'].dropna().unique())
 
-    st.markdown("**🔍 Filtros de Análisis**")
-    
-    # NUEVO: Mensaje explicativo para evitar el bug visual de Streamlit
-    st.info("💡 **Tip de uso:** Para evitar saturar los filtros y prevenir errores, **no es necesario usar 'Select all'**. Si dejas un filtro en blanco, el Dashboard analizará automáticamente **todos** los datos de esa categoría.")
-    
-    f_col1, f_col2, f_col3, f_col4 = st.columns(4)
-    with f_col1:
-        centros = sorted(df_base['Nombre Centro 2'].dropna().unique())
-        centro_sel = st.multiselect("Centro Logístico", centros, placeholder="Vacío = Todos")
-    with f_col2:
-        grupos = sorted(df_base['Grupo de compras'].dropna().unique())
-        grupo_sel = st.multiselect("Grupo de Compras", grupos, placeholder="Vacío = Todos")
-    with f_col3:
-        nombres_permitidos = ['Consuelo', 'Sofia', 'Sofía', 'Felipe', 'Constanza']
-        compradores = sorted([
-            c for c in df_base['Comprador'].dropna().astype(str).unique() 
-            if any(n in c for n in nombres_permitidos)
-        ])
-        comprador_sel = st.multiselect("Comprador", compradores, placeholder="Vacío = Todos")
-    with f_col4:
-        proveedores = sorted(df_base['Proveedor/Centro suministrador'].dropna().astype(str).unique())
-        prov_sel = st.multiselect("Proveedor", proveedores, placeholder="Vacío = Todos")
+    st.info("💡 **Solución al 'congelamiento':** Los filtros ahora están dentro de un **Panel**. Puedes agregar o quitar decenas de etiquetas con total fluidez. El sistema no se colgará porque solo procesará los datos cuando presiones el botón **Aplicar Filtros**.")
 
-    f_col5, f_col6, f_col7 = st.columns(3)
-    with f_col5:
-        estados_on_time = sorted(df_base['Estado On Time'].dropna().unique())
-        on_time_sel = st.multiselect("Estado On Time", estados_on_time, placeholder="Vacío = Todos")
-    with f_col6:
-        estados_in_full = sorted(df_base['Estado In Full'].dropna().unique())
-        in_full_sel = st.multiselect("Estado In Full", estados_in_full, placeholder="Vacío = Todos")
-    with f_col7:
-        estados_otif = sorted(df_base['Estado OTIF'].dropna().unique())
-        otif_sel = st.multiselect("Estado OTIF", estados_otif, placeholder="Vacío = Todos")
+    # ==========================================
+    # NUEVO PANEL DE FILTROS (ST.FORM)
+    # ==========================================
+    with st.form("panel_filtros"):
+        st.markdown("**🔍 Panel de Filtros**")
+        
+        # Fila 1 de filtros
+        f_col1, f_col2, f_col3, f_col4 = st.columns(4)
+        with f_col1:
+            centro_sel = st.multiselect("Centro Logístico", centros, placeholder="Vacío = Todos")
+        with f_col2:
+            grupo_sel = st.multiselect("Grupo de Compras", grupos, placeholder="Vacío = Todos")
+        with f_col3:
+            comprador_sel = st.multiselect("Comprador", compradores, placeholder="Vacío = Todos")
+        with f_col4:
+            prov_sel = st.multiselect("Proveedor", proveedores, placeholder="Vacío = Todos")
+
+        # Fila 2 de filtros
+        f_col5, f_col6, f_col7, f_col8 = st.columns(4)
+        with f_col5:
+            on_time_sel = st.multiselect("Estado On Time", estados_on_time, placeholder="Vacío = Todos")
+        with f_col6:
+            in_full_sel = st.multiselect("Estado In Full", estados_in_full, placeholder="Vacío = Todos")
+        with f_col7:
+            otif_sel = st.multiselect("Estado OTIF", estados_otif, placeholder="Vacío = Todos")
+        with f_col8:
+            semana_sel = st.multiselect("Semana / Año", semanas_disp, placeholder="Vacío = Todas")
+
+        btn_aplicar = st.form_submit_button("🔄 Aplicar Filtros", type="primary", use_container_width=True)
 
     df = df_base.copy()
     
-    # La lógica original ya funciona perfecto con filtros vacíos (ignora el filtrado y trae todo)
+    # Aplicar lógica de filtrado
     if centro_sel:
         df = df[df['Nombre Centro 2'].isin(centro_sel)]
     if grupo_sel:
