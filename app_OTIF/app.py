@@ -9,10 +9,10 @@ st.set_page_config(page_title="Dashboard OTIF", page_icon="🎯", layout="wide")
 # CONFIGURACIÓN DE RUTAS Y ENLACES ONEDRIVE
 # ==========================================
 ONEDRIVE_URLS = {
-    "me2m": "https://empresassk-my.sharepoint.com/:x:/g/personal/rodrigo_dallaserra_enaex_com/IQCsqrxqNHT5QbsHdXTEX6j3ATbS-oKte1km1xtAm4xtMrY?download=1",
-    "me80fn": "https://empresassk-my.sharepoint.com/:x:/g/personal/rodrigo_dallaserra_enaex_com/IQD0KZXh49t6QJiNk-8Db8GLAQEodvYZizKumm57X2B8PBo?download=1",
-    "grupo": "https://empresassk-my.sharepoint.com/:x:/g/personal/rodrigo_dallaserra_enaex_com/IQCWw06SLb9DT7t5WVOemA19AT663LxrU6u9e7ZXygjKGDE?download=1",
-    "centro": "https://empresassk-my.sharepoint.com/:x:/g/personal/rodrigo_dallaserra_enaex_com/IQB6Ny2KoGQURp6nWehTspgGAfwNUsxEcW4xzfszzAfUtAM?download=1"
+    "me2m": "https://empresassk-my.sharepoint.com/:x:/g/personal/rodrigo_dallaserra_enaex_com/IQCsqrxqNHT5QbsHdXTEX6j3ATbS-oKte1km1xtAm4xtMrY?e=1OLXgF&download=1",
+    "me80fn": "https://empresassk-my.sharepoint.com/:x:/g/personal/rodrigo_dallaserra_enaex_com/IQD0KZXh49t6QJiNk-8Db8GLAQEodvYZizKumm57X2B8PBo?e=pxeBjd&download=1",
+    "grupo": "https://empresassk-my.sharepoint.com/:x:/g/personal/rodrigo_dallaserra_enaex_com/IQCWw06SLb9DT7t5WVOemA19AT663LxrU6u9e7ZXygjKGDE?e=6uKY02&download=1",
+    "centro": "https://empresassk-my.sharepoint.com/:x:/g/personal/rodrigo_dallaserra_enaex_com/IQB6Ny2KoGQURp6nWehTspgGAfwNUsxEcW4xzfszzAfUtAM?e=Y0aQsB&download=1"
 }
 
 LOCAL_PATHS = {
