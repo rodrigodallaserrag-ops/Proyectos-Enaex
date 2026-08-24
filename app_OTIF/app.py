@@ -349,38 +349,46 @@ if listos_para_procesar:
         semanas_disp = sorted([s for s in df_base['Semana/Año'].unique() if s != 'Sin Fecha'])
         if 'Sin Fecha' in df_base['Semana/Año'].unique():
             semanas_disp.append('Sin Fecha')
-        semana_sel = st.multiselect("Semana / Año", semanas_disp)
+        # AÑADIDO KEY AQUÍ
+        semana_sel = st.multiselect("Semana / Año", semanas_disp, key="ms_semanas")
 
     st.markdown("**🔍 Filtros de Análisis**")
     
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     with f_col1:
         centros = sorted(df_base['Nombre Centro 2'].dropna().unique())
-        centro_sel = st.multiselect("Centro Logístico", centros)
+        # AÑADIDO KEY AQUÍ
+        centro_sel = st.multiselect("Centro Logístico", centros, key="ms_centros")
     with f_col2:
         grupos = sorted(df_base['Grupo de compras'].dropna().unique())
-        grupo_sel = st.multiselect("Grupo de Compras", grupos)
+        # AÑADIDO KEY AQUÍ
+        grupo_sel = st.multiselect("Grupo de Compras", grupos, key="ms_grupos")
     with f_col3:
         nombres_permitidos = ['Consuelo', 'Sofia', 'Sofía', 'Felipe', 'Constanza']
         compradores = sorted([
             c for c in df_base['Comprador'].dropna().astype(str).unique() 
             if any(n in c for n in nombres_permitidos)
         ])
-        comprador_sel = st.multiselect("Comprador", compradores)
+        # AÑADIDO KEY AQUÍ
+        comprador_sel = st.multiselect("Comprador", compradores, key="ms_compradores")
     with f_col4:
         proveedores = sorted(df_base['Proveedor/Centro suministrador'].dropna().astype(str).unique())
-        prov_sel = st.multiselect("Proveedor", proveedores)
+        # AÑADIDO KEY AQUÍ
+        prov_sel = st.multiselect("Proveedor", proveedores, key="ms_proveedores")
 
     f_col5, f_col6, f_col7 = st.columns(3)
     with f_col5:
         estados_on_time = sorted(df_base['Estado On Time'].dropna().unique())
-        on_time_sel = st.multiselect("Estado On Time", estados_on_time)
+        # AÑADIDO KEY AQUÍ
+        on_time_sel = st.multiselect("Estado On Time", estados_on_time, key="ms_ontime")
     with f_col6:
         estados_in_full = sorted(df_base['Estado In Full'].dropna().unique())
-        in_full_sel = st.multiselect("Estado In Full", estados_in_full)
+        # AÑADIDO KEY AQUÍ
+        in_full_sel = st.multiselect("Estado In Full", estados_in_full, key="ms_infull")
     with f_col7:
         estados_otif = sorted(df_base['Estado OTIF'].dropna().unique())
-        otif_sel = st.multiselect("Estado OTIF", estados_otif)
+        # AÑADIDO KEY AQUÍ
+        otif_sel = st.multiselect("Estado OTIF", estados_otif, key="ms_otif")
 
     df = df_base.copy()
     if centro_sel:
