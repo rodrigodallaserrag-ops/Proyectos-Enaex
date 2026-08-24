@@ -174,8 +174,8 @@ def generar_excel_resumen(df_detalle, df_t1, df_t2, df_t3):
             ws.column_dimensions['C'].width = 15
 
         format_summary_sheet('Resumen Comprador', df_t1)
-        format_summary_sheet('Resumen Planta', df_t2)
-        format_summary_sheet('Resumen Planta Macro', df_t3)
+        format_summary_sheet('Resumen Planta Macro', df_t2)
+        format_summary_sheet('Resumen Detalle Centro', df_t3)
                 
     return output.getvalue()
 
@@ -285,7 +285,7 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     # TABLAS RESUMEN (Nuevo Layout)
     # ==========================================
     
-    # 1. Preparar datos de Comprador (Filtrando y quitando OTIF)
+    # 1. Preparar datos de Comprador (Filtrando para que muestre solo los objetivos)
     compradores_obj = [
         'Consuelo Valenzuela Fuenzalida', 
         'Sofia Oporto Oporto', 
@@ -295,12 +295,13 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     df_comp = df[df['Comprador'].isin(compradores_obj)]
     
     df_t1 = generar_tabla_resumen(df_comp, 'Comprador', 'Comprador (Grupo de compras)')
-    if 'OTIF' in df_t1.columns:
-        df_t1 = df_t1.drop(columns=['OTIF'])
 
     # 2. Preparar datos de Plantas
-    df_t2 = generar_tabla_resumen(df, 'Nombre Centro', 'Centro')
-    df_t3 = generar_tabla_resumen(df, 'Nombre Centro 2', 'Centro (Macro)')
+    # Tabla fija (Nombre Centro 2 / Plantas de servicio)
+    df_t2 = generar_tabla_resumen(df, 'Nombre Centro 2', 'Centro')
+    
+    # Tabla dinámica (Nombre Centro)
+    df_t3 = generar_tabla_resumen(df, 'Nombre Centro', 'Centro (Macro)')
 
     # 3. Dibujar Layout
     st.markdown("### Por comprador")
