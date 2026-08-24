@@ -47,7 +47,7 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
     if 'Indicador de borrado' in df_me2m.columns:
         df_me2m = df_me2m[df_me2m['Indicador de borrado'].isna()].copy()
 
-    # 2. Carga de Archivos de Mapeo Locales (Cargados vía Streamlit)
+    # 2. Carga de Archivos de Mapeo Locales
     try:
         df_centro = pd.read_excel(file_centro, engine="openpyxl")
         df_centro['Título'] = df_centro['Título'].astype(str)
@@ -115,7 +115,7 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
 
     return df_otif
 
-# Función genérica para crear las tablas resumen con totales
+# Función genérica para crear las tablas resumen con totales y formato numérico
 def generar_tabla_resumen(df_filtrado, col_agrupacion, nombre_columna):
     if df_filtrado.empty:
         return pd.DataFrame(columns=[nombre_columna, 'Pos. OC', 'OTIF'])
@@ -132,7 +132,7 @@ def generar_tabla_resumen(df_filtrado, col_agrupacion, nombre_columna):
     total_pct = df_filtrado['OTIF'].mean()
     
     total_row = pd.DataFrame({
-        nombre_columna: ['Total general'],
+        nombre_columna: ['TOTAL'],
         'Pos. OC': [total_pos],
         'OTIF_pct': [total_pct]
     })
@@ -143,9 +143,12 @@ def generar_tabla_resumen(df_filtrado, col_agrupacion, nombre_columna):
     res['OTIF'] = (res['OTIF_pct'] * 100).fillna(0).round(0).astype(int).astype(str) + "%"
     res = res.drop(columns=['OTIF_pct'])
     
-    # Ordenar excluyendo la fila "Total general"
+    # Ordenar excluyendo la fila "TOTAL"
     res_body = res.iloc[:-1].sort_values(by='Pos. OC', ascending=False)
     res_final = pd.concat([res_body, res.iloc[[-1]]])
+    
+    # Aplicar formato de miles a la columna de Posiciones (ej: 10,999)
+    res_final['Pos. OC'] = res_final['Pos. OC'].apply(lambda x: f"{x:,}")
     
     return res_final
 
@@ -274,22 +277,41 @@ if archivo_me2m and archivo_me80fn and archivo_grupo and archivo_centro:
     st.divider()
 
     # ==========================================
-    # TABLAS RESUMEN TIPO PIVOT
+    # TABLAS RESUMEN (Nuevo Layout)
     # ==========================================
-    st.markdown("**📊 Tablas de Cumplimiento (Resumen)**")
     
-    col_t1, col_t2, col_t3 = st.columns(3)
+    # 1. Preparar datos de Comprador (Filtrando y quitando OTIF)
+    compradores_obj = [
+        'Consuelo Valenzuela Fuenzalida', 
+        'Sofia Oporto Oporto', 
+        'Felipe Martínez Ulloa', 
+        'Constanza Caruz Ruiz'
+    ]
+    df_comp = df[df['Comprador'].isin(compradores_obj)]
     
-    # Generar dataframes de las 3 tablas
-    df_t1 = generar_tabla_resumen(df, 'Comprador', 'Comprador')
-    df_t2 = generar_tabla_resumen(df, 'Nombre Centro', 'Planta')
-    df_t3 = generar_tabla_resumen(df, 'Nombre Centro 2', 'Planta Macro')
-    
-    with col_t1:
-        st.dataframe(df_t1, hide_index=True, use_container_width=True)
-    with col_t2:
+    df_t1 = generar_tabla_resumen(df_comp, 'Comprador', 'Comprador (Grupo de compras)')
+    if 'OTIF' in df_t1.columns:
+        df_t1 = df_t1.drop(columns=['OTIF'])
+
+    # 2. Preparar datos de Plantas
+    df_t2 = generar_tabla_resumen(df, 'Nombre Centro', 'Centro')
+    df_t3 = generar_tabla_resumen(df, 'Nombre Centro 2', 'Centro (Macro)')
+
+    # 3. Dibujar Layout
+    st.markdown("### Por comprador")
+    st.dataframe(df_t1, hide_index=True, use_container_width=True)
+
+    st.write("") # Espacio en blanco
+
+    col_izq, col_der = st.columns(2)
+    with col_izq:
+        st.markdown("### Por centro logístico")
+        st.caption("Vista fija — el total calza con la vista por comprador.")
         st.dataframe(df_t2, hide_index=True, use_container_width=True)
-    with col_t3:
+        
+    with col_der:
+        st.markdown("### Detalle por centro")
+        st.caption("Centros activos según los filtros aplicados.")
         st.dataframe(df_t3, hide_index=True, use_container_width=True)
 
     st.divider()
