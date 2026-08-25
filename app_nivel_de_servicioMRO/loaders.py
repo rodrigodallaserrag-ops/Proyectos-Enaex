@@ -121,13 +121,15 @@ def cargar_data_pr(ruta: str = None) -> pd.DataFrame:
     """
     Equivalente a la query 'Data (2)' del pbix.
     """
-    ruta = ruta or config.RUTA_DATA_ME5A
-    es_onedrive_parquet = isinstance(ruta, str) and ruta == "onedrive:me5a_parquet"
+ruta = ruta or config.RUTA_DATA_ME5A
+    # es_onedrive_parquet = isinstance(ruta, str) and ruta == "onedrive:me5a_parquet" # Puedes borrar esta línea
     fuente = _resolver_fuente(ruta)
 
-    if es_onedrive_parquet or _es_parquet(fuente):
+    # Solo usamos parquet si el archivo realmente tiene extensión .parquet
+    if _es_parquet(fuente):
         return pd.read_parquet(fuente)
 
+    # Si no es parquet (como el Excel de OneDrive), sigue de largo y lo lee como Excel:
     df = pd.read_excel(fuente, sheet_name="Data")
     return _tipar_data_pr(df)
 
