@@ -299,45 +299,50 @@ with tab_dx:
     )
 
     if st.session_state.get("_clave_pipeline") != clave_actual:
-        df_data = loaders.cargar_data_pr(archivo_data)
-        df_resp_grupo = loaders.cargar_responsable_grupo_compras(archivo_resp_grupo)
-        df_centro_sociedad = loaders.cargar_centro_sociedad_mro(archivo_centro)
-        df_resp_mrp = loaders.cargar_responsable_mrp(archivo_mrp)
-
-        df_calculado = transform.pipeline_completo(
-            df_data, df_resp_grupo, df_centro_sociedad, df_resp_mrp, fecha_corte=pd.Timestamp(fecha_corte)
-        )
-        df_calculado["Año"] = df_calculado["Fecha de pedido"].dt.year
-        df_calculado["Mes"] = df_calculado["Fecha de pedido"].dt.month
-        df_calculado["Día"] = df_calculado["Fecha de pedido"].dt.day
-
-        if "df_trazabilidad_limpio" in st.session_state:
-            df_traz = st.session_state["df_trazabilidad_limpio"]
-            col_traz = "Solicitud de pedido" if "Solicitud de pedido" in df_traz.columns else "Solped SAP (600)"
+        try:
+            df_data = loaders.cargar_data_pr(archivo_data)
+            df_resp_grupo = loaders.cargar_responsable_grupo_compras(archivo_resp_grupo)
+            df_centro_sociedad = loaders.cargar_centro_sociedad_mro(archivo_centro)
+            df_resp_mrp = loaders.cargar_responsable_mrp(archivo_mrp)
             
-            solpeds_no_cat = set(
-                df_traz[col_traz]
-                .dropna()
-                .astype(str)
-                .str.strip()
-                .str.replace(r"\.0$", "", regex=True)
+            df_calculado = transform.pipeline_completo(
+                df_data, df_resp_grupo, df_centro_sociedad, df_resp_mrp, fecha_corte=pd.Timestamp(fecha_corte)
             )
+            df_calculado["Año"] = df_calculado["Fecha de pedido"].dt.year
+            df_calculado["Mes"] = df_calculado["Fecha de pedido"].dt.month
+            df_calculado["Día"] = df_calculado["Fecha de pedido"].dt.day
 
-            solpeds_me5a = (
-                df_calculado["Solicitud de pedido"]
-                .astype(str)
-                .str.strip()
-                .str.replace(r"\.0$", "", regex=True)
-            )
+            if "df_trazabilidad_limpio" in st.session_state:
+                df_traz = st.session_state["df_trazabilidad_limpio"]
+                col_traz = "Solicitud de pedido" if "Solicitud de pedido" in df_traz.columns else "Solped SAP (600)"
+                
+                solpeds_no_cat = set(
+                    df_traz[col_traz]
+                    .dropna()
+                    .astype(str)
+                    .str.strip()
+                    .str.replace(r"\.0$", "", regex=True)
+                )
 
-            df_calculado["En_Trazabilidad"] = solpeds_me5a.isin(solpeds_no_cat)
-        else:
-            df_calculado["En_Trazabilidad"] = False
+                solpeds_me5a = (
+                    df_calculado["Solicitud de pedido"]
+                    .astype(str)
+                    .str.strip()
+                    .str.replace(r"\.0$", "", regex=True)
+                )
 
-        df_calculado["Tipo Ariba"] = df_calculado.apply(determinar_tipo_ariba, axis=1)
+                df_calculado["En_Trazabilidad"] = solpeds_me5a.isin(solpeds_no_cat)
+            else:
+                df_calculado["En_Trazabilidad"] = False
 
-        st.session_state["_df_pipeline"] = df_calculado
-        st.session_state["_clave_pipeline"] = clave_actual
+            df_calculado["Tipo Ariba"] = df_calculado.apply(determinar_tipo_ariba, axis=1)
+
+            st.session_state["_df_pipeline"] = df_calculado
+            st.session_state["_clave_pipeline"] = clave_actual
+
+        except Exception as e:
+            st.error(f"🚨 **No se pudieron cargar los datos.**\n\nDetalle técnico: `{e}`\n\n**Solución recomendada:** El archivo Parquet que intentas cargar está corrupto o es inválido. Por favor, vuelve a generar el archivo `.parquet` o súbelo nuevamente.")
+            st.stop()
 
     df = st.session_state["_df_pipeline"]
 
