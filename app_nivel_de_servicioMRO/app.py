@@ -4,6 +4,8 @@ Réplica del pbix "Nivel_de_servicio_BI.pbix", página "Dx Compradores" y Trazab
 
 Correr local: streamlit run app.py
 """
+import glob
+import os
 import pandas as pd
 import streamlit as st
 
@@ -19,6 +21,36 @@ except ImportError:
     HAS_TRAZABILIDAD = False
 
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
+
+# ==============================================================================
+# FUNCIONES AUXILIARES PARA MANEJO DE ARCHIVOS DUPLICADOS
+# ==============================================================================
+def buscar_archivo_mas_reciente(patron_o_ruta: str) -> str:
+    """
+    Busca archivos que coincidan con un patrón (ej: 'data/ME5A_con_Ariba*.parquet'
+    o 'data/ME5A_con_Ariba (1).xlsx') y retorna la ruta del más recientemente modificado.
+    """
+    if not isinstance(patron_o_ruta, str) or patron_o_ruta.startswith("onedrive:"):
+        return patron_o_ruta
+
+    # Si la ruta exacta existe, verificar si existen duplicados con (1), (2), etc.
+    nombre_base, ext = os.path.splitext(patron_o_ruta)
+    patron_busqueda = f"{nombre_base}*{ext}"
+    
+    coincidencias = glob.glob(patron_busqueda)
+    if coincidencias:
+        return max(coincidencias, key=os.path.getmtime)
+    
+    return patron_o_ruta
+
+def obtener_ultimo_subido(archivos):
+    """
+    Si el usuario sube múltiples archivos duplicados vía File Uploader,
+    selecciona el último elemento cargado.
+    """
+    if isinstance(archivos, list):
+        return archivos[-1] if len(archivos) > 0 else None
+    return archivos
 
 # ==============================================================================
 # OCULTAR NAVEGACIÓN GLOBAL (TRAZABILIDAD ARIBA)
@@ -48,22 +80,21 @@ if st.button(icono_tema, key="theme_toggle", help="Alternar Modo Claro/Oscuro"):
     st.rerun()
 
 if st.session_state["tema"] == "claro":
-    # MODO CLARO: CSS ajustado para colocar el icono debajo de los 3 puntos y evitar que sea gigante
     st.markdown("""
         <style>
         .st-key-theme_toggle {
             position: fixed !important;
-            top: 65px !important; /* Posicionado justo debajo de los 3 puntos */
-            right: 15px !important; /* Esquina superior derecha */
+            top: 65px !important;
+            right: 15px !important;
             z-index: 999999 !important;
-            width: 45px !important; /* Ancho fijo para evitar que sea gigante */
-            height: 45px !important; /* Alto fijo */
+            width: 45px !important;
+            height: 45px !important;
             min-width: 0 !important; 
         }
         .st-key-theme_toggle button {
             background: #FFFFFF !important;
             border: 1px solid #E0E0E0 !important;
-            border-radius: 50% !important; /* Botón circular */
+            border-radius: 50% !important;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important;
             font-size: 1.4rem !important;
             padding: 0 !important;
@@ -90,22 +121,21 @@ if st.session_state["tema"] == "claro":
         </style>
     """, unsafe_allow_html=True)
 else:
-    # MODO OSCURO: CSS ajustado para colocar el icono debajo de los 3 puntos y evitar que sea gigante
     st.markdown("""
         <style>
         .st-key-theme_toggle {
             position: fixed !important;
-            top: 65px !important; /* Posicionado justo debajo de los 3 puntos */
-            right: 15px !important; /* Esquina superior derecha */
+            top: 65px !important;
+            right: 15px !important;
             z-index: 999999 !important;
-            width: 45px !important; /* Ancho fijo para evitar que sea gigante */
-            height: 45px !important; /* Alto fijo */
+            width: 45px !important;
+            height: 45px !important;
             min-width: 0 !important;
         }
         .st-key-theme_toggle button {
             background: #1E2329 !important;
             border: 1px solid #444444 !important;
-            border-radius: 50% !important; /* Botón circular */
+            border-radius: 50% !important;
             box-shadow: 0 2px 5px rgba(0,0,0,0.3) !important;
             font-size: 1.4rem !important;
             padding: 0 !important;
@@ -170,13 +200,6 @@ else:
 
 # ---- 0. Función de Clasificación Corregida ----
 def determinar_tipo_ariba(row):
-    """
-    Clasifica las solicitudes garantizando la detección de Ariba No Catalogada:
-    - ⚙️ SAP ERP: Serie 1 (100...), Serie 19, CL...
-    - ⚪ SAP MRP: Serie 5 (500...) o marca de Solped MRP.
-    - 🟢 ARIBA CATALOGADA / DIRECTA: Flujos directos o catalogados con material.
-    - 🔵 ARIBA NO CATALOGADA: Serie 6 sin código de material, en Trazabilidad o sin catálogo.
-    """
     sol = str(row.get("Solicitud de pedido", "")).strip()
     material = str(row.get("Material", "")).strip()
     tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0", "null"])
@@ -263,28 +286,47 @@ with tab_dx:
                 st.stop()
 
         elif modo == "Subir archivos":
-            archivo_data = st.file_uploader(
+            # accept_multiple_files=True permite seleccionar archivos duplicados descargados (ej. ME5A (1).parquet)
+            files_data = st.file_uploader(
                 "ME5A_con_Ariba (.xlsx o .parquet)",
                 type=["xlsx", "parquet"],
-                help="Si ya lo convertiste en la pestaña 'Preparar datos', sube el .parquet.",
+                accept_multiple_files=True,
+                help="Puedes subir uno o varios archivos (incluso duplicados con '(1)'). Se tomará el último.",
             )
-            archivo_resp_grupo = st.file_uploader("Responsable_Grupo_Compras.xlsx", type="xlsx")
-            archivo_centro = st.file_uploader("Centro_Sociedad_MRO.xlsx", type="xlsx")
-            archivo_mrp = st.file_uploader("Responsable_MRP.xlsx", type="xlsx")
+            files_resp = st.file_uploader("Responsable_Grupo_Compras.xlsx", type="xlsx", accept_multiple_files=True)
+            files_centro = st.file_uploader("Centro_Sociedad_MRO.xlsx", type="xlsx", accept_multiple_files=True)
+            files_mrp = st.file_uploader("Responsable_MRP.xlsx", type="xlsx", accept_multiple_files=True)
+
+            archivo_data = obtener_ultimo_subido(files_data)
+            archivo_resp_grupo = obtener_ultimo_subido(files_resp)
+            archivo_centro = obtener_ultimo_subido(files_centro)
+            archivo_mrp = obtener_ultimo_subido(files_mrp)
+
             if not all([archivo_data, archivo_resp_grupo, archivo_centro, archivo_mrp]):
                 st.info("Sube los 4 archivos para generar el reporte.")
                 st.stop()
         else:
-            archivo_data = "data/ME5A_con_Ariba.xlsx"
-            archivo_resp_grupo = "data/Responsable_Grupo_Compras.xlsx"
-            archivo_centro = "data/Centro_Sociedad_MRO.xlsx"
-            archivo_mrp = "data/Responsable_MRP.xlsx"
+            # En modo local, buscar automáticamente duplicados con (1), (2), o .parquet/.xlsx más reciente
+            archivo_parquet_local = buscar_archivo_mas_reciente("data/ME5A_con_Ariba.parquet")
+            archivo_excel_local = buscar_archivo_mas_reciente("data/ME5A_con_Ariba.xlsx")
+
+            # Priorizar parquet local si existe
+            if os.path.exists(archivo_parquet_local):
+                archivo_data = archivo_parquet_local
+            else:
+                archivo_data = archivo_excel_local
+
+            archivo_resp_grupo = buscar_archivo_mas_reciente("data/Responsable_Grupo_Compras.xlsx")
+            archivo_centro = buscar_archivo_mas_reciente("data/Centro_Sociedad_MRO.xlsx")
+            archivo_mrp = buscar_archivo_mas_reciente("data/Responsable_MRP.xlsx")
 
         st.header("Parámetros")
         fecha_corte = st.date_input("Fecha de corte del reporte (FechaCorteReporte)", value=pd.Timestamp.today())
         st.caption(f"SLA: {config.SLA_DIAS_ERP_MRP} días ERP/MRP · {config.SLA_DIAS_ARIBA} días Ariba")
 
     def _clave_archivo(archivo):
+        if isinstance(archivo, list):
+            return tuple(_clave_archivo(a) for a in archivo)
         if hasattr(archivo, "name") and hasattr(archivo, "size"):
             return (archivo.name, archivo.size)
         return archivo
@@ -341,7 +383,7 @@ with tab_dx:
             st.session_state["_clave_pipeline"] = clave_actual
 
         except Exception as e:
-            st.error(f"🚨 **No se pudieron cargar los datos.**\n\nDetalle técnico: `{e}`\n\n**Solución recomendada:** El archivo Parquet que intentas cargar está corrupto o es inválido. Por favor, vuelve a generar el archivo `.parquet` o súbelo nuevamente.")
+            st.error(f"🚨 **No se pudieron cargar los datos.**\n\nDetalle técnico: `{e}`\n\n**Solución recomendada:** El archivo Parquet o Excel que intentas cargar está corrupto o es inválido. Vuelve a generar/subir el archivo.")
             st.stop()
 
     df = st.session_state["_df_pipeline"]
@@ -506,7 +548,6 @@ with tab_dx:
     promedio_lead_time = df_f["Lead Time Total"].mean() if "Lead Time Total" in df_f.columns else float("nan")
     pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
 
-    # Condición de texto para las Cards
     color_texto_card = "#FF3333" if st.session_state["tema"] == "oscuro" else "#404B55"
     color_sub_card = "#FF3333" if st.session_state["tema"] == "oscuro" else "#555"
 
@@ -708,7 +749,7 @@ with tab_dx:
                     "Comentario", help="Anotación libre para el registro semanal", width="medium"
                 ),
                 "Nivel de Servicio": st.column_config.NumberColumn("Nivel de Servicio (días)"),
-                "Lead Time Total": None,  # 👈 Oculto visualmente del frontend
+                "Lead Time Total": None,
             },
             disabled=[c for c in detalle.columns if c != "Comentario"],
         )
@@ -893,7 +934,6 @@ with tab_trazabilidad:
                         st.session_state["df_trazabilidad_cadena"] = df_cadena
                         st.session_state["df_trazabilidad_limpio"] = df_resumen
 
-                        # Borrar la caché del pipeline para obligar a recalcular la Pestaña 1
                         st.session_state.pop("_clave_pipeline", None)
                         st.success("¡Trazabilidad procesada con éxito! La pestaña Dx Compradores ha sido actualizada.")
                         st.rerun()
