@@ -134,13 +134,31 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
     buffer_centro = obtener_buffer_archivo(file_centro)
     buffer_grupo = obtener_buffer_archivo(file_grupo)
 
+    # 1. LECTURA Y FILTRO DE ME80FN (Agregada Clase de movimiento 101)
     df_me2m = pd.read_excel(buffer_me2m, engine="openpyxl")
-    cols_me80fn = ['Documento compras', 'Posición', 'Fe.contabilización']
+    cols_me80fn = ['Documento compras', 'Posición', 'Fe.contabilización', 'Clase de movimiento']
     df_me80fn = pd.read_excel(buffer_me80fn, engine="openpyxl", usecols=lambda c: c in cols_me80fn)
 
+    if 'Clase de movimiento' in df_me80fn.columns:
+        df_me80fn = df_me80fn[df_me80fn['Clase de movimiento'].astype(str) == '101']
+
+    # 2. FILTROS EN ME2M (Reglas de negocio)
     if 'Indicador de borrado' in df_me2m.columns:
         df_me2m = df_me2m[df_me2m['Indicador de borrado'].isna()].copy()
+        
+    if 'Ind.liberación' in df_me2m.columns:
+        df_me2m = df_me2m[df_me2m['Ind.liberación'] == 'B'].copy()
 
+    # (Opcional) Filtrar años 2018-2021. Descomentar si usas la 'Fecha del documento'
+    # if 'Fecha del documento' in df_me2m.columns:
+    #     df_me2m['Fecha del documento'] = pd.to_datetime(df_me2m['Fecha del documento'], errors='coerce')
+    #     df_me2m = df_me2m[df_me2m['Fecha del documento'].dt.year > 2021].copy()
+
+    # (Opcional) Excluir OC Masiva. Descomentar y cambiar 'Tipo Documento' por tu columna real
+    # if 'Clase de documento' in df_me2m.columns:
+    #     df_me2m = df_me2m[df_me2m['Clase de documento'] != 'ZMAS'].copy()
+
+    # 3. MERGE DE CENTROS Y GRUPOS
     try:
         df_centro = pd.read_excel(buffer_centro, engine="openpyxl")
         df_centro['Título'] = df_centro['Título'].astype(str)
@@ -178,10 +196,12 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
             
     df_me2m['Nombre Centro 2'] = df_me2m['Nombre Centro 2'].apply(agrupar_centro_logistico)
 
+    # 4. AGRUPACIÓN DE RECEPCIONES (Deduplicación)
     df_recepciones = df_me80fn.groupby(['Documento compras', 'Posición']).agg(
         Fecha_Ingreso_SAP=('Fe.contabilización', 'max')
     ).reset_index()
 
+    # 5. MERGE FINAL Y CÁLCULOS
     df_otif = pd.merge(df_me2m, df_recepciones, on=['Documento compras', 'Posición'], how='left')
 
     df_otif['Fecha_Estadistica'] = pd.to_datetime(df_otif['Fecha entrega estad.'], errors='coerce').dt.date
