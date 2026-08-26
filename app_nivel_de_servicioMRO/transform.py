@@ -77,13 +77,25 @@ def filtrar_solicitudes_vigentes(df: pd.DataFrame) -> pd.DataFrame:
     return df[personalizado_3 == 2].copy()
 
 
-def calcular_nivel_servicio_dias(df: pd.DataFrame, fecha_corte: pd.Timestamp) -> pd.DataFrame:
+def calcular_nivel_servicio_dias(
+    df: pd.DataFrame,
+    fecha_corte: pd.Timestamp,
+    df_trazabilidad: pd.DataFrame = None,
+) -> pd.DataFrame:
     """
     Calcula:
     1. SLA Comprador: Días transcurridos desde Fecha modificación.
        (Alineado con la query M: el inicio del reloj SIEMPRE es Fecha
        modificación, sin cadena de respaldo hacia Fecha de liberación ni
        Fecha de solicitud.)
+
+       EXCEPCIÓN: para las solicitudes identificadas como "No Catalogada" vía
+       la pestaña Trazabilidad (df_trazabilidad, el resumen por Solped SAP 600
+       de ariba_trazabilidad.resumen_por_solped), se usa "Fecha liberación PR
+       inicial" en vez de Fecha modificación — es el verdadero inicio del
+       reloj para ese flujo de Ariba, que Fecha modificación del ME5A no
+       siempre refleja bien. El resto de las solicitudes (sin match en
+       Trazabilidad) sigue usando Fecha modificación, sin cambios.
     2. Lead Time Total: Días transcurridos desde Fecha de solicitud inicial (usuario).
     """
     df = df.copy()
@@ -93,8 +105,33 @@ def calcular_nivel_servicio_dias(df: pd.DataFrame, fecha_corte: pd.Timestamp) ->
     f_sol = pd.to_datetime(df["Fecha de solicitud"], errors="coerce")
     f_mod = pd.to_datetime(df["Fecha modificación"], errors="coerce")
 
-    # Inicio SLA Comprador: SIEMPRE Fecha modificación (igual que la query M).
-    f_inicio_sla = f_mod
+    # Inicio SLA Comprador: Fecha modificación (igual que la query M) por defecto.
+    f_inicio_sla = f_mod.copy()
+
+    if (
+        df_trazabilidad is not None
+        and len(df_trazabilidad)
+        and "Fecha liberación PR inicial" in df_trazabilidad.columns
+    ):
+        col_traz = (
+            "Solicitud de pedido"
+            if "Solicitud de pedido" in df_trazabilidad.columns
+            else "Solped SAP (600)"
+        )
+        traz = df_trazabilidad[[col_traz, "Fecha liberación PR inicial"]].copy()
+        traz["_clave"] = (
+            traz[col_traz].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+        )
+        traz = traz.drop_duplicates(subset="_clave").set_index("_clave")["Fecha liberación PR inicial"]
+
+        clave_me5a = (
+            df["Solicitud de pedido"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+        )
+        f_lib_inicial = pd.to_datetime(clave_me5a.map(traz), errors="coerce")
+
+        # Donde hay match con Trazabilidad -> usa Fecha liberación PR inicial.
+        # Donde no hay match -> mantiene Fecha modificación (sin cambios).
+        f_inicio_sla = f_lib_inicial.fillna(f_inicio_sla)
 
     # Días para SLA Comprador
     df["_fecha_repor_inicio_sla"] = (f_corte - f_inicio_sla).dt.days
@@ -179,12 +216,21 @@ def pipeline_completo(
     df_centro_sociedad: pd.DataFrame,
     df_resp_mrp: pd.DataFrame,
     fecha_corte: pd.Timestamp,
+    df_trazabilidad: pd.DataFrame = None,
 ) -> pd.DataFrame:
-    """Ejecuta el pipeline de transformación completo."""
+    """Ejecuta el pipeline de transformación completo.
+
+    df_trazabilidad (opcional): resumen por Solped SAP 600 de
+    ariba_trazabilidad.resumen_por_solped. Si se entrega, las solicitudes que
+    matcheen por 'Solicitud de pedido' usan 'Fecha liberación PR inicial'
+    como inicio del reloj en vez de Fecha modificación (ver
+    calcular_nivel_servicio_dias). Si no se entrega, el comportamiento es
+    idéntico al de antes (siempre Fecha modificación).
+    """
     df = unir_responsables(df_data, df_resp_grupo, df_resp_mrp)
     df = calcular_solped_mrp(df)
     df = filtrar_solicitudes_vigentes(df)
-    df = calcular_nivel_servicio_dias(df, fecha_corte)
+    df = calcular_nivel_servicio_dias(df, fecha_corte, df_trazabilidad=df_trazabilidad)
     df = unir_centro_sociedad(df, df_centro_sociedad)
     df = calcular_estado_solped_y_nivel_servicio(df)
     df = calcular_aplica(df)
