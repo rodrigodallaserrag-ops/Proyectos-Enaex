@@ -80,7 +80,10 @@ def filtrar_solicitudes_vigentes(df: pd.DataFrame) -> pd.DataFrame:
 def calcular_nivel_servicio_dias(df: pd.DataFrame, fecha_corte: pd.Timestamp) -> pd.DataFrame:
     """
     Calcula:
-    1. SLA Comprador: Días transcurridos desde Fecha de liberación (descontando Fase 0).
+    1. SLA Comprador: Días transcurridos desde Fecha modificación.
+       (Alineado con la query M: el inicio del reloj SIEMPRE es Fecha
+       modificación, sin cadena de respaldo hacia Fecha de liberación ni
+       Fecha de solicitud.)
     2. Lead Time Total: Días transcurridos desde Fecha de solicitud inicial (usuario).
     """
     df = df.copy()
@@ -90,14 +93,8 @@ def calcular_nivel_servicio_dias(df: pd.DataFrame, fecha_corte: pd.Timestamp) ->
     f_sol = pd.to_datetime(df["Fecha de solicitud"], errors="coerce")
     f_mod = pd.to_datetime(df["Fecha modificación"], errors="coerce")
 
-    # Fecha de liberación (término de Fase 0 / entrada a bandeja del comprador)
-    if "Fecha de liberación" in df.columns:
-        f_lib = pd.to_datetime(df["Fecha de liberación"], errors="coerce")
-    else:
-        f_lib = pd.Series(pd.NaT, index=df.index)
-
-    # Inicio SLA Comprador: Fecha de liberación -> Fecha modificación -> Fecha solicitud
-    f_inicio_sla = f_lib.fillna(f_mod).fillna(f_sol)
+    # Inicio SLA Comprador: SIEMPRE Fecha modificación (igual que la query M).
+    f_inicio_sla = f_mod
 
     # Días para SLA Comprador
     df["_fecha_repor_inicio_sla"] = (f_corte - f_inicio_sla).dt.days
