@@ -33,7 +33,6 @@ def buscar_archivo_mas_reciente(patron_o_ruta: str) -> str:
     if not isinstance(patron_o_ruta, str) or patron_o_ruta.startswith("onedrive:"):
         return patron_o_ruta
 
-    # Si la ruta exacta existe, verificar si existen duplicados con (1), (2), etc.
     nombre_base, ext = os.path.splitext(patron_o_ruta)
     patron_busqueda = f"{nombre_base}*{ext}"
     
@@ -44,10 +43,6 @@ def buscar_archivo_mas_reciente(patron_o_ruta: str) -> str:
     return patron_o_ruta
 
 def obtener_ultimo_subido(archivos):
-    """
-    Si el usuario sube múltiples archivos duplicados vía File Uploader,
-    selecciona el último elemento cargado.
-    """
     if isinstance(archivos, list):
         return archivos[-1] if len(archivos) > 0 else None
     return archivos
@@ -57,7 +52,6 @@ def obtener_ultimo_subido(archivos):
 # ==============================================================================
 st.markdown("""
     <style>
-    /* Ocultar enlaces del menú lateral que contengan 'trazabilidad' o 'ariba' */
     [data-testid="stSidebarNav"] a[href*="trazabilidad"],
     [data-testid="stSidebarNav"] a[href*="Trazabilidad"],
     [data-testid="stSidebarNav"] a[href*="ariba"],
@@ -73,7 +67,6 @@ st.markdown("""
 if "tema" not in st.session_state:
     st.session_state["tema"] = "claro"
 
-# Botón flotante para cambiar tema
 icono_tema = "🌙" if st.session_state["tema"] == "claro" else "☀️"
 if st.button(icono_tema, key="theme_toggle", help="Alternar Modo Claro/Oscuro"):
     st.session_state["tema"] = "oscuro" if st.session_state["tema"] == "claro" else "claro"
@@ -286,7 +279,6 @@ with tab_dx:
                 st.stop()
 
         elif modo == "Subir archivos":
-            # accept_multiple_files=True permite seleccionar archivos duplicados descargados (ej. ME5A (1).parquet)
             files_data = st.file_uploader(
                 "ME5A_con_Ariba (.xlsx o .parquet)",
                 type=["xlsx", "parquet"],
@@ -306,11 +298,9 @@ with tab_dx:
                 st.info("Sube los 4 archivos para generar el reporte.")
                 st.stop()
         else:
-            # En modo local, buscar automáticamente duplicados con (1), (2), o .parquet/.xlsx más reciente
             archivo_parquet_local = buscar_archivo_mas_reciente("data/ME5A_con_Ariba.parquet")
             archivo_excel_local = buscar_archivo_mas_reciente("data/ME5A_con_Ariba.xlsx")
 
-            # Priorizar parquet local si existe
             if os.path.exists(archivo_parquet_local):
                 archivo_data = archivo_parquet_local
             else:
@@ -579,7 +569,6 @@ with tab_dx:
             tarjeta(
                 "Nivel de Servicio",
                 f"{txt_dias} días",
-                subtitulo=f"Lead Time Total: <b>{txt_lt}</b> días",
                 fondo=f_dias,
                 borde=b_dias,
             ),
@@ -675,6 +664,7 @@ with tab_dx:
     )
     tabla_comprador = transform.calcular_metricas_por_grupo(df_f, [col_comprador])
     tabla_comprador = transform.agregar_fila_total(tabla_comprador, df_f, [col_comprador])
+    tabla_comprador = tabla_comprador.drop(columns=["Promedio Lead Time Total"], errors="ignore")
     st.markdown(tabla_enaex(tabla_comprador), unsafe_allow_html=True)
 
     st.write("")
@@ -686,6 +676,7 @@ with tab_dx:
         st.subheader("Por centro logístico")
         st.caption("Vista fija — el total calza con la vista por comprador.")
         tabla_fija = transform.tabla_centros_fija(df_f)
+        tabla_fija = tabla_fija.drop(columns=["Promedio Lead Time Total"], errors="ignore")
         st.markdown(tabla_enaex(tabla_fija, compacta=True), unsafe_allow_html=True)
 
     with vc2:
@@ -695,6 +686,7 @@ with tab_dx:
         tabla_detalle = transform.calcular_metricas_por_grupo(df_f, cols_detalle)
         tabla_detalle = tabla_detalle.sort_values("Pos. OC generadas", ascending=False)
         tabla_detalle = transform.agregar_fila_total(tabla_detalle, df_f, cols_detalle)
+        tabla_detalle = tabla_detalle.drop(columns=["Promedio Lead Time Total"], errors="ignore")
         st.markdown(tabla_enaex(tabla_detalle, max_height=300, compacta=True), unsafe_allow_html=True)
 
     st.divider()
