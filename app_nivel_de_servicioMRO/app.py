@@ -371,6 +371,15 @@ with tab_dx:
 
             df_calculado["Tipo Ariba"] = df_calculado.apply(determinar_tipo_ariba, axis=1)
 
+            # Si la solicitud matcheó con Trazabilidad (mismo match que ya usa
+            # el reemplazo de fecha en transform.py), ese es un dato real de
+            # SAP — más confiable que la heurística de texto/prefijo de
+            # determinar_tipo_ariba. Se fuerza la etiqueta a "No Catalogada"
+            # para esas filas, sin importar qué haya devuelto la heurística
+            # (por ejemplo, si el rango de fechas subido a Trazabilidad no
+            # coincidía antes y la había dejado como Catalogada/Directa).
+            df_calculado.loc[df_calculado["En_Trazabilidad"], "Tipo Ariba"] = "🔵 ARIBA NO CATALOGADA"
+
             st.session_state["_df_pipeline"] = df_calculado
             st.session_state["_clave_pipeline"] = clave_actual
 
