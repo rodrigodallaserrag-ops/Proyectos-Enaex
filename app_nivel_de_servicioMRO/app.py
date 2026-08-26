@@ -338,7 +338,9 @@ with tab_dx:
             df_resp_mrp = loaders.cargar_responsable_mrp(archivo_mrp)
             
             df_calculado = transform.pipeline_completo(
-                df_data, df_resp_grupo, df_centro_sociedad, df_resp_mrp, fecha_corte=pd.Timestamp(fecha_corte)
+                df_data, df_resp_grupo, df_centro_sociedad, df_resp_mrp,
+                fecha_corte=pd.Timestamp(fecha_corte),
+                df_trazabilidad=st.session_state.get("df_trazabilidad_limpio"),
             )
             df_calculado["Año"] = df_calculado["Fecha de pedido"].dt.year
             df_calculado["Mes"] = df_calculado["Fecha de pedido"].dt.month
