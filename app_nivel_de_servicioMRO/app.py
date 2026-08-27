@@ -372,6 +372,13 @@ with tab_dx:
 
             df_calculado["Tipo Ariba"] = df_calculado.apply(determinar_tipo_ariba, axis=1)
 
+            # Si la solicitud matcheó con Trazabilidad (mismo match que ya usa
+            # el reemplazo de fecha en transform.py), ese es un dato real de
+            # SAP — más confiable que la heurística de texto/prefijo de
+            # determinar_tipo_ariba. Se fuerza la etiqueta a "No Catalogada"
+            # para esas filas, sin importar qué haya devuelto la heurística
+            # (por ejemplo, si el rango de fechas subido a Trazabilidad no
+            # coincidía antes y la había dejado como Catalogada/Directa).
             df_calculado.loc[df_calculado["En_Trazabilidad"], "Tipo Ariba"] = "🔵 ARIBA NO CATALOGADA"
 
             # --- INICIO NUEVA LÓGICA DE NEGOCIO ---
@@ -385,23 +392,10 @@ with tab_dx:
             fecha_liberacion = pd.to_datetime(df_calculado["Fecha de liberación"], errors="coerce").dt.normalize()
             dias_acumulados = (fecha_hoy - fecha_liberacion).dt.days
             
-            # Recalcular Nivel de Servicio
             df_calculado["Nivel de Servicio"] = np.where(
                 casos_pendientes,
                 dias_acumulados,
                 df_calculado["Nivel de Servicio"]
-            )
-            
-            # Recalcular Columna 'Cumple' para que las métricas y filtros se actualicen automáticamente
-            df_calculado["Días SLA_Config"] = np.where(
-                df_calculado["Tipo Ariba"].str.contains("ARIBA", na=False), 
-                getattr(config, "SLA_DIAS_ARIBA", 7), 
-                getattr(config, "SLA_DIAS_ERP_MRP", 10)
-            )
-            df_calculado["Cumple"] = np.where(
-                df_calculado["Nivel de Servicio"] <= df_calculado["Días SLA_Config"], 
-                "Cumple", 
-                "No Cumple"
             )
             # --- FIN NUEVA LÓGICA DE NEGOCIO ---
 
@@ -616,57 +610,6 @@ with tab_dx:
         st.markdown(tarjeta("OC generadas", f"{pedidos_distintos:,}"), unsafe_allow_html=True)
 
     st.divider()
-
-    # ==============================================================================
-    # SECCIÓN DE ALERTAS CRÍTICAS
-    # ==============================================================================
-    st.subheader("🚨 Alertas Críticas: No Catalogadas Fuera de Plazo")
-    
-    # 1. Filtrar solo las "No Catalogadas" que están pendientes y atrasadas
-    df_criticas = df_f[
-        (df_f['Tipo Ariba'].str.contains("NO CATALOGADA", na=False)) & 
-        (df_f['Estado Solped'] == "Sin pedido") & 
-        (df_f['Cumple'] == "No Cumple")
-    ].copy()
-
-    if not df_criticas.empty:
-        # 2. Asignar los días límite basados en origen
-        if "Días SLA_Config" in df_criticas.columns:
-            df_criticas['Días SLA'] = df_criticas['Días SLA_Config']
-        else:
-            df_criticas['Días SLA'] = np.where(df_criticas['Tipo Ariba'].str.contains("ARIBA", na=False), getattr(config, "SLA_DIAS_ARIBA", 7), getattr(config, "SLA_DIAS_ERP_MRP", 10))
-        
-        # 3. Proyectar la fecha en la que debió estar lista
-        df_criticas['Fecha Límite Esperada'] = pd.to_datetime(df_criticas['Fecha de liberación'], errors='coerce') + pd.to_timedelta(df_criticas['Días SLA'], unit='d')
-        
-        # Formatear fechas para la tabla visual
-        df_criticas['Fecha de liberación'] = pd.to_datetime(df_criticas['Fecha de liberación']).dt.date
-        df_criticas['Fecha Límite Esperada'] = df_criticas['Fecha Límite Esperada'].dt.date
-        
-        # Ordenar mostrando las de mayor retraso primero
-        df_criticas = df_criticas.sort_values(by='Nivel de Servicio', ascending=False)
-        
-        col_comprador_critica = 'Comprador (Grupo de compras)' if 'Comprador (Grupo de compras)' in df_criticas.columns else 'Grupo de compras'
-        
-        # Seleccionar columnas clave a mostrar
-        columnas_vista = [
-            'Centro', col_comprador_critica, 'Tipo Ariba', 
-            'Fecha de liberación', 'Fecha Límite Esperada', 'Nivel de Servicio'
-        ]
-        columnas_vista = [c for c in columnas_vista if c in df_criticas.columns]
-        
-        df_vista = df_criticas[columnas_vista].rename(columns={'Nivel de Servicio': 'Nivel de Servicio (días)'})
-        
-        # 4. Función para teñir toda la fila de rojo
-        def highlight_red(row):
-            return ['background-color: #ffcccc; color: #900000'] * len(row)
-        
-        st.dataframe(df_vista.style.apply(highlight_red, axis=1), use_container_width=True, hide_index=True)
-    else:
-        st.success("🎉 ¡Excelente! No hay solicitudes No Catalogadas fuera de plazo según los filtros actuales.")
-
-    st.divider()
-    # ==============================================================================
 
     # ---- Estilo corporativo Enaex ----
     ENAEX_GRIS = "#1E2329" if st.session_state["tema"] == "oscuro" else "#404B55"
