@@ -7,6 +7,7 @@ Correr local: streamlit run app.py
 import glob
 import os
 import pandas as pd
+import numpy as np
 import streamlit as st
 
 import config
@@ -379,6 +380,24 @@ with tab_dx:
             # (por ejemplo, si el rango de fechas subido a Trazabilidad no
             # coincidía antes y la había dejado como Catalogada/Directa).
             df_calculado.loc[df_calculado["En_Trazabilidad"], "Tipo Ariba"] = "🔵 ARIBA NO CATALOGADA"
+
+            # --- INICIO NUEVA LÓGICA DE NEGOCIO ---
+            es_no_catalogada = df_calculado["Tipo Ariba"] == "🔵 ARIBA NO CATALOGADA"
+            sin_pr_agregada = df_calculado["Fecha de pedido"].isna() | df_calculado["Pedido"].isna()
+            tiene_pr_inicial = df_calculado["Fecha de liberación"].notna()
+            
+            casos_pendientes = es_no_catalogada & sin_pr_agregada & tiene_pr_inicial
+
+            fecha_hoy = pd.Timestamp.today().normalize()
+            fecha_liberacion = pd.to_datetime(df_calculado["Fecha de liberación"], errors="coerce").dt.normalize()
+            dias_acumulados = (fecha_hoy - fecha_liberacion).dt.days
+            
+            df_calculado["Nivel de Servicio"] = np.where(
+                casos_pendientes,
+                dias_acumulados,
+                df_calculado["Nivel de Servicio"]
+            )
+            # --- FIN NUEVA LÓGICA DE NEGOCIO ---
 
             st.session_state["_df_pipeline"] = df_calculado
             st.session_state["_clave_pipeline"] = clave_actual
