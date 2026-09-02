@@ -1,3 +1,4 @@
+import datetime
 import io
 import re
 import pandas as pd
@@ -128,8 +129,7 @@ def procesar_guardado():
     raw = str(st.session_state.get("monto_input", "")).strip()
     moneda = st.session_state.get("moneda_input", "CLP")
     proveedor = st.session_state.get("proveedor_input", "")
-    plazo_num = st.session_state.get("plazo_num_input", 5)
-    plazo_unidad = st.session_state.get("plazo_unidad_input", "Días")
+    fecha_entrega = st.session_state.get("fecha_entrega_input", datetime.date.today())
     obs = st.session_state.get("obs_input", "")
     
     try:
@@ -153,8 +153,14 @@ def procesar_guardado():
 
         monto_usd = monto_clp / indicadores["dolar"]
         
-        # Juntamos el número y la unidad para mostrarlo claro en la tabla
-        plazo_final = f"{plazo_num} {plazo_unidad}"
+        # Lógica de calendario: Calculamos los días de diferencia respecto a hoy
+        hoy = datetime.date.today()
+        dias_diferencia = (fecha_entrega - hoy).days
+        fecha_formateada = fecha_entrega.strftime("%d-%m-%Y")
+        
+        # Manejo gramatical para 1 día vs múltiples días
+        texto_dias = "día" if dias_diferencia == 1 else "días"
+        plazo_final = f"{fecha_formateada} ({dias_diferencia} {texto_dias})"
 
         st.session_state["cotizaciones"].append({
             "Proveedor": proveedor,
@@ -162,24 +168,25 @@ def procesar_guardado():
             "Moneda": moneda,
             "Equiv. CLP ($)": round(monto_clp, 2),
             "Equiv. USD ($)": round(monto_usd, 2),
-            "Plazo": plazo_final,
+            "Fecha de Entrega": plazo_final,
             "Observaciones": obs,
         })
         
-        # Limpiamos las cajas de forma segura sin generar el error de instanciación
+        # Limpiamos las cajas de forma segura
         st.session_state["monto_input"] = ""
         st.session_state["proveedor_input"] = ""
         st.session_state["obs_input"] = ""
         st.toast(f"✅ Oferta de {proveedor} ingresada correctamente.", icon="✅")
 
-# Reorganizamos las columnas para que quepa el selector de unidad de tiempo
-col1, col2, col3, col4, col5 = st.columns([2, 1.5, 1.5, 1, 1.5])
+# Reorganizamos las columnas para el selector de fecha
+col1, col2, col3, col4 = st.columns(4)
 
 col1.text_input("Proveedor*", key="proveedor_input")
 col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"], key="moneda_input", on_change=formatear_caja_monto)
 col2.text_input("Monto Original*", placeholder="Solo números (Ej: 190000)", key="monto_input", on_change=formatear_caja_monto)
-col4.number_input("Plazo", min_value=1, value=5, key="plazo_num_input")
-col5.selectbox("Unidad", ["Días", "Semanas", "Meses", "Años"], key="plazo_unidad_input")
+
+# Implementamos el selector de calendario, bloqueando fechas pasadas
+col4.date_input("Fecha de Entrega", min_value=datetime.date.today(), key="fecha_entrega_input")
 
 st.text_area("Observaciones Técnicas", key="obs_input")
 
@@ -193,7 +200,7 @@ st.subheader("📊 Cuadro Comparativo (Homogeneizado)")
 
 if not st.session_state["cotizaciones"]:
     df_empty = pd.DataFrame(
-        columns=["Proveedor", "Monto Original", "Moneda", "Equiv. CLP ($)", "Equiv. USD ($)", "Plazo", "Observaciones"]
+        columns=["Proveedor", "Monto Original", "Moneda", "Equiv. CLP ($)", "Equiv. USD ($)", "Fecha de Entrega", "Observaciones"]
     )
     st.dataframe(df_empty, use_container_width=True)
     st.info("👆 Agrega ofertas arriba para visualizar el cuadro comparativo.")
@@ -214,7 +221,6 @@ else:
             f"Se aplicaron los tipos de cambio oficiales del día ({indicadores['fecha']})."
         )
 
-    # Función para convertir el DataFrame a Excel en memoria
     def convertir_excel(dataframe):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -228,7 +234,6 @@ else:
             st.rerun()
 
     with col_btn2:
-        # Preparamos el archivo Excel usando el DataFrame con datos numéricos puros
         excel_data = convertir_excel(df)
         
         st.download_button(
