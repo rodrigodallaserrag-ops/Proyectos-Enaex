@@ -124,7 +124,6 @@ with st.sidebar:
 # -----------------------------------------------------------------------------
 st.subheader("➕ Carga Manual de Oferta")
 
-# Función que procesa los datos y limpia las cajas ANTES de redibujar la pantalla
 def procesar_guardado():
     raw = str(st.session_state.get("monto_input", "")).strip()
     moneda = st.session_state.get("moneda_input", "CLP")
@@ -153,7 +152,6 @@ def procesar_guardado():
 
         monto_usd = monto_clp / indicadores["dolar"]
         
-        # Lógica de calendario: Calculamos los días de diferencia respecto a hoy
         hoy = datetime.date.today()
         dias_diferencia = (fecha_entrega - hoy).days
         fecha_formateada = fecha_entrega.strftime("%d-%m-%Y")
@@ -171,25 +169,20 @@ def procesar_guardado():
             "Observaciones": obs,
         })
         
-        # Limpiamos las cajas de forma segura
         st.session_state["monto_input"] = ""
         st.session_state["proveedor_input"] = ""
         st.session_state["obs_input"] = ""
         st.toast(f"✅ Oferta de {proveedor} ingresada correctamente.", icon="✅")
 
-# Reorganizamos las columnas para el selector de fecha
 col1, col2, col3, col4 = st.columns(4)
 
 col1.text_input("Proveedor*", key="proveedor_input")
 col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"], key="moneda_input", on_change=formatear_caja_monto)
 col2.text_input("Monto Original*", placeholder="Solo números (Ej: 190000)", key="monto_input", on_change=formatear_caja_monto)
-
-# Implementamos el selector de calendario, bloqueando fechas pasadas
 col4.date_input("Fecha de Entrega", min_value=datetime.date.today(), key="fecha_entrega_input")
 
 st.text_area("Observaciones Técnicas", key="obs_input")
-
-st.button("Guardar en Cuadro Comparativo", type="primary", on_click=procesar_guardado)
+st.button("Guardar en Cuadro Comparativo", on_click=procesar_guardado)
 
 # -----------------------------------------------------------------------------
 # 6. CUADRO COMPARATIVO HOMOGENEIZADO Y DESCARGA A EXCEL
@@ -213,18 +206,17 @@ else:
 
     st.dataframe(df_visual, use_container_width=True)
     
-    # --- NUEVO: SISTEMA DE ELIMINACIÓN INDIVIDUAL ---
+    # --- SISTEMA DE ELIMINACIÓN INDIVIDUAL ---
     st.markdown("#### 🛠️ Gestionar Ofertas Ingresadas")
     
     for i, cotizacion in enumerate(st.session_state["cotizaciones"]):
         col_info, col_btn = st.columns([5, 1])
         
-        # Muestra el nombre del proveedor y su valor convertido para fácil identificación
         monto_clp_formateado = f"$ {int(cotizacion['Equiv. CLP ($)']):,}".replace(",", ".")
         col_info.markdown(f"Oferta de **{cotizacion['Proveedor']}** por **{monto_clp_formateado} CLP**")
         
-        # Botón individual de borrado
-        if col_btn.button("❌ Eliminar", key=f"eliminar_fila_{i}"):
+        # Botón rojo ("primary") y con texto exacto "Eliminar"
+        if col_btn.button("Eliminar", type="primary", key=f"eliminar_fila_{i}"):
             st.session_state["cotizaciones"].pop(i)
             st.rerun()
             
@@ -245,17 +237,11 @@ else:
 
     col_btn1, col_btn2 = st.columns([1, 4])
     with col_btn1:
-        if st.button("🗑️ Limpiar Todo"):
-            st.session_state["cotizaciones"] = []
-            st.rerun()
+        if st.button("Aquí tienes un par de formas de hacerlo, dependiendo de la tecnología que estés utilizando:
 
-    with col_btn2:
-        excel_data = convertir_excel(df)
-        
-        st.download_button(
-            label="🚀 Emitir a SAP ME21N (Descargar Excel)",
-            data=excel_data,
-            file_name=f"Comparativo_Solped_{solped}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary"
-        )
+**HTML y CSS (Estilos en línea)**
+La forma más rápida si solo necesitas un botón simple:
+```html
+<button style="background-color: red; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">
+  Eliminar
+</button>
