@@ -18,29 +18,6 @@ def obtener_indicadores_financieros():
     try:
         url = "https://mindicador.cl/api"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        response = requests.get(url, timeout=5, headers=headers, verify=False)
-        data = response.json()
-        return {
-            "dolar": float(data["dolar"]["valor"]),
-            "euro": float(data["euro"]["valor"]),
-            "uf": float(data["uf"]["valor"]),
-            "fecha": data["dolar"]["fecha"][:10],
-            "estado": "Online 🟢",
-        }
-    except Exception:
-        return {
-            "dolar": 938.0,
-            "euro": 1020.0,
-            "uf": 40875.0,
-            "fecha": "Valores Estimados",
-            "estado": "Offline (Red Enaex) 🛡️",
-        }
-
-@st.cache_data(ttl=3600)  
-def obtener_indicadores_financieros():
-    try:
-        url = "https://mindicador.cl/api"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         
         # 1. Aumentamos el timeout a 15 segundos para evitar cortes prematuros
         response = requests.get(url, timeout=15, headers=headers, verify=False)
@@ -67,6 +44,22 @@ def obtener_indicadores_financieros():
             "fecha": "Valores Estimados",
             "estado": "Offline (Red Enaex) 🛡️",
         }
+
+indicadores = obtener_indicadores_financieros()
+
+def formato_clp(valor):
+    return f"${int(valor):,}".replace(",", ".")
+
+def aplicar_formato_regional(monto, moneda):
+    if moneda == "CLP":
+        return f"$ {int(monto):,}".replace(",", ".")
+    elif moneda == "USD":
+        return f"$ {monto:,.2f}"
+    elif moneda == "EUR":
+        return f"€ {monto:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    elif moneda == "UF":
+        return f"UF {monto:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return str(monto)
 
 # -----------------------------------------------------------------------------
 # 2. INICIALIZAR ESTADO Y CALLBACK DE SANITIZACIÓN NUMÉRICA
