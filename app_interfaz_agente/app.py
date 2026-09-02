@@ -126,17 +126,14 @@ with st.sidebar:
 # -----------------------------------------------------------------------------
 st.subheader("➕ Carga Manual de Oferta")
 
-col1, col2, col3, col4 = st.columns(4)
-proveedor = col1.text_input("Proveedor*")
-
-moneda = col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"], key="moneda_input", on_change=formatear_caja_monto)
-monto_str = col2.text_input("Monto Original*", placeholder="Solo números (Ej: 190000)", key="monto_input", on_change=formatear_caja_monto)
-
-plazo = col4.number_input("Plazo Entrega (Días)", min_value=1, value=5)
-obs = st.text_area("Observaciones Técnicas")
-
-if st.button("Guardar en Cuadro Comparativo", type="primary"):
-    raw = str(st.session_state["monto_input"]).strip()
+# Función que procesa los datos y limpia las cajas ANTES de redibujar la pantalla
+def procesar_guardado():
+    raw = str(st.session_state.get("monto_input", "")).strip()
+    moneda = st.session_state.get("moneda_input", "CLP")
+    proveedor = st.session_state.get("proveedor_input", "")
+    plazo = st.session_state.get("plazo_input", 5)
+    obs = st.session_state.get("obs_input", "")
+    
     try:
         if moneda == "USD":
             monto = float(raw.replace(",", ""))
@@ -146,7 +143,8 @@ if st.button("Guardar en Cuadro Comparativo", type="primary"):
         monto = 0.0
 
     if not proveedor or monto <= 0:
-        st.error("⚠️ Debes ingresar un Proveedor y un Monto numérico válido.")
+        # st.toast muestra un mensaje temporal tipo notificación en la esquina
+        st.toast("⚠️ Debes ingresar un Proveedor y un Monto numérico válido.", icon="🚨")
     else:
         monto_clp = monto
         if moneda == "USD":
@@ -168,9 +166,23 @@ if st.button("Guardar en Cuadro Comparativo", type="primary"):
             "Observaciones": obs,
         })
         
+        # Limpiamos las cajas de forma segura sin generar el error de instanciación
         st.session_state["monto_input"] = ""
-        st.success(f"✅ Oferta de {proveedor} convertida e ingresada correctamente.")
-        st.rerun()
+        st.session_state["proveedor_input"] = ""
+        st.session_state["obs_input"] = ""
+        st.toast(f"✅ Oferta de {proveedor} ingresada correctamente.", icon="✅")
+
+col1, col2, col3, col4 = st.columns(4)
+
+# Asignamos un parámetro 'key' a cada caja para conectarlas con la función de arriba
+col1.text_input("Proveedor*", key="proveedor_input")
+col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"], key="moneda_input", on_change=formatear_caja_monto)
+col2.text_input("Monto Original*", placeholder="Solo números (Ej: 190000)", key="monto_input", on_change=formatear_caja_monto)
+col4.number_input("Plazo Entrega (Días)", min_value=1, value=5, key="plazo_input")
+st.text_area("Observaciones Técnicas", key="obs_input")
+
+# El botón ahora ejecuta la función 'procesar_guardado' al hacer clic
+st.button("Guardar en Cuadro Comparativo", type="primary", on_click=procesar_guardado)
 
 # -----------------------------------------------------------------------------
 # 6. CUADRO COMPARATIVO HOMOGENEIZADO
