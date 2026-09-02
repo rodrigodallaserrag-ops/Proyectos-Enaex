@@ -37,12 +37,11 @@ def obtener_indicadores_financieros():
 indicadores = obtener_indicadores_financieros()
 
 def formato_clp(valor):
-    return f"${int(round(valor)):,}".replace(",", ".")
+    return f"${int(valor):,}".replace(",", ".")
 
 def aplicar_formato_regional(monto, moneda):
-    """Aplica formato visual personalizado según la moneda ingresada."""
     if moneda == "CLP":
-        return f"$ {int(round(monto)):,}".replace(",", ".")
+        return f"$ {int(monto):,}".replace(",", ".")
     elif moneda == "USD":
         return f"$ {monto:,.2f}"
     elif moneda == "EUR":
@@ -52,10 +51,52 @@ def aplicar_formato_regional(monto, moneda):
     return str(monto)
 
 # -----------------------------------------------------------------------------
-# 2. INICIALIZAR ESTADO DE LA APLICACIÓN
+# 2. INICIALIZAR ESTADO Y CALLBACK DE SANITIZACIÓN NUMÉRICA
 # -----------------------------------------------------------------------------
 if "cotizaciones" not in st.session_state:
     st.session_state["cotizaciones"] = []
+
+if "monto_input" not in st.session_state:
+    st.session_state["monto_input"] = ""
+
+if "moneda_input" not in st.session_state:
+    st.session_state["moneda_input"] = "CLP"
+
+def formatear_caja_monto():
+    """Filtra y elimina cualquier caracter no numérico (letras, símbolos)"""
+    raw = str(st.session_state["monto_input"]).strip()
+    moneda = st.session_state["moneda_input"]
+    
+    if not raw:
+        return
+
+    # 1. Filtro estricto: Elimina cualquier letra o símbolo que NO sea un número, punto o coma
+    solo_numeros = re.sub(r'[^0-9.,]', '', raw)
+    
+    # Si al quitar letras no queda nada (ej: escribieron "AWDADW"), borra el contenido de la caja
+    if not solo_numeros:
+        st.session_state["monto_input"] = ""
+        return
+
+    try:
+        # 2. Conversión según la norma de la moneda seleccionada
+        if moneda == "USD":
+            limpio = solo_numeros.replace(",", "")
+        else:
+            limpio = solo_numeros.replace(".", "").replace(",", ".")
+            
+        num = float(limpio)
+        
+        # 3. Reescribe la caja con el formato correcto aplicado
+        if moneda == "CLP":
+            st.session_state["monto_input"] = f"{int(num):,}".replace(",", ".")
+        elif moneda == "USD":
+            st.session_state["monto_input"] = f"{num:,.2f}"
+        elif moneda in ["EUR", "UF"]:
+            st.session_state["monto_input"] = f"{num:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            
+    except ValueError:
+        st.session_state["monto_input"] = ""
 
 st.title("🛒 Consola Única de Compras — Enaex")
 
@@ -81,65 +122,58 @@ with st.sidebar:
     sociedad = st.selectbox("Sociedad", ["EC01", "EC06"])
 
 # -----------------------------------------------------------------------------
-# 5. FORMULARIO DE INGRESO DE OFERTAS (ESTÉTIKA CLEAN)
+# 5. INGRESO DE COTIZACIONES
 # -----------------------------------------------------------------------------
 st.subheader("➕ Carga Manual de Oferta")
 
-with st.form("form_cotizacion", clear_on_submit=True):
-    col1, col2, col3, col4 = st.columns(4)
-    proveedor = col1.text_input("Proveedor*")
-    
-    # Campo de texto ultra limpio (sin botones de suma/resta)
-    monto_str = col2.text_input("Monto Original*", placeholder="Ej: 1800000 o 1500,50")
-    moneda = col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"])
-    plazo = col4.number_input("Plazo Entrega (Días)", min_value=1, value=5)
-    obs = st.text_area("Observaciones Técnicas")
+col1, col2, col3, col4 = st.columns(4)
+proveedor = col1.text_input("Proveedor*")
 
-    if st.form_submit_button("Guardar en Cuadro Comparativo", type="primary"):
-        # Limpieza estricta de caracteres no numéricos por backend
-        monto_sanitizado = re.sub(r'[^0-9.,]', '', str(monto_str).strip())
-        
-        try:
-            if moneda == "USD":
-                # Formato US: elimina comas de miles
-                limpio = monto_sanitizado.replace(",", "")
-            else:
-                # Formato CLP/EUR/UF: quita puntos de miles y convierte coma a punto decimal
-                limpio = monto_sanitizado.replace(".", "").replace(",", ".")
-            
-            monto = float(limpio)
-        except ValueError:
-            monto = 0.0
+moneda = col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"], key="moneda_input", on_change=formatear_caja_monto)
+monto_str = col2.text_input("Monto Original*", placeholder="Solo números (Ej: 190000)", key="monto_input", on_change=formatear_caja_monto)
 
-        if not proveedor or monto <= 0:
-            st.error("⚠️ Ingrese un Proveedor válido y un Monto numérico mayor a 0.")
+plazo = col4.number_input("Plazo Entrega (Días)", min_value=1, value=5)
+obs = st.text_area("Observaciones Técnicas")
+
+if st.button("Guardar en Cuadro Comparativo", type="primary"):
+    raw = str(st.session_state["monto_input"]).strip()
+    try:
+        if moneda == "USD":
+            monto = float(raw.replace(",", ""))
         else:
-            # Conversiones financieras automatizadas
-            monto_clp = monto
-            if moneda == "USD":
-                monto_clp = monto * indicadores["dolar"]
-            elif moneda == "EUR":
-                monto_clp = monto * indicadores["euro"]
-            elif moneda == "UF":
-                monto_clp = monto * indicadores["uf"]
+            monto = float(raw.replace(".", "").replace(",", "."))
+    except ValueError:
+        monto = 0.0
 
-            monto_usd = monto_clp / indicadores["dolar"]
+    if not proveedor or monto <= 0:
+        st.error("⚠️ Debes ingresar un Proveedor y un Monto numérico válido.")
+    else:
+        monto_clp = monto
+        if moneda == "USD":
+            monto_clp = monto * indicadores["dolar"]
+        elif moneda == "EUR":
+            monto_clp = monto * indicadores["euro"]
+        elif moneda == "UF":
+            monto_clp = monto * indicadores["uf"]
 
-            st.session_state["cotizaciones"].append({
-                "Proveedor": proveedor,
-                "Monto Original": monto, 
-                "Moneda": moneda,
-                "Equiv. CLP ($)": round(monto_clp, 2),
-                "Equiv. USD ($)": round(monto_usd, 2),
-                "Plazo (Días)": plazo,
-                "Observaciones": obs,
-            })
-            
-            st.success(f"✅ Oferta de {proveedor} ({moneda}) ingresada y calculada correctamente.")
-            st.rerun()
+        monto_usd = monto_clp / indicadores["dolar"]
+
+        st.session_state["cotizaciones"].append({
+            "Proveedor": proveedor,
+            "Monto Original": monto, 
+            "Moneda": moneda,
+            "Equiv. CLP ($)": round(monto_clp, 2),
+            "Equiv. USD ($)": round(monto_usd, 2),
+            "Plazo (Días)": plazo,
+            "Observaciones": obs,
+        })
+        
+        st.session_state["monto_input"] = ""
+        st.success(f"✅ Oferta de {proveedor} convertida e ingresada correctamente.")
+        st.rerun()
 
 # -----------------------------------------------------------------------------
-# 6. CUADRO COMPARATIVO HOMOGENEIZADO Y MULTIMONEDA
+# 6. CUADRO COMPARATIVO HOMOGENEIZADO
 # -----------------------------------------------------------------------------
 st.divider()
 st.subheader("📊 Cuadro Comparativo (Homogeneizado)")
@@ -149,16 +183,13 @@ if not st.session_state["cotizaciones"]:
         columns=["Proveedor", "Monto Original", "Moneda", "Equiv. CLP ($)", "Equiv. USD ($)", "Plazo (Días)", "Observaciones"]
     )
     st.dataframe(df_empty, use_container_width=True)
-    st.info("👆 Llena el formulario superior para simular la comparativa.")
+    st.info("👆 Agrega ofertas arriba para visualizar el cuadro comparativo.")
 else:
     df = pd.DataFrame(st.session_state["cotizaciones"])
     
-    # Formateo visual adaptable fila por fila
     df_visual = df.copy()
-    df_visual["Monto Original"] = df_visual.apply(
-        lambda fila: aplicar_formato_regional(fila["Monto Original"], fila["Moneda"]), axis=1
-    )
-    df_visual["Equiv. CLP ($)"] = df_visual["Equiv. CLP ($)"].apply(lambda x: f"$ {int(round(x)):,}".replace(",", "."))
+    df_visual["Monto Original"] = df_visual.apply(lambda fila: aplicar_formato_regional(fila["Monto Original"], fila["Moneda"]), axis=1)
+    df_visual["Equiv. CLP ($)"] = df_visual["Equiv. CLP ($)"].apply(lambda x: f"$ {int(x):,}".replace(",", "."))
     df_visual["Equiv. USD ($)"] = df_visual["Equiv. USD ($)"].apply(lambda x: f"$ {x:,.2f}")
 
     st.dataframe(df_visual, use_container_width=True)
