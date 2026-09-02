@@ -158,7 +158,6 @@ def procesar_guardado():
         dias_diferencia = (fecha_entrega - hoy).days
         fecha_formateada = fecha_entrega.strftime("%d-%m-%Y")
         
-        # Manejo gramatical para 1 día vs múltiples días
         texto_dias = "día" if dias_diferencia == 1 else "días"
         plazo_final = f"{fecha_formateada} ({dias_diferencia} {texto_dias})"
 
@@ -213,6 +212,23 @@ else:
     df_visual["Equiv. USD ($)"] = df_visual["Equiv. USD ($)"].apply(lambda x: f"$ {x:,.2f}")
 
     st.dataframe(df_visual, use_container_width=True)
+    
+    # --- NUEVO: SISTEMA DE ELIMINACIÓN INDIVIDUAL ---
+    st.markdown("#### 🛠️ Gestionar Ofertas Ingresadas")
+    
+    for i, cotizacion in enumerate(st.session_state["cotizaciones"]):
+        col_info, col_btn = st.columns([5, 1])
+        
+        # Muestra el nombre del proveedor y su valor convertido para fácil identificación
+        monto_clp_formateado = f"$ {int(cotizacion['Equiv. CLP ($)']):,}".replace(",", ".")
+        col_info.markdown(f"Oferta de **{cotizacion['Proveedor']}** por **{monto_clp_formateado} CLP**")
+        
+        # Botón individual de borrado
+        if col_btn.button("❌ Eliminar", key=f"eliminar_fila_{i}"):
+            st.session_state["cotizaciones"].pop(i)
+            st.rerun()
+            
+    st.write("---")
 
     max_monto_clp = df["Equiv. CLP ($)"].max()
     if max_monto_clp > 1000000:
@@ -229,7 +245,7 @@ else:
 
     col_btn1, col_btn2 = st.columns([1, 4])
     with col_btn1:
-        if st.button("🗑️ Limpiar Tabla"):
+        if st.button("🗑️ Limpiar Todo"):
             st.session_state["cotizaciones"] = []
             st.rerun()
 
