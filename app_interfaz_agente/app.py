@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 import requests
 import streamlit as st
@@ -36,19 +37,22 @@ def obtener_indicadores_financieros():
 indicadores = obtener_indicadores_financieros()
 
 def formato_clp(valor):
-    return f"${int(valor):,}".replace(",", ".")
+    return f"${int(round(valor)):,}".replace(",", ".")
 
 def aplicar_formato_regional(monto, moneda):
+    """Aplica formato visual personalizado según la moneda ingresada."""
     if moneda == "CLP":
-        return f"$ {int(monto):,}".replace(",", ".")
+        return f"$ {int(round(monto)):,}".replace(",", ".")
     elif moneda == "USD":
         return f"$ {monto:,.2f}"
-    elif moneda in ["EUR", "UF"]:
+    elif moneda == "EUR":
         return f"€ {monto:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    elif moneda == "UF":
+        return f"UF {monto:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return str(monto)
 
 # -----------------------------------------------------------------------------
-# 2. INICIALIZAR ESTADO
+# 2. INICIALIZAR ESTADO DE LA APLICACIÓN
 # -----------------------------------------------------------------------------
 if "cotizaciones" not in st.session_state:
     st.session_state["cotizaciones"] = []
@@ -77,7 +81,7 @@ with st.sidebar:
     sociedad = st.selectbox("Sociedad", ["EC01", "EC06"])
 
 # -----------------------------------------------------------------------------
-# 5. INGRESO DE COTIZACIONES (BLOQUEO NUMÉRICO NATIVO)
+# 5. FORMULARIO DE INGRESO DE OFERTAS (ESTÉTIKA CLEAN)
 # -----------------------------------------------------------------------------
 st.subheader("➕ Carga Manual de Oferta")
 
@@ -85,16 +89,32 @@ with st.form("form_cotizacion", clear_on_submit=True):
     col1, col2, col3, col4 = st.columns(4)
     proveedor = col1.text_input("Proveedor*")
     
-    # st.number_input bloquea físicamente la entrada de letras en el teclado
-    monto = col2.number_input("Monto Original*", min_value=0.0, step=1000.0, format="%.2f")
+    # Campo de texto ultra limpio (sin botones de suma/resta)
+    monto_str = col2.text_input("Monto Original*", placeholder="Ej: 1800000 o 1500,50")
     moneda = col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"])
     plazo = col4.number_input("Plazo Entrega (Días)", min_value=1, value=5)
     obs = st.text_area("Observaciones Técnicas")
 
     if st.form_submit_button("Guardar en Cuadro Comparativo", type="primary"):
+        # Limpieza estricta de caracteres no numéricos por backend
+        monto_sanitizado = re.sub(r'[^0-9.,]', '', str(monto_str).strip())
+        
+        try:
+            if moneda == "USD":
+                # Formato US: elimina comas de miles
+                limpio = monto_sanitizado.replace(",", "")
+            else:
+                # Formato CLP/EUR/UF: quita puntos de miles y convierte coma a punto decimal
+                limpio = monto_sanitizado.replace(".", "").replace(",", ".")
+            
+            monto = float(limpio)
+        except ValueError:
+            monto = 0.0
+
         if not proveedor or monto <= 0:
-            st.error("⚠️ Debes ingresar un Proveedor y un Monto mayor a 0.")
+            st.error("⚠️ Ingrese un Proveedor válido y un Monto numérico mayor a 0.")
         else:
+            # Conversiones financieras automatizadas
             monto_clp = monto
             if moneda == "USD":
                 monto_clp = monto * indicadores["dolar"]
@@ -115,11 +135,11 @@ with st.form("form_cotizacion", clear_on_submit=True):
                 "Observaciones": obs,
             })
             
-            st.success(f"✅ Oferta de {proveedor} convertida e ingresada correctamente.")
+            st.success(f"✅ Oferta de {proveedor} ({moneda}) ingresada y calculada correctamente.")
             st.rerun()
 
 # -----------------------------------------------------------------------------
-# 6. CUADRO COMPARATIVO HOMOGENEIZADO
+# 6. CUADRO COMPARATIVO HOMOGENEIZADO Y MULTIMONEDA
 # -----------------------------------------------------------------------------
 st.divider()
 st.subheader("📊 Cuadro Comparativo (Homogeneizado)")
@@ -129,13 +149,16 @@ if not st.session_state["cotizaciones"]:
         columns=["Proveedor", "Monto Original", "Moneda", "Equiv. CLP ($)", "Equiv. USD ($)", "Plazo (Días)", "Observaciones"]
     )
     st.dataframe(df_empty, use_container_width=True)
-    st.info("👆 Agrega ofertas arriba para visualizar el cuadro comparativo.")
+    st.info("👆 Llena el formulario superior para simular la comparativa.")
 else:
     df = pd.DataFrame(st.session_state["cotizaciones"])
     
+    # Formateo visual adaptable fila por fila
     df_visual = df.copy()
-    df_visual["Monto Original"] = df_visual.apply(lambda fila: aplicar_formato_regional(fila["Monto Original"], fila["Moneda"]), axis=1)
-    df_visual["Equiv. CLP ($)"] = df_visual["Equiv. CLP ($)"].apply(lambda x: f"$ {int(x):,}".replace(",", "."))
+    df_visual["Monto Original"] = df_visual.apply(
+        lambda fila: aplicar_formato_regional(fila["Monto Original"], fila["Moneda"]), axis=1
+    )
+    df_visual["Equiv. CLP ($)"] = df_visual["Equiv. CLP ($)"].apply(lambda x: f"$ {int(round(x)):,}".replace(",", "."))
     df_visual["Equiv. USD ($)"] = df_visual["Equiv. USD ($)"].apply(lambda x: f"$ {x:,.2f}")
 
     st.dataframe(df_visual, use_container_width=True)
