@@ -7,7 +7,7 @@ st.set_page_config(page_title="Consola Única de Compras - Enaex", layout="wide"
 # -----------------------------------------------------------------------------
 # 1. MOTOR FINANCIERO: CONSUMO DE API MINDICADOR.CL EN TIEMPO REAL
 # -----------------------------------------------------------------------------
-@st.cache_data(ttl=3600)  # Guarda en caché por 1 hora para no saturar la red
+@st.cache_data(ttl=3600)  # Caching de 1 hora
 def obtener_indicadores_financieros():
     try:
         url = "https://mindicador.cl/api"
@@ -22,16 +22,20 @@ def obtener_indicadores_financieros():
             "estado": "Online 🟢",
         }
     except Exception:
-        # Valores de respaldo (fallback) en caso de caída temporal de la API
+        # Valores de respaldo ajustados a formato real si la red corporativa bloquea la API
         return {
-            "dolar": 940.0,
+            "dolar": 938.0,
             "euro": 1020.0,
-            "uf": 37800.0,
+            "uf": 40875.0,
             "fecha": "Valores Estimados",
-            "estado": "Offline (Fallback) ⚠️",
+            "estado": "Offline (Red Enaex) 🛡️",
         }
 
 indicadores = obtener_indicadores_financieros()
+
+# Formato visual peso chileno (ej: $40.875 CLP)
+def formato_clp(valor):
+    return f"${int(valor):,}".replace(",", ".") + " CLP"
 
 # -----------------------------------------------------------------------------
 # 2. INICIALIZAR ESTADO DE LA APLICACIÓN
@@ -42,14 +46,14 @@ if "cotizaciones" not in st.session_state:
 st.title("🛒 Consola Única de Compras — Enaex")
 
 # -----------------------------------------------------------------------------
-# 3. PANEL CENTRAL DE MONEDAS (Destacado)
+# 3. PANEL CENTRAL DE MONEDAS (Formato de Pesos Chilenos)
 # -----------------------------------------------------------------------------
-st.caption(f"🗓️ Valores oficiales del día extraídos en vivo ({indicadores['fecha']}) - Estado API: {indicadores['estado']}")
+st.caption(f"🗓️ Valores del día ({indicadores['fecha']}) - Estado API: {indicadores['estado']}")
 
 col_uf, col_usd, col_eur, _ = st.columns([1, 1, 1, 2])
-col_uf.metric("Valor UF", f"${indicadores['uf']:,.2f}")
-col_usd.metric("Valor Dólar", f"${indicadores['dolar']:,.2f}")
-col_eur.metric("Valor Euro", f"${indicadores['euro']:,.2f}")
+col_uf.metric("Valor UF", formato_clp(indicadores['uf']))
+col_usd.metric("Valor Dólar", formato_clp(indicadores['dolar']))
+col_eur.metric("Valor Euro", formato_clp(indicadores['euro']))
 
 st.divider()
 
@@ -78,7 +82,7 @@ with st.form("form_cotizacion", clear_on_submit=True):
         if not proveedor or monto <= 0:
             st.error("⚠️ Debes ingresar el nombre del Proveedor y un Monto mayor a 0.")
         else:
-            # CÁLCULO DE CONVERSIÓN EN TIEMPO REAL A CLP Y USD
+            # Cálculo de conversión a CLP y USD con los indicadores en vivo
             monto_clp = monto
             if moneda == "USD":
                 monto_clp = monto * indicadores["dolar"]
@@ -125,7 +129,7 @@ else:
     df = pd.DataFrame(st.session_state["cotizaciones"])
     st.dataframe(df, use_container_width=True)
 
-    # Regla de Negocio Enaex: Control Financiero > $1.000.000 CLP
+    # Control financiero para montos superiores a $1.000.000 CLP
     max_monto_clp = df["Equiv. CLP ($)"].max()
     if max_monto_clp > 1000000:
         st.warning(
