@@ -6,6 +6,7 @@ Correr local: streamlit run app.py
 """
 import glob
 import os
+import re
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -435,7 +436,26 @@ with tab_dx:
     with c3:
         tipos_ariba = st.multiselect("Origen / Tipo Solicitud", sorted(df["Tipo Ariba"].dropna().unique()))
 
+    # ---- Filtro para Excluir IDs de Solped ----
+    solpeds_excluir_raw = st.text_area(
+        "🚫 Excluir Solicitudes de Pedido (IDs)", 
+        placeholder="Pega las IDs a excluir separadas por coma, espacio o línea. Ej: 10045982, 3001892",
+        help="Ingresa las IDs de Solped que deseas ocultar y excluir del reporte.",
+        height=80
+    )
+
     df_f = df.copy()
+
+    # Aplicación de exclusión de IDs
+    if solpeds_excluir_raw.strip():
+        ids_excluir = set(re.split(r'[,\s\n]+', solpeds_excluir_raw.strip()))
+        ids_excluir = {i for i in ids_excluir if i}  # Elimina valores vacíos
+        
+        if ids_excluir:
+            solpeds_str = df_f["Solicitud de pedido"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+            df_f = df_f[~solpeds_str.isin(ids_excluir)]
+            checkpoints.append(("0b. Tras exclusión por ID Solped", len(df_f)))
+
     if centros:
         df_f = df_f[df_f["Centro"].isin(centros)]
     checkpoints.append(("1. Tras filtro Centro", len(df_f)))
@@ -448,7 +468,7 @@ with tab_dx:
         df_f = df_f[df_f["Tipo Ariba"].isin(tipos_ariba)]
     checkpoints.append(("2b. Tras filtro Origen / Tipo Solicitud", len(df_f)))
 
-    _snapshot("2. Tras Centro + Aplica? + Origen", df_f)
+    _snapshot("2. Tras Centro + Aplica? + Origen + Exclusiones", df_f)
 
     # ---- Estado Solped ----
     st.caption("Estado Solped (el filtro de fecha de abajo solo aplica dentro de 'Pedido completo')")
