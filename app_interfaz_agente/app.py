@@ -1,3 +1,4 @@
+import io
 import re
 import pandas as pd
 import requests
@@ -143,7 +144,6 @@ def procesar_guardado():
         monto = 0.0
 
     if not proveedor or monto <= 0:
-        # st.toast muestra un mensaje temporal tipo notificación en la esquina
         st.toast("⚠️ Debes ingresar un Proveedor y un Monto numérico válido.", icon="🚨")
     else:
         monto_clp = monto
@@ -174,18 +174,16 @@ def procesar_guardado():
 
 col1, col2, col3, col4 = st.columns(4)
 
-# Asignamos un parámetro 'key' a cada caja para conectarlas con la función de arriba
 col1.text_input("Proveedor*", key="proveedor_input")
 col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"], key="moneda_input", on_change=formatear_caja_monto)
 col2.text_input("Monto Original*", placeholder="Solo números (Ej: 190000)", key="monto_input", on_change=formatear_caja_monto)
 col4.number_input("Plazo Entrega (Días)", min_value=1, value=5, key="plazo_input")
 st.text_area("Observaciones Técnicas", key="obs_input")
 
-# El botón ahora ejecuta la función 'procesar_guardado' al hacer clic
 st.button("Guardar en Cuadro Comparativo", type="primary", on_click=procesar_guardado)
 
 # -----------------------------------------------------------------------------
-# 6. CUADRO COMPARATIVO HOMOGENEIZADO
+# 6. CUADRO COMPARATIVO HOMOGENEIZADO Y DESCARGA A EXCEL
 # -----------------------------------------------------------------------------
 st.divider()
 st.subheader("📊 Cuadro Comparativo (Homogeneizado)")
@@ -213,6 +211,13 @@ else:
             f"Se aplicaron los tipos de cambio oficiales del día ({indicadores['fecha']})."
         )
 
+    # Función para convertir el DataFrame a Excel en memoria
+    def convertir_excel(dataframe):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            dataframe.to_excel(writer, index=False, sheet_name='Comparativo')
+        return output.getvalue()
+
     col_btn1, col_btn2 = st.columns([1, 4])
     with col_btn1:
         if st.button("🗑️ Limpiar Tabla"):
@@ -220,6 +225,13 @@ else:
             st.rerun()
 
     with col_btn2:
-        if st.button("🚀 Emitir a SAP ME21N"):
-            st.balloons()
-            st.success(f"Orden preparada para Solped {solped} (Sociedad {sociedad}). Valores convertidos inyectados en SAP.")
+        # Preparamos el archivo Excel usando el DataFrame con datos numéricos puros
+        excel_data = convertir_excel(df)
+        
+        st.download_button(
+            label="🚀 Emitir a SAP ME21N (Descargar Excel)",
+            data=excel_data,
+            file_name=f"Comparativo_Solped_{solped}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary"
+        )
