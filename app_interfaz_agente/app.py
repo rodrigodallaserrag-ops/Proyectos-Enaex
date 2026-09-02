@@ -71,16 +71,13 @@ def formatear_caja_monto():
     if not raw:
         return
 
-    # 1. Filtro estricto: Elimina cualquier letra o símbolo que NO sea un número, punto o coma
     solo_numeros = re.sub(r'[^0-9.,]', '', raw)
     
-    # Si al quitar letras no queda nada (ej: escribieron "AWDADW"), borra el contenido de la caja
     if not solo_numeros:
         st.session_state["monto_input"] = ""
         return
 
     try:
-        # 2. Conversión según la norma de la moneda seleccionada
         if moneda == "USD":
             limpio = solo_numeros.replace(",", "")
         else:
@@ -88,7 +85,6 @@ def formatear_caja_monto():
             
         num = float(limpio)
         
-        # 3. Reescribe la caja con el formato correcto aplicado
         if moneda == "CLP":
             st.session_state["monto_input"] = f"{int(num):,}".replace(",", ".")
         elif moneda == "USD":
@@ -132,7 +128,8 @@ def procesar_guardado():
     raw = str(st.session_state.get("monto_input", "")).strip()
     moneda = st.session_state.get("moneda_input", "CLP")
     proveedor = st.session_state.get("proveedor_input", "")
-    plazo = st.session_state.get("plazo_input", 5)
+    plazo_num = st.session_state.get("plazo_num_input", 5)
+    plazo_unidad = st.session_state.get("plazo_unidad_input", "Días")
     obs = st.session_state.get("obs_input", "")
     
     try:
@@ -155,6 +152,9 @@ def procesar_guardado():
             monto_clp = monto * indicadores["uf"]
 
         monto_usd = monto_clp / indicadores["dolar"]
+        
+        # Juntamos el número y la unidad para mostrarlo claro en la tabla
+        plazo_final = f"{plazo_num} {plazo_unidad}"
 
         st.session_state["cotizaciones"].append({
             "Proveedor": proveedor,
@@ -162,7 +162,7 @@ def procesar_guardado():
             "Moneda": moneda,
             "Equiv. CLP ($)": round(monto_clp, 2),
             "Equiv. USD ($)": round(monto_usd, 2),
-            "Plazo (Días)": plazo,
+            "Plazo": plazo_final,
             "Observaciones": obs,
         })
         
@@ -172,12 +172,15 @@ def procesar_guardado():
         st.session_state["obs_input"] = ""
         st.toast(f"✅ Oferta de {proveedor} ingresada correctamente.", icon="✅")
 
-col1, col2, col3, col4 = st.columns(4)
+# Reorganizamos las columnas para que quepa el selector de unidad de tiempo
+col1, col2, col3, col4, col5 = st.columns([2, 1.5, 1.5, 1, 1.5])
 
 col1.text_input("Proveedor*", key="proveedor_input")
 col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"], key="moneda_input", on_change=formatear_caja_monto)
 col2.text_input("Monto Original*", placeholder="Solo números (Ej: 190000)", key="monto_input", on_change=formatear_caja_monto)
-col4.number_input("Plazo Entrega (Días)", min_value=1, value=5, key="plazo_input")
+col4.number_input("Plazo", min_value=1, value=5, key="plazo_num_input")
+col5.selectbox("Unidad", ["Días", "Semanas", "Meses", "Años"], key="plazo_unidad_input")
+
 st.text_area("Observaciones Técnicas", key="obs_input")
 
 st.button("Guardar en Cuadro Comparativo", type="primary", on_click=procesar_guardado)
@@ -190,7 +193,7 @@ st.subheader("📊 Cuadro Comparativo (Homogeneizado)")
 
 if not st.session_state["cotizaciones"]:
     df_empty = pd.DataFrame(
-        columns=["Proveedor", "Monto Original", "Moneda", "Equiv. CLP ($)", "Equiv. USD ($)", "Plazo (Días)", "Observaciones"]
+        columns=["Proveedor", "Monto Original", "Moneda", "Equiv. CLP ($)", "Equiv. USD ($)", "Plazo", "Observaciones"]
     )
     st.dataframe(df_empty, use_container_width=True)
     st.info("👆 Agrega ofertas arriba para visualizar el cuadro comparativo.")
