@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 import requests
 import streamlit as st
@@ -50,7 +51,7 @@ def aplicar_formato_regional(monto, moneda):
     return str(monto)
 
 # -----------------------------------------------------------------------------
-# 2. INICIALIZAR ESTADO Y CALLBACKS DE FORMATEO (NUEVO)
+# 2. INICIALIZAR ESTADO Y CALLBACK DE SANITIZACIÓN NUMÉRICA
 # -----------------------------------------------------------------------------
 if "cotizaciones" not in st.session_state:
     st.session_state["cotizaciones"] = []
@@ -62,23 +63,31 @@ if "moneda_input" not in st.session_state:
     st.session_state["moneda_input"] = "CLP"
 
 def formatear_caja_monto():
-    """Se ejecuta cada vez que presionas Enter en la caja o cambias la moneda."""
+    """Filtra y elimina cualquier caracter no numérico (letras, símbolos)"""
     raw = str(st.session_state["monto_input"]).strip()
     moneda = st.session_state["moneda_input"]
     
     if not raw:
         return
 
+    # 1. Filtro estricto: Elimina cualquier letra o símbolo que NO sea un número, punto o coma
+    solo_numeros = re.sub(r'[^0-9.,]', '', raw)
+    
+    # Si al quitar letras no queda nada (ej: escribieron "AWDADW"), borra el contenido de la caja
+    if not solo_numeros:
+        st.session_state["monto_input"] = ""
+        return
+
     try:
-        # Limpieza básica para extraer el número puro si el usuario escribió puntos/comas
+        # 2. Conversión según la norma de la moneda seleccionada
         if moneda == "USD":
-            limpio = raw.replace(",", "") # Gringo: quita comas, deja punto decimal
+            limpio = solo_numeros.replace(",", "")
         else:
-            limpio = raw.replace(".", "").replace(",", ".") # Chile/Europa: quita puntos, coma es decimal
+            limpio = solo_numeros.replace(".", "").replace(",", ".")
             
         num = float(limpio)
         
-        # Aplicar la máscara visual directamente a la caja de texto
+        # 3. Reescribe la caja con el formato correcto aplicado
         if moneda == "CLP":
             st.session_state["monto_input"] = f"{int(num):,}".replace(",", ".")
         elif moneda == "USD":
@@ -87,7 +96,7 @@ def formatear_caja_monto():
             st.session_state["monto_input"] = f"{num:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             
     except ValueError:
-        pass # Si hay texto inválido, lo ignora
+        st.session_state["monto_input"] = ""
 
 st.title("🛒 Consola Única de Compras — Enaex")
 
@@ -113,23 +122,20 @@ with st.sidebar:
     sociedad = st.selectbox("Sociedad", ["EC01", "EC06"])
 
 # -----------------------------------------------------------------------------
-# 5. INGRESO DE COTIZACIONES (SIN FORMULARIO PARA PERMITIR ACTUALIZACIÓN EN VIVO)
+# 5. INGRESO DE COTIZACIONES
 # -----------------------------------------------------------------------------
 st.subheader("➕ Carga Manual de Oferta")
 
 col1, col2, col3, col4 = st.columns(4)
 proveedor = col1.text_input("Proveedor*")
 
-# La caja de texto y la moneda ahora ejecutan la función "formatear_caja_monto" apenas las sueltas
 moneda = col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"], key="moneda_input", on_change=formatear_caja_monto)
-monto_str = col2.text_input("Monto Original*", placeholder="Ej: 190000 -> (Presiona Enter)", key="monto_input", on_change=formatear_caja_monto)
+monto_str = col2.text_input("Monto Original*", placeholder="Solo números (Ej: 190000)", key="monto_input", on_change=formatear_caja_monto)
 
 plazo = col4.number_input("Plazo Entrega (Días)", min_value=1, value=5)
 obs = st.text_area("Observaciones Técnicas")
 
-# El botón ahora está suelto (no requiere st.form)
 if st.button("Guardar en Cuadro Comparativo", type="primary"):
-    # Limpiamos el texto formateado de vuelta a un número matemático para calcular
     raw = str(st.session_state["monto_input"]).strip()
     try:
         if moneda == "USD":
@@ -140,7 +146,7 @@ if st.button("Guardar en Cuadro Comparativo", type="primary"):
         monto = 0.0
 
     if not proveedor or monto <= 0:
-        st.error("⚠️ Debes ingresar el nombre del Proveedor, escribir un Monto válido y presionar Enter.")
+        st.error("⚠️ Debes ingresar un Proveedor y un Monto numérico válido.")
     else:
         monto_clp = monto
         if moneda == "USD":
@@ -162,7 +168,6 @@ if st.button("Guardar en Cuadro Comparativo", type="primary"):
             "Observaciones": obs,
         })
         
-        # Opcional: Limpiar las cajas después de guardar
         st.session_state["monto_input"] = ""
         st.success(f"✅ Oferta de {proveedor} convertida e ingresada correctamente.")
         st.rerun()
