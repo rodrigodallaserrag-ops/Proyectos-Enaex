@@ -145,12 +145,31 @@ if not st.session_state["cotizaciones"]:
     st.info("👆 Llena el formulario arriba para simular la comparativa.")
 else:
     df = pd.DataFrame(st.session_state["cotizaciones"])
-    st.dataframe(df, use_container_width=True)
+    
+    # Aplicamos formato visual a las columnas numéricas de la tabla
+    st.dataframe(
+        df, 
+        use_container_width=True,
+        column_config={
+            "Monto Original": st.column_config.NumberColumn(
+                "Monto Original",
+                format="%.2f" # Muestra hasta 2 decimales si los hay
+            ),
+            "Equiv. CLP ($)": st.column_config.NumberColumn(
+                "Equiv. CLP ($)",
+                format="$ %d" # Formato entero para pesos chilenos
+            ),
+            "Equiv. USD ($)": st.column_config.NumberColumn(
+                "Equiv. USD ($)",
+                format="$ %.2f" # Formato con 2 decimales para dólares
+            )
+        }
+    )
 
     max_monto_clp = df["Equiv. CLP ($)"].max()
     if max_monto_clp > 1000000:
         st.warning(
-            f"⚠️ **Control Financiero (> $1M CLP):** Requerimiento alcanza ${max_monto_clp:,.0f} CLP. "
+            f"⚠️ **Control Financiero (> $1M CLP):** Requerimiento alcanza {formato_clp(max_monto_clp)}. "
             f"Se aplicaron los tipos de cambio oficiales del día ({indicadores['fecha']})."
         )
 
