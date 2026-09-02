@@ -81,14 +81,26 @@ st.subheader("➕ Carga Manual de Oferta")
 with st.form("form_cotizacion", clear_on_submit=True):
     col1, col2, col3, col4 = st.columns(4)
     proveedor = col1.text_input("Proveedor*")
-    monto = col2.number_input("Monto Original*", min_value=0.0, step=1000.0)
+    
+    # Cambiamos a text_input para que puedas escribir puntos (Ej: 180.000)
+    monto_str = col2.text_input("Monto Original*", placeholder="Ej: 180.000")
+    
     moneda = col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"])
     plazo = col4.number_input("Plazo Entrega (Días)", min_value=1, value=5)
     obs = st.text_area("Observaciones Técnicas")
 
     if st.form_submit_button("Guardar en Cuadro Comparativo"):
+        # Limpiamos el texto ingresado para convertirlo a número matemático
+        try:
+            # 1. Elimina los puntos de los miles
+            # 2. Reemplaza la coma decimal por punto (por si escriben 180,5)
+            monto_limpio = monto_str.replace(".", "").replace(",", ".")
+            monto = float(monto_limpio)
+        except ValueError:
+            monto = 0.0 # Si escriben letras o lo dejan vacío, lo vuelve 0
+
         if not proveedor or monto <= 0:
-            st.error("⚠️ Debes ingresar el nombre del Proveedor y un Monto mayor a 0.")
+            st.error("⚠️ Debes ingresar el nombre del Proveedor y un Monto numérico mayor a 0.")
         else:
             monto_clp = monto
             if moneda == "USD":
@@ -102,7 +114,7 @@ with st.form("form_cotizacion", clear_on_submit=True):
 
             st.session_state["cotizaciones"].append({
                 "Proveedor": proveedor,
-                "Monto Original": monto,
+                "Monto Original": monto, # Guardamos el número limpio
                 "Moneda": moneda,
                 "Equiv. CLP ($)": round(monto_clp, 2),
                 "Equiv. USD ($)": round(monto_usd, 2),
@@ -111,7 +123,6 @@ with st.form("form_cotizacion", clear_on_submit=True):
             })
             st.success(f"✅ Oferta de {proveedor} convertida e ingresada correctamente.")
             st.rerun()
-
 # -----------------------------------------------------------------------------
 # 6. CUADRO COMPARATIVO HOMOGENEIZADO
 # -----------------------------------------------------------------------------
