@@ -237,11 +237,13 @@ else:
 
     col_btn1, col_btn2 = st.columns([1, 4])
     with col_btn1:
-        if st.button("Aquí tienes un par de formas de hacerlo, dependiendo de la tecnología que estés utilizando:
-
-**HTML y CSS (Estilos en línea)**
-La forma más rápida si solo necesitas un botón simple:
-```html
-<button style="background-color: red; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">
-  Eliminar
-</button>
+        st.download_button(
+            label="📥 Descargar a Excel",
+            data=convertir_excel(df),
+            file_name=f"cuadro_comparativo_solped_{solped}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    with col_btn2:
+        if st.button("Limpiar Cuadro", type="secondary"):
+            st.session_state["cotizaciones"] = []
+            st.rerun()
