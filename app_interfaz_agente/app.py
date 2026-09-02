@@ -3,23 +3,20 @@ import requests
 import streamlit as st
 import urllib3
 
-# Evitar advertencias rojas en la consola si el proxy corporativo intercepta el SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="Consola Única de Compras - Enaex", layout="wide")
 
 # -----------------------------------------------------------------------------
-# 1. MOTOR FINANCIERO: CONSUMO DE API MINDICADOR.CL EN TIEMPO REAL
+# 1. MOTOR FINANCIERO: MINDICADOR.CL
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=3600)  
 def obtener_indicadores_financieros():
     try:
         url = "https://mindicador.cl/api"
-        # Cabeceras y verify=False para intentar saltar el bloqueo del proxy de Enaex
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         response = requests.get(url, timeout=5, headers=headers, verify=False)
         data = response.json()
-
         return {
             "dolar": float(data["dolar"]["valor"]),
             "euro": float(data["euro"]["valor"]),
@@ -28,7 +25,6 @@ def obtener_indicadores_financieros():
             "estado": "Online 🟢",
         }
     except Exception:
-        # Valores de respaldo ajustados a formato real
         return {
             "dolar": 938.0,
             "euro": 1020.0,
@@ -39,9 +35,24 @@ def obtener_indicadores_financieros():
 
 indicadores = obtener_indicadores_financieros()
 
-# Formato visual peso chileno (Eliminamos el " CLP" del string para que no se corte)
 def formato_clp(valor):
     return f"${int(valor):,}".replace(",", ".")
+
+# Función para formatear según la región
+def aplicar_formato_regional(monto, moneda):
+    if moneda == "CLP":
+        # Formato Chileno: $ 1.800.000
+        return f"$ {int(monto):,}".replace(",", ".")
+    elif moneda == "USD":
+        # Formato Gringo: $ 1,800,000.50
+        return f"$ {monto:,.2f}"
+    elif moneda == "EUR":
+        # Formato Europeo: € 1.800.000,50
+        return f"€ {monto:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    elif moneda == "UF":
+        # Formato UF
+        return f"UF {monto:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return str(monto)
 
 # -----------------------------------------------------------------------------
 # 2. INICIALIZAR ESTADO DE LA APLICACIÓN
@@ -52,16 +63,14 @@ if "cotizaciones" not in st.session_state:
 st.title("🛒 Consola Única de Compras — Enaex")
 
 # -----------------------------------------------------------------------------
-# 3. PANEL CENTRAL DE MONEDAS (Ancho corregido)
+# 3. PANEL CENTRAL DE MONEDAS
 # -----------------------------------------------------------------------------
 st.caption(f"🗓️ Valores del día ({indicadores['fecha']}) - Estado API: {indicadores['estado']}")
 
-# Le damos más ancho a las columnas (1.5) para que los números quepan perfecto
 col_uf, col_usd, col_eur, _ = st.columns([1.5, 1.5, 1.5, 1])
-
-col_uf.metric("UF (CLP)", formato_clp(indicadores['uf']))
-col_usd.metric("Dólar (CLP)", formato_clp(indicadores['dolar']))
-col_eur.metric("Euro (CLP)", formato_clp(indicadores['euro']))
+col_uf.metric("UF", formato_clp(indicadores['uf']))
+col_usd.metric("Dólar", formato_clp(indicadores['dolar']))
+col_eur.metric("Euro", formato_clp(indicadores['euro']))
 
 st.divider()
 
@@ -81,23 +90,17 @@ st.subheader("➕ Carga Manual de Oferta")
 with st.form("form_cotizacion", clear_on_submit=True):
     col1, col2, col3, col4 = st.columns(4)
     proveedor = col1.text_input("Proveedor*")
-    
-    # Cambiamos a text_input para que puedas escribir puntos (Ej: 180.000)
-    monto_str = col2.text_input("Monto Original*", placeholder="Ej: 180.000")
-    
+    monto_str = col2.text_input("Monto Original*", placeholder="Ej: 1.800.000 o 1500,50")
     moneda = col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"])
     plazo = col4.number_input("Plazo Entrega (Días)", min_value=1, value=5)
     obs = st.text_area("Observaciones Técnicas")
 
     if st.form_submit_button("Guardar en Cuadro Comparativo"):
-        # Limpiamos el texto ingresado para convertirlo a número matemático
         try:
-            # 1. Elimina los puntos de los miles
-            # 2. Reemplaza la coma decimal por punto (por si escriben 180,5)
             monto_limpio = monto_str.replace(".", "").replace(",", ".")
             monto = float(monto_limpio)
         except ValueError:
-            monto = 0.0 # Si escriben letras o lo dejan vacío, lo vuelve 0
+            monto = 0.0 
 
         if not proveedor or monto <= 0:
             st.error("⚠️ Debes ingresar el nombre del Proveedor y un Monto numérico mayor a 0.")
@@ -114,7 +117,7 @@ with st.form("form_cotizacion", clear_on_submit=True):
 
             st.session_state["cotizaciones"].append({
                 "Proveedor": proveedor,
-                "Monto Original": monto, # Guardamos el número limpio
+                "Monto Original": monto, 
                 "Moneda": moneda,
                 "Equiv. CLP ($)": round(monto_clp, 2),
                 "Equiv. USD ($)": round(monto_usd, 2),
@@ -123,8 +126,9 @@ with st.form("form_cotizacion", clear_on_submit=True):
             })
             st.success(f"✅ Oferta de {proveedor} convertida e ingresada correctamente.")
             st.rerun()
+
 # -----------------------------------------------------------------------------
-# 6. CUADRO COMPARATIVO HOMOGENEIZADO
+# 6. CUADRO COMPARATIVO HOMOGENEIZADO (Con Formato Regional)
 # -----------------------------------------------------------------------------
 st.divider()
 st.subheader("📊 Cuadro Comparativo (Homogeneizado)")
@@ -146,25 +150,20 @@ if not st.session_state["cotizaciones"]:
 else:
     df = pd.DataFrame(st.session_state["cotizaciones"])
     
-    # Aplicamos formato visual a las columnas numéricas de la tabla
-    st.dataframe(
-        df, 
-        use_container_width=True,
-        column_config={
-            "Monto Original": st.column_config.NumberColumn(
-                "Monto Original",
-                format="%.2f" # Muestra hasta 2 decimales si los hay
-            ),
-            "Equiv. CLP ($)": st.column_config.NumberColumn(
-                "Equiv. CLP ($)",
-                format="$ %d" # Formato entero para pesos chilenos
-            ),
-            "Equiv. USD ($)": st.column_config.NumberColumn(
-                "Equiv. USD ($)",
-                format="$ %.2f" # Formato con 2 decimales para dólares
-            )
-        }
+    # Creamos una copia visual para aplicar formatos de texto sin romper los números reales
+    df_visual = df.copy()
+    
+    # Aplicamos la función regional fila por fila
+    df_visual["Monto Original"] = df_visual.apply(
+        lambda fila: aplicar_formato_regional(fila["Monto Original"], fila["Moneda"]), axis=1
     )
+    
+    # Homogeneizamos las columnas equivalentes para que se vean perfectas
+    df_visual["Equiv. CLP ($)"] = df_visual["Equiv. CLP ($)"].apply(lambda x: f"$ {int(x):,}".replace(",", "."))
+    df_visual["Equiv. USD ($)"] = df_visual["Equiv. USD ($)"].apply(lambda x: f"$ {x:,.2f}")
+
+    # Mostramos el dataframe visual
+    st.dataframe(df_visual, use_container_width=True)
 
     max_monto_clp = df["Equiv. CLP ($)"].max()
     if max_monto_clp > 1000000:
