@@ -1,4 +1,3 @@
-import re
 import pandas as pd
 import requests
 import streamlit as st
@@ -44,59 +43,15 @@ def aplicar_formato_regional(monto, moneda):
         return f"$ {int(monto):,}".replace(",", ".")
     elif moneda == "USD":
         return f"$ {monto:,.2f}"
-    elif moneda == "EUR":
+    elif moneda in ["EUR", "UF"]:
         return f"€ {monto:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    elif moneda == "UF":
-        return f"UF {monto:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return str(monto)
 
 # -----------------------------------------------------------------------------
-# 2. INICIALIZAR ESTADO Y CALLBACK DE SANITIZACIÓN NUMÉRICA
+# 2. INICIALIZAR ESTADO
 # -----------------------------------------------------------------------------
 if "cotizaciones" not in st.session_state:
     st.session_state["cotizaciones"] = []
-
-if "monto_input" not in st.session_state:
-    st.session_state["monto_input"] = ""
-
-if "moneda_input" not in st.session_state:
-    st.session_state["moneda_input"] = "CLP"
-
-def formatear_caja_monto():
-    """Filtra y elimina cualquier caracter no numérico (letras, símbolos)"""
-    raw = str(st.session_state["monto_input"]).strip()
-    moneda = st.session_state["moneda_input"]
-    
-    if not raw:
-        return
-
-    # 1. Filtro estricto: Elimina cualquier letra o símbolo que NO sea un número, punto o coma
-    solo_numeros = re.sub(r'[^0-9.,]', '', raw)
-    
-    # Si al quitar letras no queda nada (ej: escribieron "AWDADW"), borra el contenido de la caja
-    if not solo_numeros:
-        st.session_state["monto_input"] = ""
-        return
-
-    try:
-        # 2. Conversión según la norma de la moneda seleccionada
-        if moneda == "USD":
-            limpio = solo_numeros.replace(",", "")
-        else:
-            limpio = solo_numeros.replace(".", "").replace(",", ".")
-            
-        num = float(limpio)
-        
-        # 3. Reescribe la caja con el formato correcto aplicado
-        if moneda == "CLP":
-            st.session_state["monto_input"] = f"{int(num):,}".replace(",", ".")
-        elif moneda == "USD":
-            st.session_state["monto_input"] = f"{num:,.2f}"
-        elif moneda in ["EUR", "UF"]:
-            st.session_state["monto_input"] = f"{num:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            
-    except ValueError:
-        st.session_state["monto_input"] = ""
 
 st.title("🛒 Consola Única de Compras — Enaex")
 
@@ -122,55 +77,46 @@ with st.sidebar:
     sociedad = st.selectbox("Sociedad", ["EC01", "EC06"])
 
 # -----------------------------------------------------------------------------
-# 5. INGRESO DE COTIZACIONES
+# 5. INGRESO DE COTIZACIONES (BLOQUEO NUMÉRICO NATIVO)
 # -----------------------------------------------------------------------------
 st.subheader("➕ Carga Manual de Oferta")
 
-col1, col2, col3, col4 = st.columns(4)
-proveedor = col1.text_input("Proveedor*")
+with st.form("form_cotizacion", clear_on_submit=True):
+    col1, col2, col3, col4 = st.columns(4)
+    proveedor = col1.text_input("Proveedor*")
+    
+    # st.number_input bloquea físicamente la entrada de letras en el teclado
+    monto = col2.number_input("Monto Original*", min_value=0.0, step=1000.0, format="%.2f")
+    moneda = col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"])
+    plazo = col4.number_input("Plazo Entrega (Días)", min_value=1, value=5)
+    obs = st.text_area("Observaciones Técnicas")
 
-moneda = col3.selectbox("Moneda", ["CLP", "USD", "EUR", "UF"], key="moneda_input", on_change=formatear_caja_monto)
-monto_str = col2.text_input("Monto Original*", placeholder="Solo números (Ej: 190000)", key="monto_input", on_change=formatear_caja_monto)
-
-plazo = col4.number_input("Plazo Entrega (Días)", min_value=1, value=5)
-obs = st.text_area("Observaciones Técnicas")
-
-if st.button("Guardar en Cuadro Comparativo", type="primary"):
-    raw = str(st.session_state["monto_input"]).strip()
-    try:
-        if moneda == "USD":
-            monto = float(raw.replace(",", ""))
+    if st.form_submit_button("Guardar en Cuadro Comparativo", type="primary"):
+        if not proveedor or monto <= 0:
+            st.error("⚠️ Debes ingresar un Proveedor y un Monto mayor a 0.")
         else:
-            monto = float(raw.replace(".", "").replace(",", "."))
-    except ValueError:
-        monto = 0.0
+            monto_clp = monto
+            if moneda == "USD":
+                monto_clp = monto * indicadores["dolar"]
+            elif moneda == "EUR":
+                monto_clp = monto * indicadores["euro"]
+            elif moneda == "UF":
+                monto_clp = monto * indicadores["uf"]
 
-    if not proveedor or monto <= 0:
-        st.error("⚠️ Debes ingresar un Proveedor y un Monto numérico válido.")
-    else:
-        monto_clp = monto
-        if moneda == "USD":
-            monto_clp = monto * indicadores["dolar"]
-        elif moneda == "EUR":
-            monto_clp = monto * indicadores["euro"]
-        elif moneda == "UF":
-            monto_clp = monto * indicadores["uf"]
+            monto_usd = monto_clp / indicadores["dolar"]
 
-        monto_usd = monto_clp / indicadores["dolar"]
-
-        st.session_state["cotizaciones"].append({
-            "Proveedor": proveedor,
-            "Monto Original": monto, 
-            "Moneda": moneda,
-            "Equiv. CLP ($)": round(monto_clp, 2),
-            "Equiv. USD ($)": round(monto_usd, 2),
-            "Plazo (Días)": plazo,
-            "Observaciones": obs,
-        })
-        
-        st.session_state["monto_input"] = ""
-        st.success(f"✅ Oferta de {proveedor} convertida e ingresada correctamente.")
-        st.rerun()
+            st.session_state["cotizaciones"].append({
+                "Proveedor": proveedor,
+                "Monto Original": monto, 
+                "Moneda": moneda,
+                "Equiv. CLP ($)": round(monto_clp, 2),
+                "Equiv. USD ($)": round(monto_usd, 2),
+                "Plazo (Días)": plazo,
+                "Observaciones": obs,
+            })
+            
+            st.success(f"✅ Oferta de {proveedor} convertida e ingresada correctamente.")
+            st.rerun()
 
 # -----------------------------------------------------------------------------
 # 6. CUADRO COMPARATIVO HOMOGENEIZADO
