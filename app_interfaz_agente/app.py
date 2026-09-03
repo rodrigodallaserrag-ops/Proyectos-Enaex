@@ -16,7 +16,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-st.set_page_config(page_title="Consola Única de Compras - Enaex", layout="wide")
+st.set_page_config(page_title="Consola de Compras - Enaex 🟥", layout="wide")
 
 # -----------------------------------------------------------------------------
 # 1. MOTOR FINANCIERO: EVASIÓN SSL CORPORATIVA + SISTEMA CASCADA
