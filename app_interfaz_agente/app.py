@@ -10,6 +10,10 @@ import streamlit as st
 import urllib3
 import plotly.express as px
 
+import openpyxl
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -222,7 +226,107 @@ def generar_pdf_ejecutivo(solped, material, sociedad, cotizaciones, datos_indica
     return buffer.getvalue()
 
 # -----------------------------------------------------------------------------
-# 3. INICIALIZAR ESTADO Y BARRA LATERAL
+# 3. GENERADOR DE EXCEL CORPORATIVO ESTILIZADO
+# -----------------------------------------------------------------------------
+def generar_excel_estilizado(df, solped, material, sociedad, datos_indicadores):
+    output = io.BytesIO()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Cuadro Comparativo"
+    ws.views.sheetView[0].showGridLines = True
+
+    # Paleta de colores y fuentes Enaex
+    navy_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    title_font = Font(name="Calibri", size=16, bold=True, color="0F172A")
+    sub_font = Font(name="Calibri", size=10, italic=True, color="475569")
+    bold_font = Font(name="Calibri", size=10, bold=True)
+    regular_font = Font(name="Calibri", size=10)
+    
+    green_fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
+    meta_fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+    
+    thin_border = Border(
+        left=Side(style='thin', color='CBD5E1'),
+        right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'),
+        bottom=Side(style='thin', color='CBD5E1')
+    )
+
+    # 1. Título principal
+    ws.cell(row=1, column=1, value="ENAEX — Consola de Compras").font = title_font
+    ws.cell(row=2, column=1, value=f"Cuadro Comparativo de Cotizaciones — Solped N° {solped}").font = sub_font
+
+    # 2. Bloque de Metadatos
+    meta_data = [
+        [f"N° Solped: {solped}", f"Código Material: {material}", f"Sociedad: {sociedad}"],
+        [f"Fecha Emisión: {datetime.date.today().strftime('%d-%m-%Y')}", f"Dólar Ref.: ${datos_indicadores['dolar']:,.2f}", f"UF Ref.: ${datos_indicadores['uf']:,.2f}"]
+    ]
+    
+    for r_idx, row_data in enumerate(meta_data, start=4):
+        for c_idx, val in enumerate(row_data, start=1):
+            cell = ws.cell(row=r_idx, column=c_idx, value=val)
+            cell.font = bold_font
+            cell.fill = meta_fill
+            cell.border = thin_border
+
+    # 3. Encabezados de Tabla
+    headers = ["Proveedor", "Monto Original", "Moneda", "Equiv. CLP ($)", "Equiv. USD ($)", "Fecha de Entrega", "Observaciones"]
+    start_row = 7
+    
+    for c_idx, h in enumerate(headers, start=1):
+        cell = ws.cell(row=start_row, column=c_idx, value=h)
+        cell.fill = navy_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center" if c_idx in [2,3,4,5,6] else "left", vertical="center")
+
+    # 4. Filas de Datos y Resaltado
+    min_clp = df["Equiv. CLP ($)"].min() if not df.empty else 0
+
+    for r_offset, (_, row) in enumerate(df.iterrows()):
+        current_row = start_row + 1 + r_offset
+        is_best = (len(df) > 1 and row["Equiv. CLP ($)"] == min_clp)
+        
+        prov_text = str(row["Proveedor"]) + (" ★ (Mejor Oferta)" if is_best else "")
+        
+        c1 = ws.cell(row=current_row, column=1, value=prov_text)
+        c2 = ws.cell(row=current_row, column=2, value=row["Monto Original"])
+        c3 = ws.cell(row=current_row, column=3, value=row["Moneda"])
+        c4 = ws.cell(row=current_row, column=4, value=row["Equiv. CLP ($)"])
+        c5 = ws.cell(row=current_row, column=5, value=row["Equiv. USD ($)"])
+        c6 = ws.cell(row=current_row, column=6, value=str(row["Fecha de Entrega"]))
+        c7 = ws.cell(row=current_row, column=7, value=str(row.get("Observaciones", "")))
+
+        # Formatos numéricos contables
+        c2.number_format = '$ #,##0.00' if row["Moneda"] in ["USD", "EUR", "UF"] else '$ #,##0'
+        c3.alignment = Alignment(horizontal="center")
+        c4.number_format = '$ #,##0'
+        c5.number_format = '$ #,##0.00'
+        c6.alignment = Alignment(horizontal="center")
+
+        # Aplicar colores y bordes
+        for c in [c1, c2, c3, c4, c5, c6, c7]:
+            c.font = bold_font if is_best else regular_font
+            if is_best:
+                c.fill = green_fill
+            c.border = thin_border
+
+    # 5. Ajuste automático de ancho de columnas
+    for col in ws.columns:
+        max_len = 0
+        col_letter = get_column_letter(col[0].column)
+        for cell in col:
+            val = str(cell.value or '')
+            if cell.number_format and '$' in cell.number_format and isinstance(cell.value, (int, float)):
+                val = f"$ {cell.value:,.2f}"
+            max_len = max(max_len, len(val))
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 14)
+
+    wb.save(output)
+    return output.getvalue()
+
+# -----------------------------------------------------------------------------
+# 4. INICIALIZAR ESTADO Y BARRA LATERAL
 # -----------------------------------------------------------------------------
 if "cotizaciones" not in st.session_state:
     st.session_state["cotizaciones"] = []
@@ -270,11 +374,10 @@ def formatear_caja_monto():
     except ValueError:
         st.session_state["monto_input"] = ""
 
-# Título visible principal
 st.title("🛒 Consola de Compras — Enaex")
 
 # -----------------------------------------------------------------------------
-# 4. PANEL CENTRAL DE MONEDAS
+# 5. PANEL CENTRAL DE MONEDAS
 # -----------------------------------------------------------------------------
 st.caption(f"🗓️ Valores del día ({indicadores['fecha']}) - Estado API: {indicadores['estado']}")
 
@@ -286,7 +389,7 @@ col_eur.metric("Euro", formato_clp(indicadores['euro']))
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 5. INGRESO DE COTIZACIONES
+# 6. INGRESO DE COTIZACIONES
 # -----------------------------------------------------------------------------
 st.subheader("➕ Carga Manual de Oferta")
 
@@ -355,7 +458,7 @@ st.text_area("Observaciones Técnicas", key="obs_input")
 st.button("Guardar en Cuadro Comparativo", on_click=procesar_guardado)
 
 # -----------------------------------------------------------------------------
-# 6. CUADRO COMPARATIVO Y EXPORTACIÓN (EXCEL / PDF)
+# 7. CUADRO COMPARATIVO Y EXPORTACIÓN
 # -----------------------------------------------------------------------------
 st.divider()
 st.subheader("📊 Cuadro Comparativo (Homogeneizado)")
@@ -377,7 +480,7 @@ else:
     st.dataframe(df_visual, use_container_width=True)
 
     # -------------------------------------------------------------------------
-    # 7. MÓDULO VISUAL: MÉTRICAS DE AHORRO Y GRÁFICOS INTERACTIVOS
+    # ANÁLISIS VISUAL Y MÉTRICAS DE AHORRO
     # -------------------------------------------------------------------------
     st.markdown("### 📈 Análisis Visual y Métricas de Ahorro")
     
@@ -397,7 +500,6 @@ else:
         ahorro_vs_prom = monto_prom - monto_min
         pct_vs_prom = (ahorro_vs_prom / monto_prom * 100) if monto_prom > 0 else 0
 
-        # Tarjetas KPI de Ahorro
         kpi_col1, kpi_col2, kpi_col3 = st.columns(3)
         
         with kpi_col1:
@@ -422,17 +524,14 @@ else:
                 delta_color="normal"
             )
 
-        # Preparación de datos para los gráficos
         df_chart = df.copy()
         
-        # Extracción numérica de días de entrega
         def extraer_dias(cadena):
             match = re.search(r'\((\d+)\s+días?\)', str(cadena))
             return int(match.group(1)) if match else 0
             
         df_chart["Días de Entrega"] = df_chart["Fecha de Entrega"].apply(extraer_dias)
         
-        # Asignación de colores
         def asignar_categoria_color(val):
             if val == monto_min:
                 return "Mejor Opción (Mínimo)"
@@ -479,7 +578,7 @@ else:
             st.plotly_chart(fig_plazo, use_container_width=True)
 
     # -------------------------------------------------------------------------
-    # GESTIÓN Y EXPORTACIÓN
+    # GESTIÓN Y EXPORTACIÓN (EXCEL / PDF)
     # -------------------------------------------------------------------------
     st.markdown("#### 🛠️ Gestionar Ofertas Ingresadas")
     
@@ -501,17 +600,12 @@ else:
             f"Se aplicaron los tipos de cambio mostrados en la parte superior."
         )
 
-    def convertir_excel(dataframe):
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            dataframe.to_excel(writer, index=False, sheet_name='Comparativo')
-        return output.getvalue()
-
     col_btn1, col_btn2, col_btn3 = st.columns([1.5, 1.5, 3])
     with col_btn1:
+        excel_bytes = generar_excel_estilizado(df, solped, material, sociedad, indicadores)
         st.download_button(
-            label="📥 Descargar Excel",
-            data=convertir_excel(df),
+            label="📥 Descargar Excel Corporativo",
+            data=excel_bytes,
             file_name=f"cuadro_comparativo_solped_{solped}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
