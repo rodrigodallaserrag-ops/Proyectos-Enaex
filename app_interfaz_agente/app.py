@@ -50,10 +50,6 @@ def obtener_indicadores_tiempo_real():
 # FUNCIONES AUXILIARES Y BÚSQUEDA ROBUSTA
 # =============================================================================
 def procesar_y_reparar_planilla(df):
-    """
-    Busca la fila real de encabezados mediante palabras clave, la promueve, 
-    deduplica columnas y asegura que la ID (SP/SOLPED) quede al inicio.
-    """
     if df is None or df.empty:
         return df
 
@@ -130,9 +126,6 @@ def procesar_y_reparar_planilla(df):
     return df
 
 def extraer_materiales_de_masivo(df, id_solped):
-    """
-    Busca de manera flexible el ID SOLPED en la planilla masiva.
-    """
     if df is None or df.empty:
         return []
         
@@ -298,6 +291,7 @@ with tabs[0]:
         st.write("")
         btn_extraer = st.button("📤 Extraer Materiales", type="primary", use_container_width=True)
 
+    # Aquí está corregida la línea que daba error de sintaxis
     if (btn_extraer or solped_id) and solped_id.strip():
         if st.session_state.df_masivo is not None:
             materiales = extraer_materiales_de_masivo(st.session_state.df_masivo, solped_id)
@@ -451,19 +445,22 @@ with tabs[2]:
             st.metric(f"Monto Total Acumulado ({moneda_vista})", f"$ {monto_acumulado:,.2f}")
             
         st.divider()
-        st.subheader("📈 Gráficos Comparativos")
+        st.subheader("📈 Gráficos Comparativos por SOLPED")
         
         col_graf1, col_graf2 = st.columns(2)
         
         with col_graf1:
-            st.markdown(f"**💰 Monto Total por Proveedor ({moneda_vista})**")
-            df_monto = df_comp.groupby("Proveedor Visual")["Monto Total Visualizado"].sum().reset_index()
-            st.bar_chart(df_monto, x="Proveedor Visual", y="Monto Total Visualizado")
+            st.markdown(f"**💰 Comparativa de Monto Total por SOLPED ({moneda_vista})**")
+            # Agrupamos por SOLPED para ver cómo se compara cada requerimiento entre sí
+            df_monto_solped = df_comp.groupby("SOLPED")["Monto Total Visualizado"].sum().reset_index()
+            # El parámetro color="SOLPED" le dará un color distinto a cada barra de forma automática
+            # El parámetro height=350 mantiene el gráfico compacto
+            st.bar_chart(df_monto_solped, x="SOLPED", y="Monto Total Visualizado", color="SOLPED", height=350)
             
         with col_graf2:
-            st.markdown("**⏳ Promedio Días de Entrega por Proveedor**")
-            df_dias = df_comp.groupby("Proveedor Visual")["Días para Entrega"].mean().reset_index()
-            st.bar_chart(df_dias, x="Proveedor Visual", y="Días para Entrega")
+            st.markdown("**⏳ Promedio Días de Entrega por SOLPED**")
+            df_dias_solped = df_comp.groupby("SOLPED")["Días para Entrega"].mean().reset_index()
+            st.bar_chart(df_dias_solped, x="SOLPED", y="Días para Entrega", color="SOLPED", height=350)
 
         st.write("")
         if st.button("🗑️ Limpiar Cuadro Comparativo"):
