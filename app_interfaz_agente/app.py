@@ -149,13 +149,20 @@ with st.sidebar:
             if file_masivo.name.endswith(".csv"):
                 st.session_state.df_masivo = pd.read_csv(file_masivo)
             else:
-                # Modificación clave: Lee todas las hojas y las une para no perder la información real
                 dict_dfs = pd.read_excel(file_masivo, sheet_name=None, engine='openpyxl')
                 st.session_state.df_masivo = pd.concat(dict_dfs.values(), ignore_index=True)
                 
             st.success(f"Planilla cargada correctamente ({len(st.session_state.df_masivo)} filas)")
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
+
+# =============================================================================
+# VISTA PREVIA DE DATOS CARGADOS (NUEVO)
+# =============================================================================
+if st.session_state.df_masivo is not None:
+    with st.expander("👀 Vista Previa de la Planilla Base Cargada", expanded=False):
+        st.write(f"Mostrando los datos del archivo cargado ({len(st.session_state.df_masivo)} registros en total):")
+        st.dataframe(st.session_state.df_masivo, use_container_width=True)
 
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
 
