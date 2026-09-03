@@ -57,22 +57,19 @@ def procesar_y_reparar_planilla(df):
     if df is None or df.empty:
         return df
 
-    # 1. Escáner agresivo de encabezados (Corregido para tolerar celdas NaN/Float)
+    # 1. Escáner agresivo de encabezados (Tolerante a celdas NaN/Float)
     palabras_clave = ['sp', 'solped', 'material', 'pos', 'texto breve', 'centro', 'cantidad']
     header_idx = -1
     
     for idx in range(min(20, len(df))):
-        # Convertir explícitamente cada valor a string antes de analizarlo para evitar TypeError
         row_values = [str(val).lower() for val in df.iloc[idx]]
         matches = sum(1 for val in row_values for kw in palabras_clave if kw in val)
         
-        # Si la fila tiene al menos 2 palabras clave, asumimos que es el encabezado real
         if matches >= 2:
             header_idx = idx
             break
 
     if header_idx != -1:
-        # Promover esta fila a encabezados
         nuevas_columnas = []
         for i, val in enumerate(df.iloc[header_idx]):
             val_str = str(val).strip()
@@ -86,15 +83,12 @@ def procesar_y_reparar_planilla(df):
                 nuevas_columnas.append(val_str)
         
         df.columns = nuevas_columnas
-        # Recortar el dataframe para que empiece en la fila de datos reales
         df = df.iloc[header_idx + 1:].reset_index(drop=True)
         
-        # Eliminar las filas "espejo"
         if not df.empty:
             primer_col = df.columns[0]
             df = df[df[primer_col].astype(str).str.strip() != str(primer_col).strip()].reset_index(drop=True)
 
-    # 2. Mapeo explícito residual
     mapeo_columnas = {
         'Unnamed: 6': 'UM', 'Unnamed: 7': 'Solicitante', 'Unnamed: 8': 'Centro',
         'Unnamed: 9': 'Tipo de posición', 'Unnamed: 10': 'G. compras', 'Unnamed: 11': 'Mod. el',
@@ -103,7 +97,6 @@ def procesar_y_reparar_planilla(df):
     }
     df = df.rename(columns={k: v for k, v in mapeo_columnas.items() if k in df.columns})
 
-    # 3. Deduplicar nombres de columnas
     vistos = {}
     columnas_deduplicadas = []
     for c in df.columns:
@@ -116,7 +109,6 @@ def procesar_y_reparar_planilla(df):
             columnas_deduplicadas.append(c_str)
     df.columns = columnas_deduplicadas
 
-    # 4. Encontrar la columna de ID (SP/SOLPED) y moverla a la Posición 0
     cols = list(df.columns)
     id_col = None
     
@@ -136,9 +128,7 @@ def procesar_y_reparar_planilla(df):
         cols.insert(0, id_col)
         df = df[cols]
 
-    # Quitar cualquier fila que haya quedado 100% en blanco
     df = df.dropna(how='all')
-
     return df
 
 def extraer_materiales_de_masivo(df, id_solped):
@@ -274,13 +264,9 @@ with st.sidebar:
                 dict_dfs = pd.read_excel(file_masivo, sheet_name=None, engine='openpyxl')
                 df_raw = pd.concat(dict_dfs.values(), ignore_index=True)
                 
-            # Limpieza inicial
             df_clean = df_raw.dropna(axis=1, how='all').dropna(axis=0, how='all')
-            
-            # Aplicar la nueva función de mapeo y ordenamiento
             df_procesado = procesar_y_reparar_planilla(df_clean)
             
-            # Ordenar por completitud para mostrar primero las filas más llenas
             df_procesado['cantidad_nulos'] = df_procesado.isnull().sum(axis=1)
             df_procesado = df_procesado.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
             
@@ -294,7 +280,7 @@ with st.sidebar:
 # =============================================================================
 if st.session_state.df_masivo is not None:
     with st.expander("👀 Vista Previa de la Planilla Base Cargada", expanded=False):
-        st.write(f"Mostrando los datos procesados. La columna 'SP' ha sido priorizada en la primera posición para fácil lectura.")
+        st.write(f"Mostrando los datos procesados. La columna de ID ha sido priorizada en la primera posición.")
         st.dataframe(st.session_state.df_masivo, use_container_width=True)
 
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
@@ -303,7 +289,7 @@ tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "
 # TAB 1: EVALUACIÓN POR SOLPED (AUTOGESTIÓN)
 # =============================================================================
 with tabs[0]:
-    st.subheader("✏️ Evaluación por SOLPED (Soporta 20+ Materiales sin límite de filas)")
+    st.subheader("✏️ Evaluación por SOLPED")
     
     col_input, col_btn = st.columns([3, 1])
     with col_input:
@@ -344,7 +330,7 @@ with tabs[0]:
         column_config={
             "Pos": st.column_config.NumberColumn("Pos", disabled=True),
             "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
-            "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "UF", "EUR"]),
+            "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]), # Opciones restringidas
             "Calendario de entrega": st.column_config.DateColumn("Fecha Entrega")
         }
     )
@@ -406,7 +392,7 @@ with tabs[1]:
         key="cotizacion_manual_editor",
         column_config={
             "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
-            "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "UF", "EUR"]),
+            "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]), # Opciones restringidas
             "Calendario de entrega": st.column_config.DateColumn("Calendario de entrega")
         }
     )
@@ -429,7 +415,18 @@ with tabs[2]:
     
     if st.session_state.ofertas_manuales:
         df_comp = pd.DataFrame(st.session_state.ofertas_manuales)
-        st.dataframe(df_comp, use_container_width=True)
+        
+        # --- CÁLCULO DE DÍAS DE ENTREGA ---
+        df_comp['Calendario de entrega'] = pd.to_datetime(df_comp['Calendario de entrega'])
+        hoy = pd.Timestamp(date.today())
+        # Restar fecha de entrega menos hoy para obtener días. Si es negativo (fecha pasada), dejar 0.
+        df_comp['Días para Entrega'] = (df_comp['Calendario de entrega'] - hoy).dt.days
+        df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: x if x > 0 else 0)
+        
+        # Llenar proveedores vacíos para que el gráfico no se rompa
+        df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace("", "Sin Proveedor Especificado")
+
+        st.dataframe(df_comp.drop(columns=['Proveedor Visual']), use_container_width=True)
         
         col_c1, col_c2 = st.columns(2)
         with col_c1:
@@ -437,6 +434,25 @@ with tabs[2]:
         with col_c2:
             st.metric("Monto Total Acumulado (CLP)", f"$ {df_comp['Total CLP'].sum():,.2f}")
             
+        st.divider()
+        st.subheader("📈 Análisis Visual de Ofertas")
+        
+        # --- GENERACIÓN DE GRÁFICOS ---
+        col_graf1, col_graf2 = st.columns(2)
+        
+        with col_graf1:
+            st.markdown("**💰 Monto Total (CLP) por Proveedor**")
+            # Agrupar plata por proveedor
+            df_monto = df_comp.groupby("Proveedor Visual")["Total CLP"].sum().reset_index()
+            st.bar_chart(df_monto, x="Proveedor Visual", y="Total CLP")
+            
+        with col_graf2:
+            st.markdown("**⏳ Promedio Días de Entrega por Proveedor**")
+            # Promediar días por proveedor
+            df_dias = df_comp.groupby("Proveedor Visual")["Días para Entrega"].mean().reset_index()
+            st.bar_chart(df_dias, x="Proveedor Visual", y="Días para Entrega")
+
+        st.write("")
         if st.button("🗑️ Limpiar Cuadro Comparativo"):
             st.session_state.ofertas_manuales = []
             st.rerun()
