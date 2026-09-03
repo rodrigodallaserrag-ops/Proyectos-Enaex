@@ -16,7 +16,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-st.set_page_config(page_title="Consola Única de Compras - Enaex", layout="wide")
+st.set_page_config(page_title="Consola de Compras - Enaex", layout="wide")
 
 # -----------------------------------------------------------------------------
 # 1. MOTOR FINANCIERO: EVASIÓN SSL CORPORATIVA + SISTEMA CASCADA
@@ -125,11 +125,10 @@ def generar_pdf_ejecutivo(solped, material, sociedad, cotizaciones, datos_indica
     )
     cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'], fontSize=8, leading=10)
 
-    # Membrete y Título
-    story.append(Paragraph("<b>ENAEX — Consola Única de Compras</b>", title_style))
+    # Membrete y Título en el PDF
+    story.append(Paragraph("<b>ENAEX — Consola de Compras</b>", title_style))
     story.append(Paragraph(f"Reporte Ejecutivo de Adjudicación — Solped N° <b>{solped}</b>", subtitle_style))
 
-    # Ficha Técnica / Metadatos
     meta_data = [
         [
             Paragraph(f"<b>N° Solped:</b> {solped}", normal_style),
@@ -152,7 +151,6 @@ def generar_pdf_ejecutivo(solped, material, sociedad, cotizaciones, datos_indica
     story.append(t_meta)
     story.append(Spacer(1, 14))
 
-    # Tabla Comparativa de Ofertas
     table_data = [[
         Paragraph("<b>Proveedor</b>", header_table_style),
         Paragraph("<b>Monto Orig.</b>", header_table_style),
@@ -195,7 +193,6 @@ def generar_pdf_ejecutivo(solped, material, sociedad, cotizaciones, datos_indica
     story.append(t_quotes)
     story.append(Spacer(1, 15))
 
-    # Control Financiero
     max_monto = max([c["Equiv. CLP ($)"] for c in cotizaciones]) if cotizaciones else 0
     if max_monto > 1000000:
         warn_p = Paragraph(
@@ -206,7 +203,6 @@ def generar_pdf_ejecutivo(solped, material, sociedad, cotizaciones, datos_indica
         story.append(warn_p)
         story.append(Spacer(1, 15))
 
-    # Sección de Firmas de Aprobación
     story.append(Spacer(1, 25))
     sig_data = [
         [
@@ -274,7 +270,8 @@ def formatear_caja_monto():
     except ValueError:
         st.session_state["monto_input"] = ""
 
-st.title("🛒 Consola Única de Compras — Enaex")
+# Título visible principal de la aplicación
+st.title("🛒 Consola de Compras — Enaex")
 
 # -----------------------------------------------------------------------------
 # 4. PANEL CENTRAL DE MONEDAS
