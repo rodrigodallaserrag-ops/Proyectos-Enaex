@@ -596,8 +596,9 @@ else:
     max_monto_clp = df["Equiv. CLP ($)"].max()
     if max_monto_clp > 1000000:
         st.warning(
-            f"⚠️ **Control Financiero (> $1M CLP):** Requerimiento alcanza {formato_clp(max_monto_clp)}. "
-            f"Se aplicaron los tipos de cambio mostrados en la parte superior."
+            f"**Control Financiero (> 1M CLP):** Requerimiento alcanza {formato_clp(max_monto_clp)}. "
+            f"Se aplicaron los tipos de cambio mostrados en la parte superior.",
+            icon="⚠️"
         )
 
     col_btn1, col_btn2, col_btn3 = st.columns([1.5, 1.5, 3])
