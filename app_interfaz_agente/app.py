@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import re
+import requests
 from datetime import datetime, date
 
 # =============================================================================
@@ -23,6 +24,27 @@ st.markdown("""
     .badge-best { background-color: #D1FAE5; color: #065F46; padding: 0.2rem 0.5rem; border-radius: 0.25rem; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
+
+# =============================================================================
+# OBTENCIÓN DE INDICADORES FINANCIEROS EN TIEMPO REAL (API)
+# =============================================================================
+@st.cache_data(ttl=3600)
+def obtener_indicadores_tiempo_real():
+    """Consulta la API de mindicador.cl para obtener USD, EUR y UF actualizados"""
+    valores_defecto = {"USD": 950.0, "EUR": 1020.0, "UF": 38000.0, "estado": False}
+    try:
+        response = requests.get("https://mindicador.cl/api", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "USD": float(data.get("dolar", {}).get("valor", 950.0)),
+                "EUR": float(data.get("euro", {}).get("valor", 1020.0)),
+                "UF": float(data.get("uf", {}).get("valor", 38000.0)),
+                "estado": True
+            }
+    except Exception:
+        pass
+    return valores_defecto
 
 # =============================================================================
 # FUNCIONES AUXILIARES Y BÚSQUEDA ROBUSTA
@@ -136,9 +158,24 @@ st.markdown("<div class='main-header'>⚡ Sistema Integrado de Evaluación de Of
 
 with st.sidebar:
     st.header("⚙️ Parámetros de Cambio")
-    tc_usd = st.number_input("Tipo de Cambio USD / CLP", value=950.0, step=1.0)
-    tc_uf = st.number_input("Tipo de Cambio UF / CLP", value=38000.0, step=100.0)
-    tc_eur = st.number_input("Tipo de Cambio EUR / CLP", value=1020.0, step=1.0)
+    
+    # Cargar indicadores en tiempo real
+    indicadores = obtener_indicadores_tiempo_real()
+    
+    if indicadores["estado"]:
+        st.success("🟢 Indicadores actualizados en tiempo real")
+    else:
+        st.warning("⚠️ Sin conexión a API. Usando valores por defecto.")
+        
+    if st.button("🔄 Actualizar Tasas API", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+    st.divider()
+
+    tc_usd = st.number_input("Tipo de Cambio USD / CLP", value=indicadores["USD"], step=1.0, format="%.2f")
+    tc_uf = st.number_input("Tipo de Cambio UF / CLP", value=indicadores["UF"], step=100.0, format="%.2f")
+    tc_eur = st.number_input("Tipo de Cambio EUR / CLP", value=indicadores["EUR"], step=1.0, format="%.2f")
     st.divider()
     
     st.header("📂 Carga de Archivo Base")
@@ -151,21 +188,14 @@ with st.sidebar:
             else:
                 dict_dfs = pd.read_excel(file_masivo, sheet_name=None, engine='openpyxl')
                 df_raw = pd.concat(dict_dfs.values(), ignore_index=True)
-            
-            # --- LIMPIEZA Y ORDENAMIENTO DE DATOS ---
-            # 1. Eliminar columnas y filas que son 100% nulas o vacías
-            df_clean = df_raw.dropna(axis=1, how='all')
-            df_clean = df_clean.dropna(axis=0, how='all')
-            
-            # 2. Contar la cantidad de nulos por fila para determinar qué tan "incompleta" está
+                
+            # Limpieza de filas y columnas vacías + orden por completitud
+            df_clean = df_raw.dropna(axis=1, how='all').dropna(axis=0, how='all')
             df_clean['cantidad_nulos'] = df_clean.isnull().sum(axis=1)
-            
-            # 3. Ordenar (los de 0 nulos arriba, los incompletos abajo) y limpiar índice temporal
             df_clean = df_clean.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
             
             st.session_state.df_masivo = df_clean
-            st.success(f"Planilla cargada y filtrada correctamente ({len(st.session_state.df_masivo)} filas)")
-            
+            st.success(f"Planilla cargada correctamente ({len(st.session_state.df_masivo)} filas)")
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
 
@@ -174,7 +204,7 @@ with st.sidebar:
 # =============================================================================
 if st.session_state.df_masivo is not None:
     with st.expander("👀 Vista Previa de la Planilla Base Cargada", expanded=False):
-        st.write(f"Mostrando los datos consolidados y ordenados por completitud ({len(st.session_state.df_masivo)} registros en total):")
+        st.write(f"Mostrando los datos del archivo cargado ({len(st.session_state.df_masivo)} registros en total):")
         st.dataframe(st.session_state.df_masivo, use_container_width=True)
 
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
