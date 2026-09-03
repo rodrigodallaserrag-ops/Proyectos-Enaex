@@ -40,7 +40,7 @@ def obtener_indicadores_financieros():
 indicadores = obtener_indicadores_financieros()
 
 # -----------------------------------------------------------------------------
-# 2. BASE DE DATOS Y CARGA INSTANTÁNEA POR SOLPED
+# 2. FUNCIONES DE BASE DE DATOS Y PARSER DE PLANILLAS
 # -----------------------------------------------------------------------------
 SOLPEDS_DEMO = {
     "289283": {"desc": "DISCO RUPTURA GRAFITO 2`", "cant": 10, "um": "C/U", "precio": 58.00, "moneda": "USD", "prov": "MCM CHILE", "dias": 7, "comentario": "Proveedor con mejor lead time."},
@@ -63,7 +63,116 @@ def obtener_datos_solped(id_sp):
         "comentario": "Cargado automáticamente. Modifique los campos necesarios."
     }
 
-# Inicializar sesión acumulativa
+def cargar_planilla_autogestion(file):
+    try:
+        nombre = file.name.lower()
+        file_bytes = io.BytesIO(file.getvalue())
+
+        if nombre.endswith(('.xlsx', '.xlsm', '.xls')):
+            engine = 'openpyxl' if nombre.endswith(('.xlsx', '.xlsm')) else None
+            excel_file = pd.ExcelFile(file_bytes, engine=engine)
+            
+            palabras_clave = ['sp', 'solped', 'pr', 'código', 'descripción', 'cantidad', 'precio', 'proveedor', 'monto', 'material']
+            mejor_sheet, mejor_fila_idx, max_coincidencias = None, None, 0
+
+            for sheet_name in excel_file.sheet_names:
+                try:
+                    df_raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=None)
+                except Exception:
+                    continue
+
+                if df_raw.empty or len(df_raw) < 2:
+                    continue
+
+                for idx in range(min(40, len(df_raw))):
+                    row = df_raw.iloc[idx]
+                    celdas = [str(val).strip().lower() for val in row.values if pd.notna(val)]
+                    coincidencias = sum(1 for kw in palabras_clave if any(kw in c for c in celdas))
+                    if coincidencias > max_coincidencias:
+                        max_coincidencias = coincidencias
+                        mejor_sheet = sheet_name
+                        mejor_fila_idx = idx
+
+            if mejor_sheet is not None and max_coincidencias >= 2:
+                df_raw = pd.read_excel(excel_file, sheet_name=mejor_sheet, header=None)
+                df_clean = df_raw.iloc[mejor_fila_idx:].copy()
+                df_clean.columns = [str(c).strip() if pd.notna(c) and str(c).strip() != 'None' else f"Col_{i}" for i, c in enumerate(df_clean.iloc[0])]
+                df_clean = df_clean.iloc[1:].reset_index(drop=True).dropna(how='all')
+                cols_utiles = [c for c in df_clean.columns if not str(c).startswith("Col_")]
+                return df_clean[cols_utiles] if cols_utiles else df_clean
+
+            return pd.read_excel(excel_file, sheet_name=0).dropna(how='all').dropna(how='all', axis=1)
+
+        elif nombre.endswith('.csv'):
+            try:
+                df = pd.read_csv(file_bytes, sep=None, engine='python', encoding='utf-8')
+            except Exception:
+                file_bytes.seek(0)
+                df = pd.read_csv(file_bytes, sep=None, engine='python', encoding='latin-1')
+            return df.dropna(how='all').dropna(how='all', axis=1)
+
+    except Exception as e:
+        st.error(f"Error al procesar la planilla ({file.name}): {e}")
+        return None
+
+def generar_matriz_ejemplo():
+    return pd.DataFrame([
+        {"SP": "PR176577", "F. solicitud": "2026-07-27 16:07:00", "Dias de tratamiento": 3, "Material": "30066886", "Texto breve": "DISCO RUPTURA GRAFITO 2`", "Cantidad": 10, "UM": "C/U", "Proveedor Sugerido": "PRINTEC S A", "Monto Adjudicado": 545000},
+        {"SP": "PR172030", "F. solicitud": "2026-07-02 11:43:00", "Dias de tratamiento": 28, "Material": "30051314", "Texto breve": "CONTADOR DIGITAL H", "Cantidad": 5, "UM": "C/U", "Proveedor Sugerido": "MCM CHILE", "Monto Adjudicado": 900000},
+        {"SP": "PR172041", "F. solicitud": "2026-07-02 10:42:00", "Dias de tratamiento": 28, "Material": "20028618", "Texto breve": "JUEGO PERILLEROS", "Cantidad": 12, "UM": "SET", "Proveedor Sugerido": "PARKER", "Monto Adjudicado": 300000},
+    ])
+
+def exportar_reporte_pdf(id_solicitud, comprador, comentarios, df_data, total_monto):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, f"REPORTE DE ADJUDICACION - SOLPED #{id_solicitud}", ln=True, align='C')
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(0, 8, f"Fecha: {datetime.date.today().strftime('%d/%m/%Y')} | Comprador: {comprador}", ln=True, align='C')
+    pdf.ln(5)
+
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, "1. Resumen de Adjudicacion", ln=True)
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(0, 6, f"Total de Posiciones: {len(df_data)}", ln=True)
+    pdf.cell(0, 6, f"Monto Total Adjudicado: CLP ${total_monto:,.0f}".replace(",", "."), ln=True)
+    pdf.ln(4)
+
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, "2. Observaciones y Justificacion Tecnica", ln=True)
+    pdf.set_font("Arial", '', 10)
+    pdf.multi_cell(0, 6, comentarios)
+    pdf.ln(6)
+
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, "3. Detalle de Items Comparados", ln=True)
+    pdf.set_font("Arial", 'B', 9)
+    pdf.cell(30, 7, "SP / SOLPED", 1)
+    pdf.cell(70, 7, "Descripcion", 1)
+    pdf.cell(20, 7, "Cant.", 1)
+    pdf.cell(40, 7, "Proveedor", 1)
+    pdf.cell(30, 7, "Monto", 1, ln=True)
+
+    pdf.set_font("Arial", '', 8)
+    for _, row in df_data.iterrows():
+        sp = str(row.get("SP", row.get("SP / SOLPED", "")))
+        desc = str(row.get("Texto breve", row.get("Descripción", "")))[:30]
+        cant = str(row.get("Cantidad", ""))
+        prov = str(row.get("Proveedor Sugerido", row.get("Proveedor", "")))[:20]
+        monto_val = row.get('Monto Adjudicado', row.get('Monto Total CLP', 0))
+        monto = f"${float(monto_val):,.0f}".replace(",", ".")
+        
+        pdf.cell(30, 6, sp, 1)
+        pdf.cell(70, 6, desc, 1)
+        pdf.cell(20, 6, cant, 1)
+        pdf.cell(40, 6, prov, 1)
+        pdf.cell(30, 6, monto, 1, ln=True)
+
+    return pdf.output(dest='S').encode('latin1')
+
+# -----------------------------------------------------------------------------
+# 3. ESTADO INICIAL DE SESIÓN
+# -----------------------------------------------------------------------------
 if "matriz_acumulada" not in st.session_state:
     st.session_state["matriz_acumulada"] = pd.DataFrame(columns=[
         "SP / SOLPED", "Descripción", "Cantidad", "UM", "Precio Unitario",
@@ -71,7 +180,6 @@ if "matriz_acumulada" not in st.session_state:
         "Fecha Entrega", "Días Entrega", "Monto Total CLP", "Comentarios"
     ])
 
-# Callback para cargar datos al presionar Enter o cambiar ID
 def cargar_solped_callback():
     sp_id = st.session_state.get("input_solped_id", "").strip()
     if sp_id:
@@ -85,23 +193,28 @@ def cargar_solped_callback():
         st.session_state["f_dias"] = int(datos["dias"])
         st.session_state["f_comentario"] = datos["comentario"]
 
-# Configuración inicial de campos
 if "f_desc" not in st.session_state:
     st.session_state["input_solped_id"] = "289283"
     cargar_solped_callback()
 
 # -----------------------------------------------------------------------------
-# 3. INTERFAZ Y PANEL DE BÚSQUEDA RAPIDA
+# 4. LATERAL - INDICADORES
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.header("💱 Indicadores del Día")
     st.write(f"**USD:** ${indicadores['dolar']:,.2f}")
     st.write(f"**EUR:** ${indicadores['euro']:,.2f}")
+    st.write(f"**UF:** ${indicadores['uf']:,.2f}")
     st.caption(f"Estado API: {indicadores['estado']}")
 
-st.title("🛒 Consola de Autogestión y Cuadro Comparativo Multi-SOLPED")
+st.title("🛒 Consola de Compras y Autogestión - Enaex")
 
-st.markdown("**🔍 Carga Rápida de SOLPED (Escriba la ID y presione Ctrl + Enter)**")
+# =============================================================================
+# MÓDULO 1: INGRESO MANUAL Y BÚSQUEDA INSTANTÁNEA POR SOLPED
+# =============================================================================
+st.header("✍️ Módulo 1: Carga Rápida y Comparador Manual por SOLPED")
+
+st.markdown("**🔍 Búsqueda Rápida de SOLPED (Escriba la ID y presione Enter o Cargar)**")
 
 col_b1, col_b2 = st.columns([3, 1])
 with col_b1:
@@ -113,12 +226,10 @@ with col_b1:
 with col_b2:
     st.write(" ")
     st.write(" ")
-    if st.button("🔄 Cargar Informacion", use_container_width=True):
+    if st.button("🔄 Cargar Información SOLPED", use_container_width=True):
         cargar_solped_callback()
 
-# -----------------------------------------------------------------------------
-# 4. FORMULARIO DE REVISIÓN Y EDICIÓN
-# -----------------------------------------------------------------------------
+# Formulario de revisión y edición manual
 with st.container(border=True):
     st.subheader(f"⚙️ Detalle Cargado para SOLPED #{st.session_state.get('input_solped_id', '')}")
     
@@ -145,7 +256,7 @@ with st.container(border=True):
 
     v_comentarios = st.text_input("Comentarios / Observaciones", key="f_comentario")
 
-    if st.button("➕ Agregar esta SOLPED a la Matriz Comparativa", type="primary", use_container_width=True):
+    if st.button("➕ Agregar esta SOLPED a la Matriz Comparativa Manual", type="primary", use_container_width=True):
         factor = 1.0
         if v_moneda == "USD":
             factor = indicadores["dolar"]
@@ -175,46 +286,42 @@ with st.container(border=True):
         st.session_state["matriz_acumulada"] = pd.concat([df_act, pd.DataFrame([nueva_posicion])], ignore_index=True)
         st.success(f"✅ SOLPED #{st.session_state['input_solped_id']} agregada a la matriz.")
 
-# -----------------------------------------------------------------------------
-# 5. MATRIZ ACUMULADA Y ANÁLISIS COMPARATIVO
-# -----------------------------------------------------------------------------
-df_matriz = st.session_state["matriz_acumulada"]
+# Tabla manual y gráficos
+df_matriz_manual = st.session_state["matriz_acumulada"]
 
-st.divider()
-st.subheader(f"📊 Matriz Comparativa Multi-SOLPED ({len(df_matriz)} Ítems Agregados)")
+st.subheader(f"📊 Matriz Comparativa Multi-SOLPED Manual ({len(df_matriz_manual)} Registros)")
 
-if df_matriz.empty:
-    st.info("💡 La matriz está vacía. Ingrese una SOLPED arriba y presione **'Agregar esta SOLPED a la Matriz Comparativa'**.")
+if df_matriz_manual.empty:
+    st.info("💡 La matriz está vacía. Ingrese una SOLPED arriba y presione **'Agregar esta SOLPED a la Matriz Comparativa Manual'**.")
 else:
-    # Editor interactivo
-    df_edited = st.data_editor(
-        df_matriz,
+    df_edited_manual = st.data_editor(
+        df_matriz_manual,
         num_rows="dynamic",
         use_container_width=True,
-        height=280
+        height=260,
+        key="editor_manual"
     )
-    st.session_state["matriz_acumulada"] = df_edited
+    st.session_state["matriz_acumulada"] = df_edited_manual
 
-    # Gráficos comparativos
-    st.subheader("📈 Análisis Comparativo Unitario")
+    st.subheader("📈 Análisis Comparativo Unitario (Carga Manual)")
     g1, g2 = st.columns(2)
 
     with g1:
         fig_precio = px.bar(
-            df_edited,
+            df_edited_manual,
             x="SP / SOLPED",
             y="Precio Unit. CLP Norm.",
             color="Proveedor",
             text_auto=',.0f',
-            title="💰 Comparativa de Precio Unitario Normalizado [CLP]",
+            title="💰 Precio Unitario Normalizado [CLP]",
             labels={"Precio Unit. CLP Norm.": "Precio Unit. (CLP)"}
         )
-        fig_precio.update_layout(height=300)
+        fig_precio.update_layout(height=280)
         st.plotly_chart(fig_precio, use_container_width=True)
 
     with g2:
         fig_dias = px.bar(
-            df_edited,
+            df_edited_manual,
             x="SP / SOLPED",
             y="Días Entrega",
             color="Proveedor",
@@ -222,26 +329,133 @@ else:
             title="⏱️ Días Prometidos de Entrega (Lead Time)",
             labels={"Días Entrega": "Días"}
         )
-        fig_dias.update_layout(height=300)
+        fig_dias.update_layout(height=280)
         st.plotly_chart(fig_dias, use_container_width=True)
 
-    # Exportación
-    col_d1, col_d2 = st.columns(2)
-    with col_d1:
-        out_excel = io.BytesIO()
-        with pd.ExcelWriter(out_excel, engine='openpyxl') as writer:
-            df_edited.to_excel(writer, sheet_name='Comparativo_SOLPEDs', index=False)
+    col_m1, col_m2 = st.columns(2)
+    with col_m1:
+        out_excel_m = io.BytesIO()
+        with pd.ExcelWriter(out_excel_m, engine='openpyxl') as writer:
+            df_edited_manual.to_excel(writer, sheet_name='Comparativo_Manual', index=False)
 
         st.download_button(
-            label="📥 Descargar Reporte en Excel",
-            data=out_excel.getvalue(),
-            file_name=f"Reporte_Comparativo_{datetime.date.today().strftime('%Y%m%d')}.xlsx",
+            label="📥 Descargar Comparativo Manual en Excel",
+            data=out_excel_m.getvalue(),
+            file_name=f"Reporte_Manual_SOLPEDs_{datetime.date.today().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary",
             use_container_width=True
         )
 
-    with col_d2:
-        if st.button("🧹 Vaciar Matriz Comparativa", use_container_width=True):
-            st.session_state["matriz_acumulada"] = pd.DataFrame(columns=df_matriz.columns)
+    with col_m2:
+        if st.button("🧹 Vaciar Matriz Manual", use_container_width=True):
+            st.session_state["matriz_acumulada"] = pd.DataFrame(columns=df_matriz_manual.columns)
             st.rerun()
+
+st.divider()
+
+# =============================================================================
+# MÓDULO 2: CARGA MASIVA Y PROCESAMIENTO DE PLANILLA DE AUTOGESTIÓN (.XLSM)
+# =============================================================================
+st.header("📋 Módulo 2: Carga Masiva de Planilla de Autogestión (.XLSM / .XLSX / .CSV)")
+
+uploaded_auto = st.file_uploader(
+    "Subir Planilla de Autogestión", 
+    type=["xlsx", "xlsm", "xls", "csv"],
+    help="Cargue su archivo oficial de compras para procesar múltiples posiciones automáticamente."
+)
+
+if uploaded_auto is not None:
+    df_cargado = cargar_planilla_autogestion(uploaded_auto)
+    if df_cargado is not None and not df_cargado.empty:
+        st.session_state["df_matriz_archivo"] = df_cargado
+
+if "df_matriz_archivo" not in st.session_state:
+    st.session_state["df_matriz_archivo"] = generar_matriz_ejemplo()
+
+df_archivo = st.session_state["df_matriz_archivo"]
+
+# Detección de columna de SOLPED en el archivo
+col_solped = None
+for c in df_archivo.columns:
+    c_clean = str(c).strip().lower()
+    if c_clean in ['sp', 'solped', 'solicitud', 'pr'] or 'solped' in c_clean or 'sp' in c_clean:
+        col_solped = c
+        break
+
+lista_ids_archivo = ["Todas las solicitudes (SOLPED)"]
+if col_solped:
+    unicos = [str(x) for x in df_archivo[col_solped].dropna().unique() if str(x).strip() != ""]
+    lista_ids_archivo.extend(unicos)
+
+st.subheader("🆔 Filtros de Planilla y Control de Reporte")
+col_f1, col_f2, col_f3 = st.columns([2, 2, 2])
+
+with col_f1:
+    id_sel_archivo = st.selectbox("Seleccionar SP / SOLPED del Archivo", lista_ids_archivo)
+with col_f2:
+    val_defecto = id_sel_archivo if id_sel_archivo != "Todas las solicitudes (SOLPED)" else "SOLPED-CONSOLIDADA"
+    id_reporte_archivo = st.text_input("ID Personalizada para Reporte Masivo", value=val_defecto)
+with col_f3:
+    comprador_archivo = st.text_input("Comprador / Evaluador", value="Felipe Martínez", key="comp_archivo")
+
+# Filtrado de la planilla subida
+if id_sel_archivo != "Todas las solicitudes (SOLPED)" and col_solped:
+    df_filtrado_archivo = df_archivo[df_archivo[col_solped].astype(str) == id_sel_archivo]
+else:
+    df_filtrado_archivo = df_archivo
+
+st.subheader(f"📊 Matriz de Cotizaciones desde Planilla ({len(df_filtrado_archivo)} Posiciones)")
+
+df_edited_archivo = st.data_editor(
+    df_filtrado_archivo,
+    num_rows="dynamic",
+    use_container_width=True,
+    height=320,
+    key="editor_archivo"
+)
+
+st.subheader("📝 Dictamen e Informe del Archivo Cargado")
+
+comentarios_reporte_archivo = st.text_area(
+    "Observaciones de adjudicación para el informe final:",
+    value="Se realiza adjudicación considerando el menor costo total, cumplimiento de plazo de entrega (Lead Time) y la validación técnica favorable por parte del área usuaria."
+)
+
+col_monto = [col for col in df_edited_archivo.columns if 'monto' in str(col).lower() or 'adjudicado' in str(col).lower()]
+total_adjudicado = float(pd.to_numeric(df_edited_archivo[col_monto[0]], errors='coerce').fillna(0).sum()) if col_monto else 0.0
+
+st.metric(f"Total Adjudicado SOLPED ({id_reporte_archivo})", f"$ {total_adjudicado:,.0f}".replace(",", "."))
+
+col_a1, col_a2 = st.columns(2)
+
+with col_a1:
+    output_excel_a = io.BytesIO()
+    with pd.ExcelWriter(output_excel_a, engine='openpyxl') as writer:
+        df_edited_archivo.to_excel(writer, sheet_name=f'SOLPED_{id_reporte_archivo}'[:31], index=False)
+    
+    st.download_button(
+        label="📥 Descargar Reporte Completo en Excel",
+        data=output_excel_a.getvalue(),
+        file_name=f"Reporte_Planilla_SOLPED_{id_reporte_archivo}_{datetime.date.today().strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+        use_container_width=True
+    )
+
+with col_a2:
+    if PDF_HABILITADO:
+        try:
+            pdf_bytes = exportar_reporte_pdf(id_reporte_archivo, comprador_archivo, comentarios_reporte_archivo, df_edited_archivo, total_adjudicado)
+            st.download_button(
+                label="📄 Descargar Reporte en PDF",
+                data=pdf_bytes,
+                file_name=f"Informe_Adjudicacion_SOLPED_{id_reporte_archivo}.pdf",
+                mime="application/pdf",
+                type="secondary",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.warning(f"No se pudo generar el PDF: {e}")
+    else:
+        st.info("💡 Instale `fpdf` (`pip install fpdf`) para habilitar la exportación directa a PDF.")
