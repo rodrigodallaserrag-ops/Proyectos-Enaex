@@ -43,23 +43,20 @@ indicadores = obtener_indicadores_financieros()
 # -----------------------------------------------------------------------------
 def cargar_planilla_autogestion(file):
     """
-    Lee archivos Excel y CSV de manera robusta convirtiendo el buffer de Streamlit 
-    en un stream binario limpio para evitar lecturas como texto plano.
+    Lee archivos Excel (.xlsx, .xlsm, .xls) y CSV mediante lectura binaria limpia.
+    openpyxl soporta nativamente la extracción de datos desde plantillas con macros (.xlsm).
     """
     try:
         nombre = file.name.lower()
         file_bytes = io.BytesIO(file.getvalue())
 
-        if nombre.endswith(('.xlsx', '.xls')):
-            # Procesamiento binario explícito para planillas Excel
-            if nombre.endswith('.xlsx'):
-                df = pd.read_excel(file_bytes, engine='openpyxl')
-            else:
-                df = pd.read_excel(file_bytes)
+        if nombre.endswith(('.xlsx', '.xlsm', '.xls')):
+            # Se especifica openpyxl para .xlsx y .xlsm con macros
+            engine = 'openpyxl' if nombre.endswith(('.xlsx', '.xlsm')) else None
+            df = pd.read_excel(file_bytes, engine=engine)
             return df
 
         elif nombre.endswith('.csv'):
-            # Intento de lectura CSV con detección automática de separadores
             try:
                 return pd.read_csv(file_bytes, sep=None, engine='python', encoding='utf-8')
             except Exception:
@@ -67,11 +64,10 @@ def cargar_planilla_autogestion(file):
                 return pd.read_csv(file_bytes, sep=None, engine='python', encoding='latin-1')
 
         else:
-            # Fallback para archivos subidos con extensiones no estándar
             return pd.read_excel(file_bytes, engine='openpyxl')
 
     except Exception as e:
-        st.error(f"Error al procesar la planilla: {e}")
+        st.error(f"Error al procesar la planilla ({file.name}): {e}")
         return None
 
 def generar_matriz_ejemplo():
@@ -124,7 +120,10 @@ def generar_matriz_ejemplo():
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.header("📋 Planilla de Autogestión")
-    uploaded_auto = st.file_uploader("Subir Planilla de Autogestión (Excel/CSV)", type=["xlsx", "xls", "csv"])
+    uploaded_auto = st.file_uploader(
+        "Subir Planilla de Autogestión (Excel/XLSM/CSV)", 
+        type=["xlsx", "xlsm", "xls", "csv"]
+    )
     
     st.divider()
     st.header("💱 Indicadores del Día")
@@ -143,7 +142,7 @@ if uploaded_auto is not None:
     df_cargado = cargar_planilla_autogestion(uploaded_auto)
     if df_cargado is not None:
         st.session_state["df_matriz"] = df_cargado
-        st.success("✅ Planilla de Autogestión cargada exitosamente.")
+        st.success(f"✅ Planilla '{uploaded_auto.name}' cargada exitosamente.")
 
 if "df_matriz" not in st.session_state:
     st.session_state["df_matriz"] = generar_matriz_ejemplo()
