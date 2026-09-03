@@ -1,13 +1,18 @@
 import datetime
 import io
+import json
 import re
+import ssl
+import urllib.request
 import pandas as pd
 import requests
 import streamlit as st
 import urllib3
-import urllib.request
-import ssl
-import json
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -18,7 +23,6 @@ st.set_page_config(page_title="Consola Única de Compras - Enaex", layout="wide"
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=3600)  
 def obtener_indicadores_financieros():
-    # Intento 1: urllib nativo (Detecta automáticamente el proxy de Windows e ignora el SSL interceptado)
     try:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -39,9 +43,8 @@ def obtener_indicadores_financieros():
                     "estado": "Online (Proxy Local) 🟢",
                 }
     except Exception:
-        pass # Falla el método nativo, pasamos a requests
+        pass
         
-    # Intento 2: Requests con rutas alternativas
     urls_intento = [
         "https://mindicador.cl/api",
         "http://mindicador.cl/api",
@@ -53,7 +56,7 @@ def obtener_indicadores_financieros():
     for url in urls_intento:
         try:
             with requests.Session() as s:
-                s.trust_env = True # Fuerza el uso de variables de entorno del proxy
+                s.trust_env = True
                 response = s.get(url, timeout=8, headers=headers, verify=False)
                 response.raise_for_status()
                 data = response.json()
@@ -69,7 +72,6 @@ def obtener_indicadores_financieros():
         except Exception:
             continue 
 
-    # Fallback si el firewall bloquea todo el tráfico saliente
     return {
         "dolar": 938.0,
         "euro": 1020.0,
@@ -79,7 +81,7 @@ def obtener_indicadores_financieros():
     }
 
 indicadores_cache = obtener_indicadores_financieros()
-indicadores = dict(indicadores_cache) # Hacemos una copia para permitir sobrescritura manual
+indicadores = dict(indicadores_cache)
 
 def formato_clp(valor):
     return f"${int(valor):,}".replace(",", ".")
@@ -96,7 +98,135 @@ def aplicar_formato_regional(monto, moneda):
     return str(monto)
 
 # -----------------------------------------------------------------------------
-# 2. INICIALIZAR ESTADO Y BARRA LATERAL (CON MODO MANUAL FAIL-SAFE)
+# 2. GENERADOR DE REPORTES PDF EJECUTIVOS
+# -----------------------------------------------------------------------------
+def generar_pdf_ejecutivo(solped, material, sociedad, cotizaciones, datos_indicadores):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36
+    )
+    story = []
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        'TitleStyle', parent=styles['Heading1'], fontSize=16, leading=20,
+        textColor=colors.HexColor('#0F172A'), spaceAfter=4
+    )
+    subtitle_style = ParagraphStyle(
+        'SubTitleStyle', parent=styles['Normal'], fontSize=10, leading=12,
+        textColor=colors.HexColor('#475569'), spaceAfter=14
+    )
+    normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontSize=9, leading=12)
+    header_table_style = ParagraphStyle(
+        'HeaderStyle', parent=styles['Normal'], fontSize=8, leading=10,
+        textColor=colors.whitesmoke, fontName='Helvetica-Bold'
+    )
+    cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'], fontSize=8, leading=10)
+
+    # Membrete y Título
+    story.append(Paragraph("<b>ENAEX — Consola Única de Compras</b>", title_style))
+    story.append(Paragraph(f"Reporte Ejecutivo de Adjudicación — Solped N° <b>{solped}</b>", subtitle_style))
+
+    # Ficha Técnica / Metadatos
+    meta_data = [
+        [
+            Paragraph(f"<b>N° Solped:</b> {solped}", normal_style),
+            Paragraph(f"<b>Código Material:</b> {material}", normal_style),
+            Paragraph(f"<b>Sociedad:</b> {sociedad}", normal_style)
+        ],
+        [
+            Paragraph(f"<b>Fecha Emisión:</b> {datetime.date.today().strftime('%d-%m-%Y')}", normal_style),
+            Paragraph(f"<b>Dólar Ref.:</b> ${datos_indicadores['dolar']:,.2f}", normal_style),
+            Paragraph(f"<b>UF Ref.:</b> ${datos_indicadores['uf']:,.2f}", normal_style)
+        ]
+    ]
+    t_meta = Table(meta_data, colWidths=[180, 180, 180])
+    t_meta.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F1F5F9')),
+        ('PADDING', (0,0), (-1,-1), 6),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('LINEBELOW', (0,0), (-1,-1), 1, colors.HexColor('#CBD5E1'))
+    ]))
+    story.append(t_meta)
+    story.append(Spacer(1, 14))
+
+    # Tabla Comparativa de Ofertas
+    table_data = [[
+        Paragraph("<b>Proveedor</b>", header_table_style),
+        Paragraph("<b>Monto Orig.</b>", header_table_style),
+        Paragraph("<b>Mon.</b>", header_table_style),
+        Paragraph("<b>Equiv. CLP ($)</b>", header_table_style),
+        Paragraph("<b>Equiv. USD ($)</b>", header_table_style),
+        Paragraph("<b>Plazo Entrega</b>", header_table_style),
+        Paragraph("<b>Observaciones</b>", header_table_style)
+    ]]
+
+    min_clp = min([c["Equiv. CLP ($)"] for c in cotizaciones]) if cotizaciones else 0
+
+    for c in cotizaciones:
+        monto_orig_fmt = aplicar_formato_regional(c["Monto Original"], c["Moneda"])
+        clp_fmt = f"$ {int(c['Equiv. CLP ($)']):,}".replace(",", ".")
+        usd_fmt = f"$ {c['Equiv. USD ($)']:,.2f}"
+        
+        prov_text = f"<b>{c['Proveedor']}</b>"
+        if len(cotizaciones) > 1 and c["Equiv. CLP ($)"] == min_clp:
+            prov_text += "<br/><font color='#16A34A'><b>★ Mejor Oferta</b></font>"
+
+        table_data.append([
+            Paragraph(prov_text, cell_style),
+            Paragraph(monto_orig_fmt, cell_style),
+            Paragraph(c["Moneda"], cell_style),
+            Paragraph(clp_fmt, cell_style),
+            Paragraph(usd_fmt, cell_style),
+            Paragraph(c["Fecha de Entrega"], cell_style),
+            Paragraph(c.get("Observaciones", "-") or "-", cell_style)
+        ])
+
+    t_quotes = Table(table_data, colWidths=[105, 65, 30, 75, 70, 85, 110])
+    t_quotes.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#0F172A')),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
+        ('PADDING', (0,0), (-1,-1), 5),
+    ]))
+    story.append(t_quotes)
+    story.append(Spacer(1, 15))
+
+    # Control Financiero
+    max_monto = max([c["Equiv. CLP ($)"] for c in cotizaciones]) if cotizaciones else 0
+    if max_monto > 1000000:
+        warn_p = Paragraph(
+            f"<b>⚠️ Nota de Control Financiero:</b> El requerimiento supera $1.000.000 CLP "
+            f"(Máximo detectado: {formato_clp(max_monto)} CLP). Requiere validación de acuerdo a matriz de firmas vigente.",
+            normal_style
+        )
+        story.append(warn_p)
+        story.append(Spacer(1, 15))
+
+    # Sección de Firmas de Aprobación
+    story.append(Spacer(1, 25))
+    sig_data = [
+        [
+            Paragraph("___________________________________<br/><b>Elaborado por:</b> Analista de Compras", cell_style),
+            Paragraph("___________________________________<br/><b>Aprobado por:</b> Jefatura de Abastecimiento", cell_style)
+        ]
+    ]
+    t_sig = Table(sig_data, colWidths=[270, 270])
+    t_sig.setStyle(TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ]))
+    story.append(t_sig)
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+# -----------------------------------------------------------------------------
+# 3. INICIALIZAR ESTADO Y BARRA LATERAL
 # -----------------------------------------------------------------------------
 if "cotizaciones" not in st.session_state:
     st.session_state["cotizaciones"] = []
@@ -113,10 +243,9 @@ with st.sidebar:
     material = st.text_input("Código Material", value="3001892")
     sociedad = st.selectbox("Sociedad", ["EC01", "EC06"])
     
-    # UI: Activar panel manual de rescate si el firewall bloquea la API
     if "Offline" in indicadores["estado"]:
         st.divider()
-        st.warning("⚠️ **Red Corporativa Bloqueada**\n\nEl sistema no pudo obtener los valores automáticamente. Ajusta los valores de hoy manualmente para continuar:")
+        st.warning("⚠️ **Red Corporativa Bloqueada**\nAjusta los valores manualmente para continuar:")
         indicadores["uf"] = st.number_input("Valor UF de hoy", value=float(indicadores["uf"]), key="uf_manual")
         indicadores["dolar"] = st.number_input("Valor Dólar de hoy", value=float(indicadores["dolar"]), key="dolar_manual")
         indicadores["euro"] = st.number_input("Valor Euro de hoy", value=float(indicadores["euro"]), key="euro_manual")
@@ -148,7 +277,7 @@ def formatear_caja_monto():
 st.title("🛒 Consola Única de Compras — Enaex")
 
 # -----------------------------------------------------------------------------
-# 3. PANEL CENTRAL DE MONEDAS
+# 4. PANEL CENTRAL DE MONEDAS
 # -----------------------------------------------------------------------------
 st.caption(f"🗓️ Valores del día ({indicadores['fecha']}) - Estado API: {indicadores['estado']}")
 
@@ -160,7 +289,7 @@ col_eur.metric("Euro", formato_clp(indicadores['euro']))
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 4. INGRESO DE COTIZACIONES Y PROCESAMIENTO
+# 5. INGRESO DE COTIZACIONES
 # -----------------------------------------------------------------------------
 st.subheader("➕ Carga Manual de Oferta")
 
@@ -171,7 +300,6 @@ def procesar_guardado():
     fecha_entrega = st.session_state.get("fecha_entrega_input", datetime.date.today())
     obs = st.session_state.get("obs_input", "")
     
-    # Extraemos valores actuales del panel (si hubo edición manual)
     uf_actual = st.session_state.get("uf_manual", indicadores["uf"])
     dolar_actual = st.session_state.get("dolar_manual", indicadores["dolar"])
     euro_actual = st.session_state.get("euro_manual", indicadores["euro"])
@@ -230,7 +358,7 @@ st.text_area("Observaciones Técnicas", key="obs_input")
 st.button("Guardar en Cuadro Comparativo", on_click=procesar_guardado)
 
 # -----------------------------------------------------------------------------
-# 5. CUADRO COMPARATIVO Y EXPORTACIÓN EXCEL
+# 6. CUADRO COMPARATIVO Y EXPORTACIÓN (EXCEL / PDF)
 # -----------------------------------------------------------------------------
 st.divider()
 st.subheader("📊 Cuadro Comparativo (Homogeneizado)")
@@ -277,15 +405,23 @@ else:
             dataframe.to_excel(writer, index=False, sheet_name='Comparativo')
         return output.getvalue()
 
-    col_btn1, col_btn2 = st.columns([1, 4])
+    col_btn1, col_btn2, col_btn3 = st.columns([1.5, 1.5, 3])
     with col_btn1:
         st.download_button(
-            label="📥 Descargar a Excel",
+            label="📥 Descargar Excel",
             data=convertir_excel(df),
             file_name=f"cuadro_comparativo_solped_{solped}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     with col_btn2:
+        pdf_bytes = generar_pdf_ejecutivo(solped, material, sociedad, st.session_state["cotizaciones"], indicadores)
+        st.download_button(
+            label="📄 Descargar Reporte PDF",
+            data=pdf_bytes,
+            file_name=f"reporte_ejecutivo_solped_{solped}.pdf",
+            mime="application/pdf"
+        )
+    with col_btn3:
         if st.button("Limpiar Cuadro", type="secondary"):
             st.session_state["cotizaciones"] = []
             st.rerun()
