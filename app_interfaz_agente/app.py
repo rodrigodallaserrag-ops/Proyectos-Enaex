@@ -8,6 +8,7 @@ import pandas as pd
 import requests
 import streamlit as st
 import urllib3
+import plotly.express as px
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -125,7 +126,6 @@ def generar_pdf_ejecutivo(solped, material, sociedad, cotizaciones, datos_indica
     )
     cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'], fontSize=8, leading=10)
 
-    # Membrete y Título en el PDF
     story.append(Paragraph("<b>ENAEX — Consola de Compras</b>", title_style))
     story.append(Paragraph(f"Reporte Ejecutivo de Adjudicación — Solped N° <b>{solped}</b>", subtitle_style))
 
@@ -270,7 +270,7 @@ def formatear_caja_monto():
     except ValueError:
         st.session_state["monto_input"] = ""
 
-# Título visible principal de la aplicación
+# Título visible principal
 st.title("🛒 Consola de Compras — Enaex")
 
 # -----------------------------------------------------------------------------
@@ -375,7 +375,112 @@ else:
     df_visual["Equiv. USD ($)"] = df_visual["Equiv. USD ($)"].apply(lambda x: f"$ {x:,.2f}")
 
     st.dataframe(df_visual, use_container_width=True)
+
+    # -------------------------------------------------------------------------
+    # 7. MÓDULO VISUAL: MÉTRICAS DE AHORRO Y GRÁFICOS INTERACTIVOS
+    # -------------------------------------------------------------------------
+    st.markdown("### 📈 Análisis Visual y Métricas de Ahorro")
     
+    if len(st.session_state["cotizaciones"]) < 2:
+        st.info("💡 Ingresa al menos **2 cotizaciones** para habilitar el gráfico comparativo y el análisis de ahorro.")
+    else:
+        monto_min = df["Equiv. CLP ($)"].min()
+        monto_max = df["Equiv. CLP ($)"].max()
+        monto_prom = df["Equiv. CLP ($)"].mean()
+        
+        prov_min = df.loc[df["Equiv. CLP ($)"] == monto_min, "Proveedor"].values[0]
+        prov_max = df.loc[df["Equiv. CLP ($)"] == monto_max, "Proveedor"].values[0]
+        
+        ahorro_vs_max = monto_max - monto_min
+        pct_vs_max = (ahorro_vs_max / monto_max * 100) if monto_max > 0 else 0
+        
+        ahorro_vs_prom = monto_prom - monto_min
+        pct_vs_prom = (ahorro_vs_prom / monto_prom * 100) if monto_prom > 0 else 0
+
+        # Tarjetas KPI de Ahorro
+        kpi_col1, kpi_col2, kpi_col3 = st.columns(3)
+        
+        with kpi_col1:
+            st.metric(
+                label="🏆 Oferta Recomendada",
+                value=prov_min,
+                delta=formato_clp(monto_min),
+                delta_color="normal"
+            )
+        with kpi_col2:
+            st.metric(
+                label="💰 Ahorro Máximo (vs. Menos Económica)",
+                value=formato_clp(ahorro_vs_max),
+                delta=f"-{pct_vs_max:.1f}% vs {prov_max}",
+                delta_color="normal"
+            )
+        with kpi_col3:
+            st.metric(
+                label="📊 Ahorro vs. Promedio del Mercado",
+                value=formato_clp(ahorro_vs_prom),
+                delta=f"-{pct_vs_prom:.1f}% vs Promedio",
+                delta_color="normal"
+            )
+
+        # Preparación de datos para los gráficos
+        df_chart = df.copy()
+        
+        # Extracción numérica de días de entrega
+        def extraer_dias(cadena):
+            match = re.search(r'\((\d+)\s+días?\)', str(cadena))
+            return int(match.group(1)) if match else 0
+            
+        df_chart["Días de Entrega"] = df_chart["Fecha de Entrega"].apply(extraer_dias)
+        
+        # Asignación de colores
+        def asignar_categoria_color(val):
+            if val == monto_min:
+                return "Mejor Opción (Mínimo)"
+            elif val == monto_max:
+                return "Mayor Precio"
+            return "Opción Intermedia"
+            
+        df_chart["Evaluación"] = df_chart["Equiv. CLP ($)"].apply(asignar_categoria_color)
+
+        chart_col1, chart_col2 = st.columns(2)
+
+        with chart_col1:
+            fig_precio = px.bar(
+                df_chart,
+                x="Proveedor",
+                y="Equiv. CLP ($)",
+                color="Evaluación",
+                text_auto=',.0f',
+                title="Comparativo de Precios Homogeneizados (CLP)",
+                color_discrete_map={
+                    "Mejor Opción (Mínimo)": "#16A34A",
+                    "Mayor Precio": "#DC2626",
+                    "Opción Intermedia": "#0284C7"
+                }
+            )
+            fig_precio.update_layout(yaxis_title="Monto CLP ($)", xaxis_title="Proveedor", showlegend=True)
+            st.plotly_chart(fig_precio, use_container_width=True)
+
+        with chart_col2:
+            fig_plazo = px.bar(
+                df_chart,
+                x="Proveedor",
+                y="Días de Entrega",
+                color="Evaluación",
+                text_auto=True,
+                title="Plazos de Entrega Estimados (Días Corridos)",
+                color_discrete_map={
+                    "Mejor Opción (Mínimo)": "#16A34A",
+                    "Mayor Precio": "#DC2626",
+                    "Opción Intermedia": "#0284C7"
+                }
+            )
+            fig_plazo.update_layout(yaxis_title="Días de Entrega", xaxis_title="Proveedor", showlegend=False)
+            st.plotly_chart(fig_plazo, use_container_width=True)
+
+    # -------------------------------------------------------------------------
+    # GESTIÓN Y EXPORTACIÓN
+    # -------------------------------------------------------------------------
     st.markdown("#### 🛠️ Gestionar Ofertas Ingresadas")
     
     for i, cotizacion in enumerate(st.session_state["cotizaciones"]):
