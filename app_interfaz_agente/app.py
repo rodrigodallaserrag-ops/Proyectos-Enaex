@@ -147,21 +147,34 @@ with st.sidebar:
     if file_masivo:
         try:
             if file_masivo.name.endswith(".csv"):
-                st.session_state.df_masivo = pd.read_csv(file_masivo)
+                df_raw = pd.read_csv(file_masivo)
             else:
                 dict_dfs = pd.read_excel(file_masivo, sheet_name=None, engine='openpyxl')
-                st.session_state.df_masivo = pd.concat(dict_dfs.values(), ignore_index=True)
-                
-            st.success(f"Planilla cargada correctamente ({len(st.session_state.df_masivo)} filas)")
+                df_raw = pd.concat(dict_dfs.values(), ignore_index=True)
+            
+            # --- LIMPIEZA Y ORDENAMIENTO DE DATOS ---
+            # 1. Eliminar columnas y filas que son 100% nulas o vacías
+            df_clean = df_raw.dropna(axis=1, how='all')
+            df_clean = df_clean.dropna(axis=0, how='all')
+            
+            # 2. Contar la cantidad de nulos por fila para determinar qué tan "incompleta" está
+            df_clean['cantidad_nulos'] = df_clean.isnull().sum(axis=1)
+            
+            # 3. Ordenar (los de 0 nulos arriba, los incompletos abajo) y limpiar índice temporal
+            df_clean = df_clean.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
+            
+            st.session_state.df_masivo = df_clean
+            st.success(f"Planilla cargada y filtrada correctamente ({len(st.session_state.df_masivo)} filas)")
+            
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
 
 # =============================================================================
-# VISTA PREVIA DE DATOS CARGADOS (NUEVO)
+# VISTA PREVIA DE DATOS CARGADOS
 # =============================================================================
 if st.session_state.df_masivo is not None:
     with st.expander("👀 Vista Previa de la Planilla Base Cargada", expanded=False):
-        st.write(f"Mostrando los datos del archivo cargado ({len(st.session_state.df_masivo)} registros en total):")
+        st.write(f"Mostrando los datos consolidados y ordenados por completitud ({len(st.session_state.df_masivo)} registros en total):")
         st.dataframe(st.session_state.df_masivo, use_container_width=True)
 
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
