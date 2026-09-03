@@ -11,6 +11,13 @@ import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
+# Intentar importar FPDF para generación de PDF
+try:
+    from fpdf import FPDF
+    PDF_HABILITADO = True
+except ImportError:
+    PDF_HABILITADO = False
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="Consola de Compras - Enaex", layout="wide")
@@ -39,14 +46,9 @@ def obtener_indicadores_financieros():
 indicadores = obtener_indicadores_financieros()
 
 # -----------------------------------------------------------------------------
-# 2. CARGA Y PROCESAMIENTO INTELIGENTE DE MATRIZ DE COMPRAS (.XLSM)
+# 2. CARGA INTELIGENTE DE PLANILLA DE AUTOGESTIÓN (.XLSM)
 # -----------------------------------------------------------------------------
 def cargar_planilla_autogestion(file):
-    """
-    Escanea hojas y filas buscando la tabla de materiales real según densidad
-    de columnas clave de compras (Solped, Código, Descripción, Cantidad, etc.),
-    omitiendo tarjetas o bloques de resumen superiores.
-    """
     try:
         nombre = file.name.lower()
         file_bytes = io.BytesIO(file.getvalue())
@@ -55,18 +57,14 @@ def cargar_planilla_autogestion(file):
             engine = 'openpyxl' if nombre.endswith(('.xlsx', '.xlsm')) else None
             excel_file = pd.ExcelFile(file_bytes, engine=engine)
             
-            # Palabras clave distintivas de la tabla principal de materiales
             palabras_clave_fuertes = [
                 'solped', 'código', 'codigo', 'descripción', 'descripcion', 
-                'cantidad', 'um', 'u.m.', 'precio', 'proveedor', 'oferta', 
-                'incoterm', 'adjudicado', 'monto', 'lead time', 'material', 'posición', 'posicion'
+                'cantidad', 'um', 'precio', 'proveedor', 'oferta', 
+                'incoterm', 'adjudicado', 'monto', 'lead time', 'material', 'posición'
             ]
             
-            mejor_sheet = None
-            mejor_fila_idx = None
-            max_coincidencias = 0
+            mejor_sheet, mejor_fila_idx, max_coincidencias = None, None, 0
 
-            # 1. Escanear pestañas y filas para hallar la cabecera con mayor coincidencia
             for sheet_name in excel_file.sheet_names:
                 try:
                     df_raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=None)
@@ -79,19 +77,14 @@ def cargar_planilla_autogestion(file):
                 for idx in range(min(40, len(df_raw))):
                     row = df_raw.iloc[idx]
                     celdas_texto = [str(val).strip().lower() for val in row.values if pd.notna(val) and str(val).strip() != '']
-                    
-                    # Se requiere al menos 3 columnas pobladas para considerarse cabecera
                     if len(celdas_texto) < 3:
                         continue
-                        
                     coincidencias = sum(1 for kw in palabras_clave_fuertes if any(kw in celda for celda in celdas_texto))
-                    
                     if coincidencias > max_coincidencias:
                         max_coincidencias = coincidencias
                         mejor_sheet = sheet_name
                         mejor_fila_idx = idx
 
-            # 2. Extraer y estructurar la tabla principal detectada
             if mejor_sheet is not None and max_coincidencias >= 2:
                 df_raw = pd.read_excel(excel_file, sheet_name=mejor_sheet, header=None)
                 df_clean = df_raw.iloc[mejor_fila_idx:].copy()
@@ -105,21 +98,13 @@ def cargar_planilla_autogestion(file):
                         encabezados.append(f"Columna_{i+1}")
                 
                 df_clean.columns = encabezados
-                df_clean = df_clean.iloc[1:].reset_index(drop=True)
-                df_clean = df_clean.dropna(how='all')
-                
-                # Conservar solo columnas estructuradas con nombre válido
+                df_clean = df_clean.iloc[1:].reset_index(drop=True).dropna(how='all')
                 cols_utiles = [col for col in df_clean.columns if not str(col).startswith("Columna_")]
                 if len(cols_utiles) >= 2:
                     df_clean = df_clean[cols_utiles]
-                
-                # Filtrar filas de residuos o vacías
-                df_clean = df_clean.dropna(thresh=2)
-                return df_clean
+                return df_clean.dropna(thresh=2)
 
-            # Fallback en caso de no hallar coincidencia explícita
-            df_fallback = pd.read_excel(excel_file, sheet_name=0)
-            return df_fallback.dropna(how='all').dropna(how='all', axis=1)
+            return pd.read_excel(excel_file, sheet_name=0).dropna(how='all').dropna(how='all', axis=1)
 
         elif nombre.endswith('.csv'):
             try:
@@ -134,7 +119,6 @@ def cargar_planilla_autogestion(file):
         return None
 
 def generar_matriz_ejemplo():
-    """Genera matriz inicial editable con +20 materiales idéntica a la plantilla Excel"""
     data = []
     materiales_demo = [
         ("LIMPIA CONTACTOS 279 CHESTERTON.", "C/U", 72, 54500, "CLP", "PRINTEC S A"),
@@ -142,21 +126,14 @@ def generar_matriz_ejemplo():
         ("VALVULA DE BOLA 2 INCH ANSI 300", "C/U", 15, 180000, "CLP", "MCM CHILE"),
         ("MANGUERA ALTA PRESION 1/2", "MTR", 120, 25000, "CLP", "PARKER"),
         ("EMPADRON BASTIDOR SOPORTE", "C/U", 4, 450000, "CLP", "INDURA"),
-        ("RODAMIENTO BOLA 6204-2RSH", "C/U", 50, 18500, "CLP", "SKF CHILE"),
-        ("KITS DE EMPADRADO COMPLETO", "SET", 2, 1200000, "CLP", "SKF CHILE"),
-        ("ELECTRODO AWS E7018 1/8", "KG", 200, 4800, "CLP", "INDURA"),
-        ("FILTRO DE AIRE PRIMARIO", "C/U", 24, 65000, "CLP", "CATERPILLAR"),
-        ("CORREA TRANSMISION V B52", "C/U", 30, 12500, "CLP", "GATES CHILE"),
     ]
-    
-    for i in range(1, 21):
+    for i in range(1, 16):
         idx = (i - 1) % len(materiales_demo)
         desc, um, cant, precio, mon, prov = materiales_demo[idx]
-        precio_usd = round(precio / indicadores["dolar"], 2) if mon == "CLP" else precio
-        
+        solped_id = "1002610200" if i <= 8 else "1002610300"
         data.append({
             "Pos": i * 10,
-            "Solped": "1002610299",
+            "Solped": solped_id,
             "Código SAP": f"2000{6120 + i}",
             "Descripción breve": f"{desc} #{i}",
             "Cantidad": cant,
@@ -165,21 +142,69 @@ def generar_matriz_ejemplo():
             "Proveedor Histórico": prov,
             "Último Precio [Unit]": precio,
             "Moneda Hist.": mon,
-            "Último precio [USD]": precio_usd,
-            "Incoterm": "T. Gil",
             "Oferta Inicial Moneda": precio * 1.05,
             "Oferta Mejorada Moneda": precio * 0.95,
             "Lead Time": "5 DIAS",
             "Validación Técnica": True,
             "Proveedor Sugerido": prov,
-            "Tipo Adjudicación": "Proveedor único",
             "Monto Adjudicado": int(cant * precio * 0.95),
-            "Comentario": "Se adjudica por historial de compra y validación técnica favorable."
         })
     return pd.DataFrame(data)
 
+# GENERADOR DE REPORTES PDF
+def exportar_reporte_pdf(id_solicitud, comprador, comentarios, df_data, total_monto):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, f"REPORTE DE ADJUDICACIÓN - SOLICITUD #{id_solicitud}", ln=True, align='C')
+    
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(0, 8, f"Fecha: {datetime.date.today().strftime('%d/%m/%Y')} | Comprador: {comprador}", ln=True, align='C')
+    pdf.ln(5)
+
+    # Resumen Ejecutivo
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, "1. Resumen de Adjudicación", ln=True)
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(0, 6, f"Total de Posiciones: {len(df_data)}", ln=True)
+    pdf.cell(0, 6, f"Monto Total Adjudicado: CLP ${total_monto:,.0f}".replace(",", "."), ln=True)
+    pdf.ln(4)
+
+    # Comentarios / Justificación
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, "2. Observaciones y Justificación Técnica/Económica", ln=True)
+    pdf.set_font("Arial", '', 10)
+    pdf.multi_cell(0, 6, comentarios)
+    pdf.ln(6)
+
+    # Detalle de Materiales (Tabla Resumida)
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 8, "3. Detalle de Ítems Comparados", ln=True)
+    pdf.set_font("Arial", 'B', 9)
+    pdf.cell(20, 7, "Pos", 1)
+    pdf.cell(75, 7, "Descripción", 1)
+    pdf.cell(20, 7, "Cant.", 1)
+    pdf.cell(40, 7, "Proveedor", 1)
+    pdf.cell(35, 7, "Monto", 1, ln=True)
+
+    pdf.set_font("Arial", '', 8)
+    for _, row in df_data.iterrows():
+        pos = str(row.get("Pos", ""))
+        desc = str(row.get("Descripción breve", row.get("Descripción", "")))[:35]
+        cant = str(row.get("Cantidad", ""))
+        prov = str(row.get("Proveedor Sugerido", row.get("Proveedor Histórico", "")))[:20]
+        monto = f"${float(row.get('Monto Adjudicado', 0)):,.0f}".replace(",", ".")
+        
+        pdf.cell(20, 6, pos, 1)
+        pdf.cell(75, 6, desc, 1)
+        pdf.cell(20, 6, cant, 1)
+        pdf.cell(40, 6, prov, 1)
+        pdf.cell(35, 6, monto, 1, ln=True)
+
+    return pdf.output(dest='S').encode('latin1')
+
 # -----------------------------------------------------------------------------
-# 3. INTERFAZ LATERAL (CONFIGURACIÓN Y PLANILLA DE AUTOGESTIÓN)
+# 3. INTERFAZ LATERAL
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.header("📋 Planilla de Autogestión")
@@ -187,84 +212,109 @@ with st.sidebar:
         "Subir Planilla de Autogestión (Excel/XLSM/CSV)", 
         type=["xlsx", "xlsm", "xls", "csv"]
     )
-    
     st.divider()
     st.header("💱 Indicadores del Día")
     st.write(f"**USD:** ${indicadores['dolar']:,.2f}")
     st.write(f"**EUR:** ${indicadores['euro']:,.2f}")
-    st.write(f"**UF:** ${indicadores['uf']:,.2f}")
     st.caption(f"Estado API: {indicadores['estado']}")
 
 # -----------------------------------------------------------------------------
-# 4. CUADRO COMPARATIVO MULTIMATERIAL CENTRAL (+20 MATERIALES)
+# 4. PANEL DE CONTROL DE REPORTE E ID DE SOLICITUD
 # -----------------------------------------------------------------------------
 st.title("🛒 Cuadro Comparativo Multimaterial - Autogestión")
-st.caption("Consolidado de cotizaciones y adjudicación automatizada en una sola pantalla.")
 
 if uploaded_auto is not None:
     df_cargado = cargar_planilla_autogestion(uploaded_auto)
     if df_cargado is not None and not df_cargado.empty:
         st.session_state["df_matriz"] = df_cargado
-        st.success(f"✅ Planilla '{uploaded_auto.name}' procesada e importada correctamente.")
 
 if "df_matriz" not in st.session_state:
     st.session_state["df_matriz"] = generar_matriz_ejemplo()
 
 df_matriz = st.session_state["df_matriz"]
 
-# Controles de acción directa
-col_b1, col_b2, col_b3 = st.columns([2, 2, 4])
-with col_b1:
-    if st.button("🧹 Limpiar Cuadro Comparativo", type="secondary"):
-        st.session_state["df_matriz"] = pd.DataFrame(columns=df_matriz.columns)
-        st.rerun()
-with col_b2:
-    if st.button("🔄 Recargar Datos Demostración"):
-        st.session_state["df_matriz"] = generar_matriz_ejemplo()
-        st.rerun()
+# Búsqueda/Detección de ID Solicitud
+col_solped = [c for c in df_matriz.columns if 'solped' in str(c).lower() or 'id' in str(c).lower()]
+lista_ids = ["Todas las solicitudes"]
+if col_solped:
+    unicos = df_matriz[col_solped[0]].dropna().astype(str).unique().tolist()
+    lista_ids.extend(unicos)
 
-st.subheader(f"📊 Matriz de Cotizaciones ({len(df_matriz)} Materiales / Posiciones)")
+st.subheader("🆔 Control de ID de Solicitud y Filtros")
+col_f1, col_f2, col_f3 = st.columns([2, 2, 2])
 
-# Editor de datos interactivo
+with col_f1:
+    id_seleccionado = st.selectbox("Seleccionar ID Solicitud (SOLPED)", lista_ids)
+with col_f2:
+    id_reporte = st.text_input("ID Personalizada para Reporte", value=id_seleccionado if id_seleccionado != "Todas las solicitudes" else "SOL-200")
+with col_f3:
+    comprador = st.text_input("Comprador / Evaluador", value="Felipe Martínez")
+
+# Filtrado dinámico
+if id_seleccionado != "Todas las solicitudes" and col_solped:
+    df_filtrado = df_matriz[df_matriz[col_solped[0]].astype(str) == id_seleccionado]
+else:
+    df_filtrado = df_matriz
+
+# -----------------------------------------------------------------------------
+# 5. MATRIZ DE COTIZACIONES EDITABLE
+# -----------------------------------------------------------------------------
+st.subheader(f"📊 Matriz de Cotizaciones ({len(df_filtrado)} Posiciones)")
+
 df_edited = st.data_editor(
-    df_matriz,
+    df_filtrado,
     num_rows="dynamic",
     use_container_width=True,
-    height=550
+    height=400
 )
 
-st.session_state["df_matriz"] = df_edited
-
 # -----------------------------------------------------------------------------
-# 5. RESUMEN DE ADJUDICACIÓN Y EXPORTACIÓN MASIVA
+# 6. COMENTARIOS EJECUTIVOS Y GENERACIÓN DE INFORMES
 # -----------------------------------------------------------------------------
 st.divider()
-st.subheader("📈 Resumen Estadístico de Adjudicación")
+st.subheader("📝 Dictamen y Comentarios del Reporte")
 
-if not df_edited.empty:
-    col_monto = [col for col in df_edited.columns if 'monto' in str(col).lower() or 'adjudicado' in str(col).lower()]
-    if col_monto:
-        monto_series = pd.to_numeric(df_edited[col_monto[0]], errors='coerce').fillna(0)
-        total_adjudicado = float(monto_series.sum())
-    else:
-        total_adjudicado = 0.0
-        
-    total_items = len(df_edited)
-    
-    col_m1, col_m2, col_m3 = st.columns(3)
-    col_m1.metric("Total Materiales Comparados", f"{total_items} Pos")
-    col_m2.metric("Monto Total Adjudicado (CLP)", f"$ {total_adjudicado:,.0f}".replace(",", "."))
-    col_m3.metric("Promedio por Ítem", f"$ {total_adjudicado/max(1, total_items):,.0f}".replace(",", "."))
+comentarios_reporte = st.text_area(
+    "Ingrese las observaciones de adjudicación para el informe final:",
+    value="Se realiza adjudicación considerando el menor costo total, cumplimiento de plazo de entrega (Lead Time) y la validación técnica favorable por parte del área usuaria."
+)
 
-    # Exportación a Excel
+col_monto = [col for col in df_edited.columns if 'monto' in str(col).lower() or 'adjudicado' in str(col).lower()]
+total_adjudicado = float(pd.to_numeric(df_edited[col_monto[0]], errors='coerce').fillna(0).sum()) if col_monto else 0.0
+
+st.metric("Total Adjudicado para esta Solicitud", f"$ {total_adjudicado:,.0f}".replace(",", "."))
+
+col_d1, col_d2 = st.columns(2)
+
+with col_d1:
+    # Descarga Excel
     output_excel = io.BytesIO()
     with pd.ExcelWriter(output_excel, engine='openpyxl') as writer:
-        df_edited.to_excel(writer, sheet_name='Cuadro Comparativo', index=False)
+        df_edited.to_excel(writer, sheet_name=f'Solicitud_{id_reporte}', index=False)
     
     st.download_button(
-        label="📥 Descargar Cuadro Comparativo Automatizado (Excel)",
+        label="📥 Descargar Reporte en Excel",
         data=output_excel.getvalue(),
-        file_name=f"Cuadro_Comparativo_Autogestion_{datetime.date.today().strftime('%Y%m%d')}.xlsx",
+        file_name=f"Reporte_Solicitud_{id_reporte}_{datetime.date.today().strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary"
+        type="primary",
+        use_container_width=True
     )
+
+with col_d2:
+    # Descarga PDF
+    if PDF_HABILITADO:
+        try:
+            pdf_bytes = exportar_reporte_pdf(id_reporte, comprador, comentarios_reporte, df_edited, total_adjudicado)
+            st.download_button(
+                label="📄 Descargar Reporte en PDF",
+                data=pdf_bytes,
+                file_name=f"Informe_Adjudicacion_{id_reporte}.pdf",
+                mime="application/pdf",
+                type="secondary",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.warning(f"No se pudo generar PDF: {e}")
+    else:
+        st.info("💡 Instala `fpdf` (`pip install fpdf`) para activar la descarga directa en PDF.")
