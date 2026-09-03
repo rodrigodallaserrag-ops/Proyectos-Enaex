@@ -101,7 +101,7 @@ with st.sidebar:
 
 st.title("🛒 Consola de Autogestión y Cuadro Comparativo Multi-SOLPED")
 
-**🔍 Carga Rápida de SOLPED (Escriba la ID y presione Ctrl + Enter)**
+st.markdown("**🔍 Carga Rápida de SOLPED (Escriba la ID y presione Ctrl + Enter)**")
 
 col_b1, col_b2 = st.columns([3, 1])
 with col_b1:
