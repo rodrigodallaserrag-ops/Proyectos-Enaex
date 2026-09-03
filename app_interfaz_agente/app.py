@@ -47,8 +47,51 @@ def obtener_indicadores_tiempo_real():
     return valores_defecto
 
 # =============================================================================
-# FUNCIONES AUXILIARES Y BÚSQUEDA ROBUSTA
+# FUNCIONES DE REPARACIÓN DE ENCABEZADOS Y BÚSQUEDA ROBUSTA
 # =============================================================================
+def reparar_encabezados(df):
+    """
+    Detecta si la planilla tiene columnas tipo 'Unnamed:' debido a filas de títulos
+    o celdas vacías al inicio, y promueve la fila correcta como encabezado real.
+    """
+    if df is None or df.empty:
+        return df
+
+    # Contar cuántas columnas tienen el nombre genérico 'Unnamed:'
+    unnamed_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
+
+    if len(unnamed_cols) > 0:
+        # Buscar en las primeras 10 filas la fila que contiene los nombres reales de las columnas
+        for idx in range(min(10, len(df))):
+            row = df.iloc[idx]
+            celdas_validas = [str(v).strip() for v in row if pd.notna(v) and str(v).strip().lower() not in ['nan', 'none', '']]
+            
+            # Si encontramos una fila con datos representativos
+            if len(celdas_validas) >= (len(df.columns) * 0.3):
+                # Asignar los nombres de esta fila como nuevos encabezados de columna
+                nuevas_columnas = []
+                for i, v in enumerate(row):
+                    v_str = str(v).strip()
+                    if pd.notna(v) and v_str != '' and not v_str.startswith("Unnamed:"):
+                        nuevas_columnas.append(v_str)
+                    else:
+                        nuevas_columnas.append(f"Columna_{i+1}")
+                
+                df.columns = nuevas_columnas
+                # Conservar solo los datos posteriores a la fila del encabezado
+                df = df.iloc[idx + 1:].reset_index(drop=True)
+                break
+
+    # Eliminar filas duplicadas que vuelvan a repetir los títulos del encabezado
+    if not df.empty:
+        primer_col = df.columns[0]
+        mask_repetida = df[primer_col].astype(str).str.lower().str.strip() == str(primer_col).lower().strip()
+        df = df[~mask_repetida].reset_index(drop=True)
+
+    # Limpiar espacios en los nombres de las columnas
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
 def extraer_materiales_de_masivo(df, id_solped):
     """
     Busca de manera flexible el ID SOLPED en la planilla masiva.
@@ -189,13 +232,18 @@ with st.sidebar:
                 dict_dfs = pd.read_excel(file_masivo, sheet_name=None, engine='openpyxl')
                 df_raw = pd.concat(dict_dfs.values(), ignore_index=True)
                 
-            # Limpieza de filas y columnas vacías + orden por completitud
-            df_clean = df_raw.dropna(axis=1, how='all').dropna(axis=0, how='all')
+            # 1. Reparar automáticamente encabezados que contengan 'Unnamed:'
+            df_reparado = reparar_encabezados(df_raw)
+            
+            # 2. Limpieza de filas y columnas totalmente vacías
+            df_clean = df_reparado.dropna(axis=1, how='all').dropna(axis=0, how='all')
+            
+            # 3. Ordenar por completitud (menos valores nulos primero)
             df_clean['cantidad_nulos'] = df_clean.isnull().sum(axis=1)
             df_clean = df_clean.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
             
             st.session_state.df_masivo = df_clean
-            st.success(f"Planilla cargada correctamente ({len(st.session_state.df_masivo)} filas)")
+            st.success(f"Planilla cargada y corregida correctamente ({len(st.session_state.df_masivo)} filas)")
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
 
@@ -204,7 +252,7 @@ with st.sidebar:
 # =============================================================================
 if st.session_state.df_masivo is not None:
     with st.expander("👀 Vista Previa de la Planilla Base Cargada", expanded=False):
-        st.write(f"Mostrando los datos del archivo cargado ({len(st.session_state.df_masivo)} registros en total):")
+        st.write(f"Mostrando los datos procesados sin encabesados 'Unnamed' ({len(st.session_state.df_masivo)} registros en total):")
         st.dataframe(st.session_state.df_masivo, use_container_width=True)
 
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
