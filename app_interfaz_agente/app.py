@@ -96,7 +96,7 @@ def extraer_materiales_de_masivo(df, id_solped):
             "Precio Unitario": clean_num(get_val(['precio', 'monto', 'val', 'costo', 'p.u', 'neto'], 0.0), 0.0),
             "Moneda": str(get_val(['moneda', 'curr', 'mon'], "CLP")).upper(),
             "Proveedor": str(get_val(['proveedor', 'vendor', 'prov', 'nam'], "")),
-            "Calendario de entrega": date.today(),  # Se guarda como tipo date
+            "Calendario de entrega": date.today(),
             "Observaciones": str(get_val(['obs', 'observacion', 'comentario'], ""))
         })
         
@@ -142,7 +142,8 @@ with st.sidebar:
     st.divider()
     
     st.header("📂 Carga de Archivo Base")
-    file_masivo = st.file_uploader("Cargar Planilla Maestro/SOLPEDs (Excel/CSV)", type=["xlsx", "xls", "csv"])
+    # Soporte para .xlsm habilitado en 'type'
+    file_masivo = st.file_uploader("Cargar Planilla Maestro/SOLPEDs (Excel/CSV)", type=["xlsx", "xls", "csv", "xlsm"])
     if file_masivo:
         try:
             if file_masivo.name.endswith(".csv"):
@@ -188,7 +189,6 @@ with tabs[0]:
         "Proveedor": "", "Calendario de entrega": date.today(), "Observaciones": ""
     }]))
 
-    # Homologación explícita de tipos de datos para evitar descalce en data_editor
     if not df_inicial.empty:
         df_inicial["Precio Unitario"] = pd.to_numeric(df_inicial["Precio Unitario"], errors='coerce').fillna(0.0)
         df_inicial["Cantidad"] = pd.to_numeric(df_inicial["Cantidad"], errors='coerce').fillna(1.0)
