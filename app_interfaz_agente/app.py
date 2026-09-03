@@ -1,15 +1,9 @@
 import datetime
 import io
-import re
 import pandas as pd
 import requests
 import streamlit as st
 import urllib3
-import plotly.express as px
-
-import openpyxl
-from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
 
 # Intentar importar FPDF para generación de PDF
 try:
@@ -58,9 +52,9 @@ def cargar_planilla_autogestion(file):
             excel_file = pd.ExcelFile(file_bytes, engine=engine)
             
             palabras_clave_fuertes = [
-                'solped', 'código', 'codigo', 'descripción', 'descripcion', 
+                'sp', 'solped', 'pr', 'código', 'codigo', 'descripción', 'descripcion', 
                 'cantidad', 'um', 'precio', 'proveedor', 'oferta', 
-                'incoterm', 'adjudicado', 'monto', 'lead time', 'material', 'posición'
+                'incoterm', 'adjudicado', 'monto', 'lead time', 'material', 'posición', 'texto breve'
             ]
             
             mejor_sheet, mejor_fila_idx, max_coincidencias = None, None, 0
@@ -77,9 +71,9 @@ def cargar_planilla_autogestion(file):
                 for idx in range(min(40, len(df_raw))):
                     row = df_raw.iloc[idx]
                     celdas_texto = [str(val).strip().lower() for val in row.values if pd.notna(val) and str(val).strip() != '']
-                    if len(celdas_texto) < 3:
+                    if len(celdas_texto) < 2:
                         continue
-                    coincidencias = sum(1 for kw in palabras_clave_fuertes if any(kw in celda for celda in celdas_texto))
+                    coincidencias = sum(1 for kw in palabras_clave_fuertes if any(kw == celda or kw in celda for celda in celdas_texto))
                     if coincidencias > max_coincidencias:
                         max_coincidencias = coincidencias
                         mejor_sheet = sheet_name
@@ -121,31 +115,23 @@ def cargar_planilla_autogestion(file):
 def generar_matriz_ejemplo():
     data = []
     materiales_demo = [
-        ("LIMPIA CONTACTOS 279 CHESTERTON.", "C/U", 72, 54500, "CLP", "PRINTEC S A"),
-        ("ACEITE HIDRAULICO ISO 68", "LTS", 500, 3200, "CLP", "LUBRICANTES CHILE"),
-        ("VALVULA DE BOLA 2 INCH ANSI 300", "C/U", 15, 180000, "CLP", "MCM CHILE"),
-        ("MANGUERA ALTA PRESION 1/2", "MTR", 120, 25000, "CLP", "PARKER"),
-        ("EMPADRON BASTIDOR SOPORTE", "C/U", 4, 450000, "CLP", "INDURA"),
+        ("DISCO RUPTURA GRAFITO 2`", "C/U", 72, 54500, "CLP", "PRINTEC S A"),
+        ("CONTADOR DIGITAL H", "C/U", 15, 180000, "CLP", "MCM CHILE"),
+        ("JUEGO PERILLEROS", "SET", 120, 25000, "CLP", "PARKER"),
+        ("JUEGO LLAVE ALLEN", "SET", 4, 450000, "CLP", "INDURA"),
     ]
     for i in range(1, 16):
         idx = (i - 1) % len(materiales_demo)
         desc, um, cant, precio, mon, prov = materiales_demo[idx]
-        solped_id = "1002610200" if i <= 8 else "1002610300"
+        sp_id = "PR176577" if i <= 8 else "PR172030"
         data.append({
-            "Pos": i * 10,
-            "Solped": solped_id,
-            "Código SAP": f"2000{6120 + i}",
-            "Descripción breve": f"{desc} #{i}",
+            "F. solicitud": "2026-07-27 16:07:00",
+            "Dias de tratamiento": 3,
+            "SP": sp_id,
+            "Material": f"2000{6120 + i}",
+            "Texto breve": f"{desc}",
             "Cantidad": cant,
             "UM": um,
-            "Última compra": "19-06-2025",
-            "Proveedor Histórico": prov,
-            "Último Precio [Unit]": precio,
-            "Moneda Hist.": mon,
-            "Oferta Inicial Moneda": precio * 1.05,
-            "Oferta Mejorada Moneda": precio * 0.95,
-            "Lead Time": "5 DIAS",
-            "Validación Técnica": True,
             "Proveedor Sugerido": prov,
             "Monto Adjudicado": int(cant * precio * 0.95),
         })
@@ -156,13 +142,12 @@ def exportar_reporte_pdf(id_solicitud, comprador, comentarios, df_data, total_mo
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, f"REPORTE DE ADJUDICACIÓN - SOLICITUD #{id_solicitud}", ln=True, align='C')
+    pdf.cell(0, 10, f"REPORTE DE ADJUDICACIÓN - SOLPED #{id_solicitud}", ln=True, align='C')
     
     pdf.set_font("Arial", '', 10)
     pdf.cell(0, 8, f"Fecha: {datetime.date.today().strftime('%d/%m/%Y')} | Comprador: {comprador}", ln=True, align='C')
     pdf.ln(5)
 
-    # Resumen Ejecutivo
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(0, 8, "1. Resumen de Adjudicación", ln=True)
     pdf.set_font("Arial", '', 10)
@@ -170,36 +155,34 @@ def exportar_reporte_pdf(id_solicitud, comprador, comentarios, df_data, total_mo
     pdf.cell(0, 6, f"Monto Total Adjudicado: CLP ${total_monto:,.0f}".replace(",", "."), ln=True)
     pdf.ln(4)
 
-    # Comentarios / Justificación
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(0, 8, "2. Observaciones y Justificación Técnica/Económica", ln=True)
     pdf.set_font("Arial", '', 10)
     pdf.multi_cell(0, 6, comentarios)
     pdf.ln(6)
 
-    # Detalle de Materiales (Tabla Resumida)
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(0, 8, "3. Detalle de Ítems Comparados", ln=True)
     pdf.set_font("Arial", 'B', 9)
-    pdf.cell(20, 7, "Pos", 1)
-    pdf.cell(75, 7, "Descripción", 1)
+    pdf.cell(30, 7, "SP / SOLPED", 1)
+    pdf.cell(70, 7, "Material / Descripción", 1)
     pdf.cell(20, 7, "Cant.", 1)
     pdf.cell(40, 7, "Proveedor", 1)
-    pdf.cell(35, 7, "Monto", 1, ln=True)
+    pdf.cell(30, 7, "Monto", 1, ln=True)
 
     pdf.set_font("Arial", '', 8)
     for _, row in df_data.iterrows():
-        pos = str(row.get("Pos", ""))
-        desc = str(row.get("Descripción breve", row.get("Descripción", "")))[:35]
+        sp = str(row.get("SP", row.get("Solped", "")))
+        desc = str(row.get("Texto breve", row.get("Descripción breve", "")))[:30]
         cant = str(row.get("Cantidad", ""))
         prov = str(row.get("Proveedor Sugerido", row.get("Proveedor Histórico", "")))[:20]
         monto = f"${float(row.get('Monto Adjudicado', 0)):,.0f}".replace(",", ".")
         
-        pdf.cell(20, 6, pos, 1)
-        pdf.cell(75, 6, desc, 1)
+        pdf.cell(30, 6, sp, 1)
+        pdf.cell(70, 6, desc, 1)
         pdf.cell(20, 6, cant, 1)
         pdf.cell(40, 6, prov, 1)
-        pdf.cell(35, 6, monto, 1, ln=True)
+        pdf.cell(30, 6, monto, 1, ln=True)
 
     return pdf.output(dest='S').encode('latin1')
 
@@ -219,7 +202,7 @@ with st.sidebar:
     st.caption(f"Estado API: {indicadores['estado']}")
 
 # -----------------------------------------------------------------------------
-# 4. PANEL DE CONTROL DE REPORTE E ID DE SOLICITUD
+# 4. PANEL DE CONTROL DE REPORTE E ID DE SOLICITUD (SOLPED / SP)
 # -----------------------------------------------------------------------------
 st.title("🛒 Cuadro Comparativo Multimaterial - Autogestión")
 
@@ -233,26 +216,33 @@ if "df_matriz" not in st.session_state:
 
 df_matriz = st.session_state["df_matriz"]
 
-# Búsqueda/Detección de ID Solicitud
-col_solped = [c for c in df_matriz.columns if 'solped' in str(c).lower() or 'id' in str(c).lower()]
-lista_ids = ["Todas las solicitudes"]
+# Búsqueda precisa de la columna SOLPED / SP
+col_solped = None
+for c in df_matriz.columns:
+    c_clean = str(c).strip().lower()
+    if c_clean in ['sp', 'solped', 'solicitud', 'pr'] or 'solped' in c_clean or 'sp' in c_clean:
+        col_solped = c
+        break
+
+lista_ids = ["Todas las solicitudes (SOLPED)"]
 if col_solped:
-    unicos = df_matriz[col_solped[0]].dropna().astype(str).unique().tolist()
+    unicos = [str(x) for x in df_matriz[col_solped].dropna().unique() if str(x).strip() != ""]
     lista_ids.extend(unicos)
 
-st.subheader("🆔 Control de ID de Solicitud y Filtros")
+st.subheader("🆔 Control de ID de Solicitud (SOLPED / SP) y Filtros")
 col_f1, col_f2, col_f3 = st.columns([2, 2, 2])
 
 with col_f1:
-    id_seleccionado = st.selectbox("Seleccionar ID Solicitud (SOLPED)", lista_ids)
+    id_seleccionado = st.selectbox("Seleccionar SP / SOLPED", lista_ids)
 with col_f2:
-    id_reporte = st.text_input("ID Personalizada para Reporte", value=id_seleccionado if id_seleccionado != "Todas las solicitudes" else "SOL-200")
+    val_defecto = id_seleccionado if id_seleccionado != "Todas las solicitudes (SOLPED)" else "SOLPED-CONSOLIDADA"
+    id_reporte = st.text_input("ID Personalizada para Reporte", value=val_defecto)
 with col_f3:
     comprador = st.text_input("Comprador / Evaluador", value="Felipe Martínez")
 
-# Filtrado dinámico
-if id_seleccionado != "Todas las solicitudes" and col_solped:
-    df_filtrado = df_matriz[df_matriz[col_solped[0]].astype(str) == id_seleccionado]
+# Filtrado por SP / SOLPED
+if id_seleccionado != "Todas las solicitudes (SOLPED)" and col_solped:
+    df_filtrado = df_matriz[df_matriz[col_solped].astype(str) == id_seleccionado]
 else:
     df_filtrado = df_matriz
 
@@ -282,39 +272,37 @@ comentarios_reporte = st.text_area(
 col_monto = [col for col in df_edited.columns if 'monto' in str(col).lower() or 'adjudicado' in str(col).lower()]
 total_adjudicado = float(pd.to_numeric(df_edited[col_monto[0]], errors='coerce').fillna(0).sum()) if col_monto else 0.0
 
-st.metric("Total Adjudicado para esta Solicitud", f"$ {total_adjudicado:,.0f}".replace(",", "."))
+st.metric(f"Total Adjudicado SOLPED ({id_reporte})", f"$ {total_adjudicado:,.0f}".replace(",", "."))
 
 col_d1, col_d2 = st.columns(2)
 
 with col_d1:
-    # Descarga Excel
     output_excel = io.BytesIO()
     with pd.ExcelWriter(output_excel, engine='openpyxl') as writer:
-        df_edited.to_excel(writer, sheet_name=f'Solicitud_{id_reporte}', index=False)
+        df_edited.to_excel(writer, sheet_name=f'SOLPED_{id_reporte}'[:31], index=False)
     
     st.download_button(
         label="📥 Descargar Reporte en Excel",
         data=output_excel.getvalue(),
-        file_name=f"Reporte_Solicitud_{id_reporte}_{datetime.date.today().strftime('%Y%m%d')}.xlsx",
+        file_name=f"Reporte_SOLPED_{id_reporte}_{datetime.date.today().strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary",
         use_container_width=True
     )
 
 with col_d2:
-    # Descarga PDF
     if PDF_HABILITADO:
         try:
             pdf_bytes = exportar_reporte_pdf(id_reporte, comprador, comentarios_reporte, df_edited, total_adjudicado)
             st.download_button(
                 label="📄 Descargar Reporte en PDF",
                 data=pdf_bytes,
-                file_name=f"Informe_Adjudicacion_{id_reporte}.pdf",
+                file_name=f"Informe_Adjudicacion_SOLPED_{id_reporte}.pdf",
                 mime="application/pdf",
                 type="secondary",
                 use_container_width=True
             )
         except Exception as e:
-            st.warning(f"No se pudo generar PDF: {e}")
+            st.warning(f"No se pudo generar el PDF: {e}")
     else:
-        st.info("💡 Instala `fpdf` (`pip install fpdf`) para activar la descarga directa en PDF.")
+        st.info("💡 Instala `fpdf` (`pip install fpdf`) para exportación directa a PDF.")
