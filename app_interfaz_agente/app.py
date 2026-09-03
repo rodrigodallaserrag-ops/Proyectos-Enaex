@@ -57,14 +57,15 @@ def procesar_y_reparar_planilla(df):
     if df is None or df.empty:
         return df
 
-    # 1. Escáner agresivo de encabezados
-    # Buscamos en las primeras 20 filas palabras clave típicas de los reportes SAP/Enaex
+    # 1. Escáner agresivo de encabezados (Corregido para tolerar celdas NaN/Float)
     palabras_clave = ['sp', 'solped', 'material', 'pos', 'texto breve', 'centro', 'cantidad']
     header_idx = -1
     
     for idx in range(min(20, len(df))):
-        row_values = df.iloc[idx].astype(str).str.lower().tolist()
+        # Convertir explícitamente cada valor a string antes de analizarlo para evitar TypeError
+        row_values = [str(val).lower() for val in df.iloc[idx]]
         matches = sum(1 for val in row_values for kw in palabras_clave if kw in val)
+        
         # Si la fila tiene al menos 2 palabras clave, asumimos que es el encabezado real
         if matches >= 2:
             header_idx = idx
@@ -88,12 +89,12 @@ def procesar_y_reparar_planilla(df):
         # Recortar el dataframe para que empiece en la fila de datos reales
         df = df.iloc[header_idx + 1:].reset_index(drop=True)
         
-        # Eliminar las filas "espejo" (ej. cuando la fila 1 repite exactamente el encabezado de la 0)
+        # Eliminar las filas "espejo"
         if not df.empty:
             primer_col = df.columns[0]
             df = df[df[primer_col].astype(str).str.strip() != str(primer_col).strip()].reset_index(drop=True)
 
-    # 2. Mapeo explícito residual (por si acaso quedan algunas por defecto sin nombre)
+    # 2. Mapeo explícito residual
     mapeo_columnas = {
         'Unnamed: 6': 'UM', 'Unnamed: 7': 'Solicitante', 'Unnamed: 8': 'Centro',
         'Unnamed: 9': 'Tipo de posición', 'Unnamed: 10': 'G. compras', 'Unnamed: 11': 'Mod. el',
@@ -102,7 +103,7 @@ def procesar_y_reparar_planilla(df):
     }
     df = df.rename(columns={k: v for k, v in mapeo_columnas.items() if k in df.columns})
 
-    # 3. Deduplicar nombres de columnas (Evita el error de PyArrow)
+    # 3. Deduplicar nombres de columnas
     vistos = {}
     columnas_deduplicadas = []
     for c in df.columns:
@@ -119,20 +120,17 @@ def procesar_y_reparar_planilla(df):
     cols = list(df.columns)
     id_col = None
     
-    # Priorizar búsqueda exacta primero
     for c in cols:
-        if c.lower() in ['sp', 'solped', 'solicitud']:
+        if str(c).lower() in ['sp', 'solped', 'solicitud']:
             id_col = c
             break
             
-    # Búsqueda parcial como plan B
     if not id_col:
         for c in cols:
-            if any(kw in c.lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'pedido']):
+            if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'pedido']):
                 id_col = c
                 break
                 
-    # Mover al principio
     if id_col and id_col in cols:
         cols.remove(id_col)
         cols.insert(0, id_col)
