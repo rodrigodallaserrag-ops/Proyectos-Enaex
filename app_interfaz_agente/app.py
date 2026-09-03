@@ -169,7 +169,7 @@ with tabs[0]:
         st.write("")
         btn_extraer = st.button("📤 Extraer Materiales", type="primary", use_container_width=True)
 
-    if btn_extraer or solped_id:
+    if (btn_extraer or solped_id) and solped_id.strip():
         if st.session_state.df_masivo is not None:
             materiales = extraer_materiales_de_masivo(st.session_state.df_masivo, solped_id)
             if materiales:
@@ -180,7 +180,8 @@ with tabs[0]:
         else:
             st.info("Carga una planilla maestra en el menú lateral para realizar la búsqueda automática por SOLPED.")
 
-    key_editor = f"editor_{solped_id}" if solped_id in st.session_state else "editor_default"
+    # Corrección de validación de clave en session_state
+    key_editor = f"editor_{solped_id}" if (solped_id and f"editor_{solped_id}" in st.session_state) else "editor_default"
     
     df_inicial = st.session_state.get(key_editor, pd.DataFrame([{
         "Pos": 1, "Material": "(Material)", "Centro": "(Centro)", "Cantidad": 1.0, 
@@ -224,7 +225,6 @@ with tabs[1]:
         st.write("")
         btn_cargar_manual = st.button("📥 Cargar Requerimiento", use_container_width=True)
 
-    # Carga rápida si se solicita
     if btn_cargar_manual and manual_solped:
         if st.session_state.df_masivo is not None:
             mats = extraer_materiales_de_masivo(st.session_state.df_masivo, manual_solped)
