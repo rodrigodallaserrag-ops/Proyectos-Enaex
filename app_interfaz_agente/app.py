@@ -108,7 +108,6 @@ def vincular_cotizaciones_excel(df_proveedores, solped_id, solped_info, indicado
     df_p = df_proveedores.copy()
     df_p.columns = [str(c).strip().upper() for c in df_p.columns]
 
-    # Identificar columna SOLPED/ID
     col_solped = next((c for c in df_p.columns if any(k in c for k in ["SOLPED", "ID", "REQ", "NUMERO"])), None)
     if not col_solped:
         return []
@@ -122,7 +121,6 @@ def vincular_cotizaciones_excel(df_proveedores, solped_id, solped_info, indicado
     uf_actual = indicadores["uf"]
     ult_compra = solped_info.get("ULTIMA_COMPRA_MONTO", 0)
 
-    # Identificación flexible de columnas
     col_prov = next((c for c in df_p.columns if any(k in c for k in ["PROV", "NOMBRE", "VENDOR", "EMPRESA"])), "PROVEEDOR")
     col_monto = next((c for c in df_p.columns if any(k in c for k in ["MONTO", "PRECIO", "VALOR", "OFERTA"])), "MONTO")
     col_moneda = next((c for c in df_p.columns if any(k in c for k in ["MONEDA", "CURRENCY"])), "MONEDA")
@@ -166,7 +164,7 @@ def vincular_cotizaciones_excel(df_proveedores, solped_id, solped_info, indicado
 
     return cotizaciones_mapeadas
 
-# Formatters y Generadores de PDF/Excel
+# Formatters y Generadores
 indicadores_cache = obtener_indicadores_financieros()
 indicadores = dict(indicadores_cache)
 
@@ -224,41 +222,141 @@ def generar_pdf_ejecutivo(solped_info, cotizaciones, datos_indicadores):
     buffer.seek(0)
     return buffer.getvalue()
 
+# -----------------------------------------------------------------------------
+# GENERADOR DE EXCEL CON FORMATO CORPORATIVO EXACTO (IDÉNTICO A LA IMAGEN)
+# -----------------------------------------------------------------------------
 def generar_excel_estilizado(df, solped_info, datos_indicadores):
     output = io.BytesIO()
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Cuadro Comparativo"
-    navy_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
-    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-    bold_font = Font(name="Calibri", size=10, bold=True)
-    regular_font = Font(name="Calibri", size=10)
-    green_fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
-    thin_border = Border(left=Side(style='thin', color='CBD5E1'), right=Side(style='thin', color='CBD5E1'), top=Side(style='thin', color='CBD5E1'), bottom=Side(style='thin', color='CBD5E1'))
+    ws.views.sheetView[0].showGridLines = True
 
-    ws.cell(row=1, column=1, value="ENAEX — Consola de Compras").font = Font(name="Calibri", size=15, bold=True, color="0F172A")
-    headers = ["POS", "Proveedor", "Monto Original", "Moneda", "Equiv. CLP ($)", "Equiv. USD ($)", "Var. % Hist.", "Fecha Entrega", "Observaciones"]
-    for c_idx, h in enumerate(headers, start=1):
-        cell = ws.cell(row=4, column=c_idx, value=h)
+    # Estilos de colores y fuentes
+    navy_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    meta_fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+    green_fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
+    
+    title_font = Font(name="Calibri", size=16, bold=True, color="0F172A")
+    subtitle_font = Font(name="Calibri", size=11, italic=True, color="475569")
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    meta_font = Font(name="Calibri", size=10, bold=True, color="0F172A")
+    regular_font = Font(name="Calibri", size=10)
+    bold_font = Font(name="Calibri", size=10, bold=True)
+    
+    thin_border = Border(
+        left=Side(style='thin', color='CBD5E1'),
+        right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'),
+        bottom=Side(style='thin', color='CBD5E1')
+    )
+
+    # Fila 1: Título principal
+    ws.cell(row=1, column=1, value="ENAEX — Consola de Compras").font = title_font
+
+    # Fila 2: Subtítulo
+    ws.cell(row=2, column=1, value=f"Cuadro Comparativo de Cotizaciones — Solped N° {solped_info['SOLPED']}").font = subtitle_font
+
+    # Filas 4 y 5: Bloque de Metadatos
+    fecha_str = datetime.date.today().strftime('%d-%m-%Y')
+    dolar_val = datos_indicadores.get('dolar', 0)
+    uf_val = datos_indicadores.get('uf', 0)
+
+    for r in range(4, 6):
+        for c in range(1, 8):
+            cell = ws.cell(row=r, column=c)
+            cell.fill = meta_fill
+            cell.border = thin_border
+            cell.font = regular_font
+
+    ws.cell(row=4, column=1, value=f"N° Solped: {solped_info['SOLPED']}").font = meta_font
+    ws.cell(row=4, column=3, value=f"Código Material: {solped_info['CODIGO_SAP']}").font = meta_font
+    ws.cell(row=4, column=5, value=f"Sociedad: {solped_info['SOCIEDAD']}").font = meta_font
+
+    ws.cell(row=5, column=1, value=f"Fecha Emisión: {fecha_str}").font = meta_font
+    ws.cell(row=5, column=3, value=f"Dólar Ref.: ${dolar_val:,.2f}").font = meta_font
+    ws.cell(row=5, column=5, value=f"UF Ref.: ${uf_val:,.2f}").font = meta_font
+
+    # Fila 7: Encabezados de Tabla
+    headers = [
+        "Proveedor", 
+        "Monto Original", 
+        "Moneda", 
+        "Equiv. CLP ($)", 
+        "Equiv. USD ($)", 
+        "Fecha de Entrega", 
+        "Observaciones"
+    ]
+    
+    for col_idx, header_text in enumerate(headers, start=1):
+        cell = ws.cell(row=7, column=col_idx, value=header_text)
         cell.fill = navy_fill
         cell.font = header_font
+        cell.border = thin_border
+        
+        if header_text in ["Monto Original", "Equiv. CLP ($)", "Equiv. USD ($)"]:
+            cell.alignment = Alignment(horizontal="right", vertical="center")
+        elif header_text in ["Moneda", "Fecha de Entrega"]:
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        else:
+            cell.alignment = Alignment(horizontal="left", vertical="center")
 
+    # Filas de Datos (Fila 8 en adelante)
     min_clp = df["Equiv. CLP ($)"].min() if not df.empty else 0
-    for r_offset, (_, row) in enumerate(df.iterrows()):
-        r = 5 + r_offset
+
+    for r_idx, (_, row) in enumerate(df.iterrows(), start=8):
         is_best = (len(df) > 1 and row["Equiv. CLP ($)"] == min_clp)
-        vals = [solped_info["POS"], row["Proveedor"], row["Monto Original"], row["Moneda"], row["Equiv. CLP ($)"], row["Equiv. USD ($)"], f"{row.get('Var % vs Hist', 0):+.1f}%", row["Fecha de Entrega"], row.get("Observaciones", "")]
-        for c_i, v in enumerate(vals, start=1):
-            cell = ws.cell(row=r, column=c_i, value=v)
+        
+        prov_text = str(row["Proveedor"])
+        if is_best:
+            prov_text += " ★ (Mejor Oferta)"
+
+        c_prov = ws.cell(row=r_idx, column=1, value=prov_text)
+        c_monto = ws.cell(row=r_idx, column=2, value=row["Monto Original"])
+        c_moneda = ws.cell(row=r_idx, column=3, value=row["Moneda"])
+        c_clp = ws.cell(row=r_idx, column=4, value=row["Equiv. CLP ($)"])
+        c_usd = ws.cell(row=r_idx, column=5, value=row["Equiv. USD ($)"])
+        c_fecha = ws.cell(row=r_idx, column=6, value=str(row["Fecha de Entrega"]))
+        c_obs = ws.cell(row=r_idx, column=7, value=str(row.get("Observaciones", "")))
+
+        # Formatos numéricos corporativos estilo Chile
+        c_monto.number_format = '"$" #,##0.00' if row["Moneda"] in ["USD", "EUR", "UF"] else '"$" #,##0'
+        c_clp.number_format = '"$" #,##0'
+        c_usd.number_format = '"$" #,##0.00'
+
+        # Alineación de contenido
+        c_prov.alignment = Alignment(horizontal="left", vertical="center")
+        c_monto.alignment = Alignment(horizontal="right", vertical="center")
+        c_moneda.alignment = Alignment(horizontal="center", vertical="center")
+        c_clp.alignment = Alignment(horizontal="right", vertical="center")
+        c_usd.alignment = Alignment(horizontal="right", vertical="center")
+        c_fecha.alignment = Alignment(horizontal="center", vertical="center")
+        c_obs.alignment = Alignment(horizontal="left", vertical="center")
+
+        # Aplicación de bordes y resaltado de mejor oferta
+        for cell in [c_prov, c_monto, c_moneda, c_clp, c_usd, c_fecha, c_obs]:
             cell.font = bold_font if is_best else regular_font
-            if is_best: cell.fill = green_fill
             cell.border = thin_border
+            if is_best:
+                cell.fill = green_fill
+
+    # Ajuste automático del ancho de las columnas
+    for col in ws.columns:
+        max_len = 0
+        col_letter = get_column_letter(col[0].column)
+        for cell in col:
+            if cell.row < 4:
+                continue
+            val_str = str(cell.value or '')
+            if len(val_str) > max_len:
+                max_len = len(val_str)
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 15)
 
     wb.save(output)
     return output.getvalue()
 
 # -----------------------------------------------------------------------------
-# 4. INICIALIZACIÓN DE ESTADO Y SIDEBAR INTEGRA CON SHAREPOINT + EXCEL PROVEEDORES
+# 4. INICIALIZACIÓN DE ESTADO Y SIDEBAR
 # -----------------------------------------------------------------------------
 if "cotizaciones" not in st.session_state: st.session_state["cotizaciones"] = []
 if "monto_input" not in st.session_state: st.session_state["monto_input"] = ""
@@ -275,7 +373,6 @@ with st.sidebar:
     st.caption(f"Estado SharePoint: **{estado_sp}**")
 
     st.divider()
-    # NUEVO MÓDULO: CARGAR EXCEL DE PROVEEDORES
     st.header("📂 Cargar Excel de Proveedores")
     uploaded_prov = st.file_uploader("Adjuntar Excel/CSV Cotizaciones", type=["xlsx", "xls", "csv"], key="excel_prov")
     df_prov_excel = None
@@ -313,7 +410,6 @@ with st.sidebar:
             "ULTIMA_COMPRA_MONEDA": "CLP", "PROVEEDOR_HISTORICO": st.text_input("Prov. Histórico", value="PROVEEDOR BASE")
         }
 
-    # BINDING AUTOMÁTICO DESDE EXCEL DE PROVEEDORES
     if df_prov_excel is not None:
         ofertas_auto = vincular_cotizaciones_excel(df_prov_excel, solped_ingresada, solped_info, indicadores)
         if ofertas_auto:
