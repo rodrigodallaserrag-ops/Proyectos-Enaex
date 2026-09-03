@@ -47,55 +47,79 @@ def obtener_indicadores_tiempo_real():
     return valores_defecto
 
 # =============================================================================
-# FUNCIONES DE REPARACIÓN DE ENCABEZADOS Y BÚSQUEDA ROBUSTA
+# FUNCIONES AUXILIARES Y BÚSQUEDA ROBUSTA
 # =============================================================================
-def reparar_encabezados(df):
+def procesar_y_reparar_planilla(df):
     """
-    Detecta si la planilla tiene columnas tipo 'Unnamed:' debido a filas de títulos
-    o celdas vacías al inicio, y promueve la fila correcta como encabezado real.
+    Renombra las columnas 'Unnamed' explícitamente, promueve encabezados si es necesario, 
+    y mueve la columna de ID (SOLPED/Solicitud) al principio del DataFrame.
     """
     if df is None or df.empty:
         return df
 
-    # Contar cuántas columnas tienen el nombre genérico 'Unnamed:'
-    unnamed_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
+    # 1. Mapeo explícito basado en las imágenes de referencia
+    mapeo_columnas = {
+        'Unnamed: 6': 'UM',
+        'Unnamed: 7': 'Solicitante',
+        'Unnamed: 8': 'Centro',
+        'Unnamed: 9': 'Tipo de posición',
+        'Unnamed: 10': 'G. compras',
+        'Unnamed: 11': 'Mod. el',
+        'Unnamed: 12': 'Urgencia',
+        'Unnamed: 13': 'NS',
+        'Unnamed: 14': 'Contrato marco',
+        'Unnamed: 15': 'Observación',
+        'Unnamed: 16': 'Responsable',
+        'Unnamed: 41': 'Total general'
+    }
+    df = df.rename(columns=mapeo_columnas)
 
+    # 2. Intentar promover la fila de encabezados real si aún quedan muchas "Unnamed"
+    unnamed_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
     if len(unnamed_cols) > 0:
-        # Buscar en las primeras 10 filas la fila que contiene los nombres reales de las columnas
         for idx in range(min(10, len(df))):
             row = df.iloc[idx]
             celdas_validas = [str(v).strip() for v in row if pd.notna(v) and str(v).strip().lower() not in ['nan', 'none', '']]
             
-            # Si encontramos una fila con datos representativos
             if len(celdas_validas) >= (len(df.columns) * 0.3):
-                # Asignar los nombres de esta fila como nuevos encabezados de columna
                 nuevas_columnas = []
                 for i, v in enumerate(row):
                     v_str = str(v).strip()
                     if pd.notna(v) and v_str != '' and not v_str.startswith("Unnamed:"):
                         nuevas_columnas.append(v_str)
                     else:
-                        nuevas_columnas.append(f"Columna_{i+1}")
+                        nuevas_columnas.append(df.columns[i]) # Mantener el nombre ya mapeado
                 
                 df.columns = nuevas_columnas
-                # Conservar solo los datos posteriores a la fila del encabezado
                 df = df.iloc[idx + 1:].reset_index(drop=True)
                 break
 
-    # Eliminar filas duplicadas que vuelvan a repetir los títulos del encabezado
+    # 3. Eliminar filas duplicadas (ej. la fila que se usó como encabezado)
     if not df.empty:
         primer_col = df.columns[0]
         mask_repetida = df[primer_col].astype(str).str.lower().str.strip() == str(primer_col).lower().strip()
         df = df[~mask_repetida].reset_index(drop=True)
 
-    # Limpiar espacios en los nombres de las columnas
     df.columns = [str(c).strip() for c in df.columns]
+
+    # 4. Encontrar la columna de ID (SOLPED) y moverla al principio
+    cols = list(df.columns)
+    id_col = None
+    for c in cols:
+        if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'pedido']):
+            id_col = c
+            break
+            
+    if id_col and id_col in cols:
+        cols.remove(id_col)
+        cols.insert(0, id_col)
+        df = df[cols]
+
     return df
 
 def extraer_materiales_de_masivo(df, id_solped):
     """
     Busca de manera flexible el ID SOLPED en la planilla masiva.
-    Soporta prefijos como PR175798, SP175798 o búsquedas puramente numéricas 175798.
     """
     if df is None or df.empty:
         return []
@@ -106,7 +130,6 @@ def extraer_materiales_de_masivo(df, id_solped):
         
     digits_search = re.sub(r'\D', '', raw_search)
     
-    # Columnas candidatas a ser la SOLPED
     sp_cols = [c for c in df.columns if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'doc', 'pedido', 'compra'])]
     if not sp_cols:
         sp_cols = list(df.columns)
@@ -115,16 +138,12 @@ def extraer_materiales_de_masivo(df, id_solped):
     
     for col in sp_cols:
         col_str = df[col].astype(str).str.strip()
-        
-        # 1. Coincidencia exacta
         mask = col_str.str.lower() == raw_search.lower()
         
-        # 2. Coincidencia por dígitos (e.g. PR175798 -> 175798)
         if not mask.any() and digits_search:
             col_digits = col_str.apply(lambda x: re.sub(r'\D', '', str(x)))
             mask = col_digits == digits_search
             
-        # 3. Coincidencia parcial si las anteriores fallan
         if not mask.any():
             mask = col_str.str.lower().str.contains(raw_search.lower(), regex=False)
 
@@ -202,7 +221,6 @@ st.markdown("<div class='main-header'>⚡ Sistema Integrado de Evaluación de Of
 with st.sidebar:
     st.header("⚙️ Parámetros de Cambio")
     
-    # Cargar indicadores en tiempo real
     indicadores = obtener_indicadores_tiempo_real()
     
     if indicadores["estado"]:
@@ -232,18 +250,18 @@ with st.sidebar:
                 dict_dfs = pd.read_excel(file_masivo, sheet_name=None, engine='openpyxl')
                 df_raw = pd.concat(dict_dfs.values(), ignore_index=True)
                 
-            # 1. Reparar automáticamente encabezados que contengan 'Unnamed:'
-            df_reparado = reparar_encabezados(df_raw)
+            # Limpieza inicial
+            df_clean = df_raw.dropna(axis=1, how='all').dropna(axis=0, how='all')
             
-            # 2. Limpieza de filas y columnas totalmente vacías
-            df_clean = df_reparado.dropna(axis=1, how='all').dropna(axis=0, how='all')
+            # Aplicar la nueva función de mapeo y ordenamiento
+            df_procesado = procesar_y_reparar_planilla(df_clean)
             
-            # 3. Ordenar por completitud (menos valores nulos primero)
-            df_clean['cantidad_nulos'] = df_clean.isnull().sum(axis=1)
-            df_clean = df_clean.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
+            # Ordenar por completitud (opcional, para visualización limpia)
+            df_procesado['cantidad_nulos'] = df_procesado.isnull().sum(axis=1)
+            df_procesado = df_procesado.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
             
-            st.session_state.df_masivo = df_clean
-            st.success(f"Planilla cargada y corregida correctamente ({len(st.session_state.df_masivo)} filas)")
+            st.session_state.df_masivo = df_procesado
+            st.success(f"Planilla cargada y mapeada correctamente ({len(st.session_state.df_masivo)} filas)")
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
 
@@ -252,7 +270,7 @@ with st.sidebar:
 # =============================================================================
 if st.session_state.df_masivo is not None:
     with st.expander("👀 Vista Previa de la Planilla Base Cargada", expanded=False):
-        st.write(f"Mostrando los datos procesados sin encabesados 'Unnamed' ({len(st.session_state.df_masivo)} registros en total):")
+        st.write(f"Mostrando los datos procesados con columnas corregidas e ID al inicio ({len(st.session_state.df_masivo)} registros en total):")
         st.dataframe(st.session_state.df_masivo, use_container_width=True)
 
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
