@@ -50,6 +50,10 @@ def obtener_indicadores_tiempo_real():
 # FUNCIONES AUXILIARES Y BÚSQUEDA ROBUSTA
 # =============================================================================
 def procesar_y_reparar_planilla(df):
+    """
+    Busca la fila real de encabezados mediante palabras clave, la promueve, 
+    deduplica columnas y asegura que la ID (SP/SOLPED) quede al inicio.
+    """
     if df is None or df.empty:
         return df
 
@@ -126,6 +130,9 @@ def procesar_y_reparar_planilla(df):
     return df
 
 def extraer_materiales_de_masivo(df, id_solped):
+    """
+    Busca de manera flexible el ID SOLPED en la planilla masiva.
+    """
     if df is None or df.empty:
         return []
         
@@ -192,7 +199,7 @@ def extraer_materiales_de_masivo(df, id_solped):
     return posiciones
 
 def convertir_moneda(monto, moneda_origen, tc_usd, tc_uf, tc_eur):
-    """Calcula la equivalencia en las tres monedas principales"""
+    """Calcula importes equivalentes en CLP, USD y EUR"""
     monto = float(monto or 0.0)
     moneda_origen = str(moneda_origen).upper()
     
@@ -293,13 +300,114 @@ with tabs[0]:
 
     if (btn_extraer or solped_id) and solped_id.strip():
         if st.session_state.df_masivo is not None:
-            materiales = extraer_materiales_de_masivo(st.session_state.df_masivoPara implementar un selector que cambie dinámicamente la moneda en la que se visualizan los montos totales, la mejor opción es modificar la pestaña del **Cuadro Comparativo Integrado** (Tab 3). 
+            materiales = extraer_materiales_de_masivo(st.session_state.df_masivo, solped_id)
+            if materiales:
+                st.session_state[f"editor_{solped_id}"] = pd.DataFrame(materiales)
+                st.success(f"Se encontraron {len(materiales)} posiciones para la SOLPED **{solped_id}**")
+            else:
+                st.warning(f"No se encontraron registros para la SOLPED '{solped_id}'. Verifica si fue cargada en el panel lateral.")
+        else:
+            st.info("Carga una planilla maestra en el menú lateral para realizar la búsqueda automática por SOLPED.")
 
-Dado que el archivo app (17).py ya calcula y almacena el `Total CLP` y cuenta con las variables de conversión en tiempo real (`tc_usd`, `tc_eur`, `tc_uf`)[cite: 1], puedes usar un `st.radio` para aplicar el tipo de cambio al vuelo sobre la tabla y las métricas.
+    key_editor = f"editor_{solped_id}" if (solped_id and f"editor_{solped_id}" in st.session_state) else "editor_default"
+    
+    df_inicial = st.session_state.get(key_editor, pd.DataFrame([{
+        "Pos": 1, "Material": "(Material)", "Centro": "(Centro)", "Cantidad": 1.0, 
+        "UM": "C/U", "Precio Unitario": 0.0, "Moneda": "CLP", 
+        "Proveedor": "", "Calendario de entrega": date.today(), "Observaciones": ""
+    }]))
 
-Reemplaza todo el bloque de código de tu **TAB 3** con la siguiente versión:
+    if not df_inicial.empty:
+        df_inicial["Precio Unitario"] = pd.to_numeric(df_inicial["Precio Unitario"], errors='coerce').fillna(0.0)
+        df_inicial["Cantidad"] = pd.to_numeric(df_inicial["Cantidad"], errors='coerce').fillna(1.0)
+        df_inicial["Calendario de entrega"] = pd.to_datetime(df_inicial["Calendario de entrega"]).dt.date
 
-```python
+    edited_df = st.data_editor(
+        df_inicial,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Pos": st.column_config.NumberColumn("Pos", disabled=True),
+            "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
+            "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
+            "Calendario de entrega": st.column_config.DateColumn("Fecha Entrega")
+        }
+    )
+
+    if st.button("💾 Guardar Oferta de SOLPED en Comparativo", type="primary"):
+        registros = edited_df.to_dict('records')
+        for r in registros:
+            clp, usd, eur = convertir_moneda(r["Precio Unitario"] * r["Cantidad"], r["Moneda"], tc_usd, tc_uf, tc_eur)
+            r["SOLPED"] = solped_id if solped_id else "N/A"
+            r["Total CLP"] = clp
+            r["Total USD"] = usd
+            r["Total EUR"] = eur
+            st.session_state.ofertas_manuales.append(r)
+        st.success("¡Oferta guardada exitosamente en el Cuadro Comparativo!")
+
+# =============================================================================
+# TAB 2: CARGA MANUAL INTEGRA / EDICIÓN DIRECTA POR SOLPED
+# =============================================================================
+with tabs[1]:
+    st.subheader("➕ Carga Manual de Oferta Paso a Paso")
+    
+    col_s1, col_s2 = st.columns([3, 1])
+    with col_s1:
+        manual_solped = st.text_input("Ingresar N° SOLPED para Autocompletar:", placeholder="Ej: PR175798")
+    with col_s2:
+        st.write("")
+        st.write("")
+        btn_cargar_manual = st.button("📥 Cargar Requerimiento", use_container_width=True)
+
+    if btn_cargar_manual and manual_solped:
+        if st.session_state.df_masivo is not None:
+            mats = extraer_materiales_de_masivo(st.session_state.df_masivo, manual_solped)
+            if mats:
+                st.session_state["manual_grid_df"] = pd.DataFrame(mats)
+                st.success(f"Materiales cargados automáticamente desde la SOLPED {manual_solped}")
+            else:
+                st.warning(f"No se encontró la SOLPED {manual_solped} en el archivo base.")
+        else:
+            st.info("Sube una planilla en la barra lateral para autocompletar posiciones por SOLPED.")
+
+    if "manual_grid_df" not in st.session_state:
+        st.session_state["manual_grid_df"] = pd.DataFrame([{
+            "Pos": 1, "Material": "Ítem Manual", "Cantidad": 1.0, "UM": "C/U",
+            "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", 
+            "Calendario de entrega": date.today(), "Observaciones": ""
+        }])
+
+    df_manual = st.session_state["manual_grid_df"]
+    if not df_manual.empty:
+        df_manual["Precio Unitario"] = pd.to_numeric(df_manual["Precio Unitario"], errors='coerce').fillna(0.0)
+        df_manual["Cantidad"] = pd.to_numeric(df_manual["Cantidad"], errors='coerce').fillna(1.0)
+        df_manual["Calendario de entrega"] = pd.to_datetime(df_manual["Calendario de entrega"]).dt.date
+
+    st.write("### Tabla de Cotización de Proveedor")
+    
+    cotizacion_df = st.data_editor(
+        df_manual,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="cotizacion_manual_editor",
+        column_config={
+            "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
+            "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
+            "Calendario de entrega": st.column_config.DateColumn("Calendario de entrega")
+        }
+    )
+
+    if st.button("💾 Guardar Cotización Manual Completa", type="primary"):
+        items = cotizacion_df.to_dict('records')
+        for item in items:
+            clp, usd, eur = convertir_moneda(item["Precio Unitario"] * item["Cantidad"], item["Moneda"], tc_usd, tc_uf, tc_eur)
+            item["SOLPED"] = manual_solped if manual_solped else "MANUAL"
+            item["Total CLP"] = clp
+            item["Total USD"] = usd
+            item["Total EUR"] = eur
+            st.session_state.ofertas_manuales.append(item)
+        st.success("¡Cotización agregada al Cuadro Comparativo!")
+
 # =============================================================================
 # TAB 3: CUADRO COMPARATIVO INTEGRADO
 # =============================================================================
@@ -309,54 +417,55 @@ with tabs[2]:
     if st.session_state.ofertas_manuales:
         df_comp = pd.DataFrame(st.session_state.ofertas_manuales)
         
-        # 1. Selector de moneda para la visualización
+        # Selector de Moneda de Visualización
         moneda_vista = st.radio(
-            "💱 Mostrar valores convertidos en:", 
-            options=["CLP", "USD", "EUR", "UF"], 
+            "💱 Seleccionar Moneda de Visualización:", 
+            options=["CLP", "USD", "EUR"], 
             horizontal=True
         )
         
-        # 2. Copia del dataframe para no alterar los datos base
-        df_vista = df_comp.copy()
-        
-        # 3. Conversión dinámica basada en el Total CLP y los parámetros de la barra lateral
+        # Asignar la columna total dinámica según la moneda seleccionada
         if moneda_vista == "CLP":
-            df_vista["Total Visualizado"] = df_vista["Total CLP"]
+            df_comp["Monto Total Visualizado"] = df_comp["Total CLP"]
         elif moneda_vista == "USD":
-            df_vista["Total Visualizado"] = df_vista["Total CLP"] / tc_usd
+            df_comp["Monto Total Visualizado"] = df_comp["Total USD"]
         elif moneda_vista == "EUR":
-            df_vista["Total Visualizado"] = df_vista["Total CLP"] / tc_eur
-        elif moneda_vista == "UF":
-            df_vista["Total Visualizado"] = df_vista["Total CLP"] / tc_uf
-            
-        # Opcional: Dar formato visual a la nueva columna
-        df_vista["Total Visualizado"] = df_vista["Total Visualizado"].apply(lambda x: f"{x:,.2f} {moneda_vista}")
+            df_comp["Monto Total Visualizado"] = df_comp["Total EUR"]
+
+        # Calcular días restantes de entrega
+        df_comp['Calendario de entrega'] = pd.to_datetime(df_comp['Calendario de entrega'])
+        hoy = pd.Timestamp(date.today())
+        df_comp['Días para Entrega'] = (df_comp['Calendario de entrega'] - hoy).dt.days
+        df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: x if x > 0 else 0)
         
-        # Reordenar columnas para que el Total Visualizado destaque (al final)
-        cols = list(df_vista.columns)
-        cols.append(cols.pop(cols.index("Total Visualizado")))
-        df_vista = df_vista[cols]
+        df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace("", "Sin Especificar")
+
+        # Mostrar tabla comparativa
+        st.dataframe(df_comp, use_container_width=True)
         
-        st.dataframe(df_vista, use_container_width=True)
-        
-        # 4. Actualización dinámica de las métricas inferiores
         col_c1, col_c2 = st.columns(2)
         with col_c1:
-            st.metric("Total Ofertas Registradas", len(df_vista))
+            st.metric("Total Ofertas Registradas", len(df_comp))
         with col_c2:
-            total_base_clp = df_comp['Total CLP'].sum()
+            monto_acumulado = df_comp["Monto Total Visualizado"].sum()
+            st.metric(f"Monto Total Acumulado ({moneda_vista})", f"$ {monto_acumulado:,.2f}")
             
-            if moneda_vista == "CLP":
-                monto_final = total_base_clp
-            elif moneda_vista == "USD":
-                monto_final = total_base_clp / tc_usd
-            elif moneda_vista == "EUR":
-                monto_final = total_base_clp / tc_eur
-            elif moneda_vista == "UF":
-                monto_final = total_base_clp / tc_uf
-                
-            st.metric(f"Monto Total Acumulado ({moneda_vista})", f"{monto_final:,.2f}")
+        st.divider()
+        st.subheader("📈 Gráficos Comparativos")
+        
+        col_graf1, col_graf2 = st.columns(2)
+        
+        with col_graf1:
+            st.markdown(f"**💰 Monto Total por Proveedor ({moneda_vista})**")
+            df_monto = df_comp.groupby("Proveedor Visual")["Monto Total Visualizado"].sum().reset_index()
+            st.bar_chart(df_monto, x="Proveedor Visual", y="Monto Total Visualizado")
             
+        with col_graf2:
+            st.markdown("**⏳ Promedio Días de Entrega por Proveedor**")
+            df_dias = df_comp.groupby("Proveedor Visual")["Días para Entrega"].mean().reset_index()
+            st.bar_chart(df_dias, x="Proveedor Visual", y="Días para Entrega")
+
+        st.write("")
         if st.button("🗑️ Limpiar Cuadro Comparativo"):
             st.session_state.ofertas_manuales = []
             st.rerun()
