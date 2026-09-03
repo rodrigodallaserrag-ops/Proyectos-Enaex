@@ -34,42 +34,71 @@ def obtener_indicadores():
 tasas = obtener_indicadores()
 
 # -----------------------------------------------------------------------------
-# 2. BASE DE DATOS DEMO Y FUNCIONES DE ARCHIVO
+# 2. CARGADOR INTELIGENTE DE EXCEL (DETECTA LA FILA REAL DE ENCABEZADOS)
 # -----------------------------------------------------------------------------
-SOLPEDS_BASE = {
-    "287": [
-        {"Pos": 1, "Material": "EXPLOSIVOS HIGH POWER", "Cantidad": 20, "UM": "C/U", "Precio Unitario": 8.0, "Moneda": "CLP", "Proveedor": "EXPLOSIVOS CHILE", "Días Entrega": 5, "Comentario": "⚠️ Precio de 8 pesos (corregir valor)"},
-        {"Pos": 2, "Material": "MATERIAS PRIMAS QUIMICAS", "Cantidad": 70, "UM": "KG", "Precio Unitario": 12.5, "Moneda": "USD", "Proveedor": "CHEMICAL CORP", "Días Entrega": 14, "Comentario": "Importación directa"},
-        {"Pos": 3, "Material": "TORNILLOS 200 KILOS", "Cantidad": 2, "UM": "C/U", "Precio Unitario": 45000.0, "Moneda": "CLP", "Proveedor": "PERNOS S.A.", "Días Entrega": 3, "Comentario": "Stock local disponible"},
-    ]
-}
-
-def cargar_planilla(file):
+def cargar_planilla_inteligente(file):
     try:
         nombre = file.name.lower()
         file_bytes = io.BytesIO(file.getvalue())
+
         if nombre.endswith(('.xlsx', '.xlsm', '.xls')):
             engine = 'openpyxl' if nombre.endswith(('.xlsx', '.xlsm')) else None
-            df = pd.read_excel(file_bytes, engine=engine)
-        else:
-            df = pd.read_csv(file_bytes, sep=None, engine='python', encoding='utf-8')
-        return df.dropna(how='all').dropna(how='all', axis=1)
+            excel_file = pd.ExcelFile(file_bytes, engine=engine)
+            
+            palabras_clave = ['sp', 'solped', 'pr', 'código', 'descripción', 'cantidad', 'precio', 'proveedor', 'monto', 'material', 'texto breve']
+            mejor_sheet, mejor_fila_idx, max_coincidencias = None, None, 0
+
+            # Buscar la fila que tenga más coincidencias con columnas de compras
+            for sheet_name in excel_file.sheet_names:
+                try:
+                    df_raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=None)
+                except Exception:
+                    continue
+
+                if df_raw.empty or len(df_raw) < 2:
+                    continue
+
+                for idx in range(min(50, len(df_raw))):
+                    row = df_raw.iloc[idx]
+                    celdas = [str(val).strip().lower() for val in row.values if pd.notna(val)]
+                    coincidencias = sum(1 for kw in palabras_clave if any(kw in c for c in celdas))
+                    if coincidencias > max_coincidencias:
+                        max_coincidencias = coincidencias
+                        mejor_sheet = sheet_name
+                        mejor_fila_idx = idx
+
+            # Extraer tabla omitiendo las filas de títulos superiores
+            if mejor_sheet is not None and max_coincidencias >= 2:
+                df_raw = pd.read_excel(excel_file, sheet_name=mejor_sheet, header=None)
+                df_clean = df_raw.iloc[mejor_fila_idx:].copy()
+                df_clean.columns = [str(c).strip() if pd.notna(c) and str(c).strip() != 'None' else f"Col_{i}" for i, c in enumerate(df_clean.iloc[0])]
+                df_clean = df_clean.iloc[1:].reset_index(drop=True).dropna(how='all')
+                cols_utiles = [c for c in df_clean.columns if not str(c).startswith("Col_")]
+                return df_clean[cols_utiles] if cols_utiles else df_clean
+
+            return pd.read_excel(excel_file, sheet_name=0).dropna(how='all')
+
+        elif nombre.endswith('.csv'):
+            try:
+                df = pd.read_csv(file_bytes, sep=None, engine='python', encoding='utf-8')
+            except Exception:
+                file_bytes.seek(0)
+                df = pd.read_csv(file_bytes, sep=None, engine='python', encoding='latin-1')
+            return df.dropna(how='all')
+
     except Exception as e:
-        st.error(f"Error al procesar la planilla: {e}")
+        st.error(f"Error al procesar el archivo ({file.name}): {e}")
         return None
 
 def extraer_materiales_de_masivo(df, id_solped):
-    # Buscar la columna que contiene el ID de la SOLPED
     col_sp = next((c for c in df.columns if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr'])), None)
     if not col_sp:
         return []
     
-    # Filtrar las filas que coinciden con el ID buscado
     df_filtrado = df[df[col_sp].astype(str).str.strip().str.upper() == str(id_solped).strip().upper()]
     if df_filtrado.empty:
         return []
 
-    # Mapear columnas dinámicamente al formato estándar del editor
     posiciones = []
     for idx, row in enumerate(df_filtrado.to_dict('records')):
         def get_val(keys, default):
@@ -83,10 +112,18 @@ def extraer_materiales_de_masivo(df, id_solped):
             "Precio Unitario": float(get_val(['precio', 'monto', 'val', 'costo'], 0.0)),
             "Moneda": str(get_val(['moneda', 'curr'], "CLP")).upper(),
             "Proveedor": str(get_val(['proveedor', 'vendor', 'prov'], "POR DEFINIR")),
-            "Días Entrega": int(float(get_val(['dias', 'plazo', 'lead'], 10))),
+            "Días Entrega": int(float(get_val(['dias', 'plazo', 'lead', 'tratamiento'], 10))),
             "Comentario": "Autocompletado desde planilla masiva"
         })
     return posiciones
+
+SOLPEDS_BASE = {
+    "287": [
+        {"Pos": 1, "Material": "EXPLOSIVOS HIGH POWER", "Cantidad": 20, "UM": "C/U", "Precio Unitario": 8.0, "Moneda": "CLP", "Proveedor": "EXPLOSIVOS CHILE", "Días Entrega": 5, "Comentario": "⚠️ Precio de 8 pesos (corregir valor)"},
+        {"Pos": 2, "Material": "MATERIAS PRIMAS QUIMICAS", "Cantidad": 70, "UM": "KG", "Precio Unitario": 12.5, "Moneda": "USD", "Proveedor": "CHEMICAL CORP", "Días Entrega": 14, "Comentario": "Importación directa"},
+        {"Pos": 3, "Material": "TORNILLOS 200 KILOS", "Cantidad": 2, "UM": "C/U", "Precio Unitario": 45000.0, "Moneda": "CLP", "Proveedor": "PERNOS S.A.", "Días Entrega": 3, "Comentario": "Stock local disponible"},
+    ]
+}
 
 def generar_pdf(id_solped, comprador, df_data, total_monto):
     pdf = FPDF()
@@ -125,7 +162,7 @@ def generar_pdf(id_solped, comprador, df_data, total_monto):
     return pdf.output(dest='S').encode('latin1')
 
 # -----------------------------------------------------------------------------
-# INTERFAZ PRINCIPAL
+# INTERFAZ Streamlit
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.header("💱 Tipo de Cambio")
@@ -134,29 +171,23 @@ with st.sidebar:
 
 st.title("🛒 Consola de Compras - Autogestión Integral")
 
-# =============================================================================
 # MÓDULO 1: CARGA MASIVA AUTOMÁTICA
-# =============================================================================
 st.header("📋 Módulo 1: Base de Datos Maestra (Carga Masiva)")
 uploaded_file = st.file_uploader("Suba su Planilla de Autogestión (Excel/CSV) para nutrir el sistema", type=["xlsx", "xlsm", "xls", "csv"])
 
 if uploaded_file is not None:
-    df_masivo = cargar_planilla(uploaded_file)
+    df_masivo = cargar_planilla_inteligente(uploaded_file)
     if df_masivo is not None and not df_masivo.empty:
         st.session_state["df_masivo"] = df_masivo
-        st.success(f"✅ Archivo cargado exitosamente. ({len(df_masivo)} registros totales disponibles).")
-        with st.expander("Ver Vista Previa de la Base de Datos Maestra"):
+        st.success(f"✅ Archivo cargado e interpretado correctamente ({len(df_masivo)} filas detectadas).")
+        with st.expander("Ver Vista Previa de la Tabla Detectada"):
             st.dataframe(df_masivo.head(10), use_container_width=True)
-else:
-    st.info("💡 Si no sube un archivo, el sistema utilizará la base de datos de demostración (Ej: SOLPED 287).")
 
 st.divider()
 
-# =============================================================================
-# MÓDULO 2: BÚSQUEDA Y EDICIÓN MULTI-POSICIÓN (MANUAL)
-# =============================================================================
+# MÓDULO 2: BÚSQUEDA Y EDICIÓN MULTI-POSICIÓN
 st.header("✏️ Módulo 2: Edición y Evaluación por SOLPED")
-st.markdown("Busque una ID. El sistema extraerá **todos sus materiales** desde la base maestra para que pueda corregir precios (ej. montos en 8 pesos), ajustar monedas o cambiar proveedores.")
+st.markdown("Busque una ID. El sistema extraerá **todos sus materiales** desde la base maestra para corregir precios (ej. montos en 8 pesos), ajustar monedas o cambiar proveedores.")
 
 col_search, col_btn = st.columns([3, 1])
 with col_search:
@@ -166,16 +197,13 @@ with col_btn:
     st.write(" ")
     cargar_btn = st.button("📥 Cargar Materiales", use_container_width=True, type="primary")
 
-# Lógica de extracción de datos
 if "datos_solped_actual" not in st.session_state or cargar_btn:
     sp_id = solped_input.strip()
     materiales_cargados = []
     
-    # 1. Intentar buscar en el archivo masivo subido
     if "df_masivo" in st.session_state:
         materiales_cargados = extraer_materiales_de_masivo(st.session_state["df_masivo"], sp_id)
     
-    # 2. Si no hay archivo o no se encontró, buscar en la demo
     if not materiales_cargados:
         if sp_id in SOLPEDS_BASE:
             materiales_cargados = SOLPEDS_BASE[sp_id]
@@ -189,7 +217,6 @@ if "datos_solped_actual" not in st.session_state or cargar_btn:
 
 df_trabajo = st.session_state["datos_solped_actual"]
 
-# Tabla Editable
 st.subheader(f"🛠️ Ajuste de Materiales - SOLPED #{st.session_state.get('solped_id_cargada', '')}")
 df_editado = st.data_editor(
     df_trabajo,
@@ -206,7 +233,6 @@ df_editado = st.data_editor(
     key="editor_multi_posicion"
 )
 
-# Cálculo dinámico
 def calcular_monto_clp(row):
     try:
         precio = float(row.get("Precio Unitario", 0))
@@ -219,9 +245,7 @@ def calcular_monto_clp(row):
 
 df_editado["Monto Total CLP"] = df_editado.apply(calcular_monto_clp, axis=1)
 
-# =============================================================================
-# MÓDULO 3: GRÁFICOS Y EXPORTACIÓN DEL REPORTE
-# =============================================================================
+# MÓDULO 3: GRÁFICOS Y EXPORTACIÓN
 st.divider()
 st.subheader("📈 Análisis de Ofertas y Lead Time")
 
@@ -242,7 +266,6 @@ with col_g2:
     fig_dias.update_layout(height=320, xaxis_tickangle=-15)
     st.plotly_chart(fig_dias, use_container_width=True)
 
-# Exportación
 st.subheader("📥 Exportar Informe Final")
 c_rep1, c_rep2 = st.columns(2)
 with c_rep1:
