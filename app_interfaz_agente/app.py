@@ -42,11 +42,36 @@ indicadores = obtener_indicadores_financieros()
 # 2. CARGA Y PROCESAMIENTO DE PLANILLA DE AUTOGESTIÓN MASIVA (+20 MATERIALES)
 # -----------------------------------------------------------------------------
 def cargar_planilla_autogestion(file):
+    """
+    Lee archivos Excel y CSV de manera robusta convirtiendo el buffer de Streamlit 
+    en un stream binario limpio para evitar lecturas como texto plano.
+    """
     try:
-        df = pd.read_excel(file) if file.name.endswith(('.xlsx', '.xls')) else pd.read_csv(file)
-        return df
+        nombre = file.name.lower()
+        file_bytes = io.BytesIO(file.getvalue())
+
+        if nombre.endswith(('.xlsx', '.xls')):
+            # Procesamiento binario explícito para planillas Excel
+            if nombre.endswith('.xlsx'):
+                df = pd.read_excel(file_bytes, engine='openpyxl')
+            else:
+                df = pd.read_excel(file_bytes)
+            return df
+
+        elif nombre.endswith('.csv'):
+            # Intento de lectura CSV con detección automática de separadores
+            try:
+                return pd.read_csv(file_bytes, sep=None, engine='python', encoding='utf-8')
+            except Exception:
+                file_bytes.seek(0)
+                return pd.read_csv(file_bytes, sep=None, engine='python', encoding='latin-1')
+
+        else:
+            # Fallback para archivos subidos con extensiones no estándar
+            return pd.read_excel(file_bytes, engine='openpyxl')
+
     except Exception as e:
-        st.error(f"Error al procesar Planilla de Autogestión: {e}")
+        st.error(f"Error al procesar la planilla: {e}")
         return None
 
 def generar_matriz_ejemplo():
@@ -65,7 +90,6 @@ def generar_matriz_ejemplo():
         ("CORREA TRANSMISION V B52", "C/U", 30, 12500, "CLP", "GATES CHILE"),
     ]
     
-    # Duplicamos registros demo para sobrepasar 20 ítems fácilmente
     for i in range(1, 21):
         idx = (i - 1) % len(materiales_demo)
         desc, um, cant, precio, mon, prov = materiales_demo[idx]
@@ -116,14 +140,17 @@ st.title("🛒 Cuadro Comparativo Multimaterial - Autogestión")
 st.caption("Consolidado de cotizaciones y adjudicación automatizada en una sola pantalla.")
 
 if uploaded_auto is not None:
-    df_matriz = cargar_planilla_autogestion(uploaded_auto)
-    st.success("✅ Planilla de Autogestión cargada exitosamente.")
-else:
-    if "df_matriz" not in st.session_state:
-        st.session_state["df_matriz"] = generar_matriz_ejemplo()
-    df_matriz = st.session_state["df_matriz"]
+    df_cargado = cargar_planilla_autogestion(uploaded_auto)
+    if df_cargado is not None:
+        st.session_state["df_matriz"] = df_cargado
+        st.success("✅ Planilla de Autogestión cargada exitosamente.")
 
-# Controles de acción directa (Botones superiores como en Excel)
+if "df_matriz" not in st.session_state:
+    st.session_state["df_matriz"] = generar_matriz_ejemplo()
+
+df_matriz = st.session_state["df_matriz"]
+
+# Controles de acción directa
 col_b1, col_b2, col_b3 = st.columns([2, 2, 4])
 with col_b1:
     if st.button("🧹 Limpiar Cuadro Comparativo", type="secondary"):
@@ -136,7 +163,7 @@ with col_b2:
 
 st.subheader(f"📊 Matriz de Cotizaciones ({len(df_matriz)} Materiales / Posiciones)")
 
-# Editor de datos interactivo para procesar >20 ítems de forma fluida
+# Editor de datos interactivo
 df_edited = st.data_editor(
     df_matriz,
     num_rows="dynamic",
@@ -167,7 +194,7 @@ if not df_edited.empty and "Monto Adjudicado" in df_edited.columns:
     col_m2.metric("Monto Total Adjudicado (CLP)", f"$ {total_adjudicado:,.0f}".replace(",", "."))
     col_m3.metric("Promedio por Ítem", f"$ {total_adjudicado/max(1, total_items):,.0f}".replace(",", "."))
 
-    # Exportación a Excel idéntica a la plantilla de trabajo
+    # Exportación a Excel
     output_excel = io.BytesIO()
     with pd.ExcelWriter(output_excel, engine='openpyxl') as writer:
         df_edited.to_excel(writer, sheet_name='Cuadro Comparativo', index=False)
