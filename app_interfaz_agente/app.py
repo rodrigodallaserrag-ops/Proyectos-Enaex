@@ -21,7 +21,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-st.set_page_config(page_title="Consola de Compras - Enaex", layout="wide")
+st.set_page_config(page_title="Consola de Compras — Enaex", layout="wide")
 
 # -----------------------------------------------------------------------------
 # 1. MOTOR FINANCIERO: EVASIÓN SSL CORPORATIVA + SISTEMA CASCADA
@@ -244,10 +244,10 @@ def generar_pdf_ejecutivo(solped, material, sociedad, cotizaciones, datos_indica
         Paragraph("<b>Observaciones</b>", header_table_style)
     ]]
 
-    min_clp = min([c["Equiv. CLP ($)"] for c in cotizaciones]) if cotizaciones else 0
+    min_clp = min([c.get("Equiv. CLP ($)", 0) for c in cotizaciones]) if cotizaciones else 0
 
     for c in cotizaciones:
-        monto_orig_fmt = aplicar_formato_regional(c.get("Monto Original", 0), c.get("Moneda", "CLP"))
+        monto_orig_fmt = aplicar_formato_regional(c.get("Monto Original", c.get("Precio Unitario", 0)), c.get("Moneda", "CLP"))
         clp_fmt = f"$ {int(c.get('Equiv. CLP ($)', 0)):,}".replace(",", ".")
         usd_fmt = f"$ {c.get('Equiv. USD ($)', 0):,.2f}"
         
@@ -276,7 +276,7 @@ def generar_pdf_ejecutivo(solped, material, sociedad, cotizaciones, datos_indica
     story.append(t_quotes)
     story.append(Spacer(1, 15))
 
-    max_monto = max([c["Equiv. CLP ($)"] for c in cotizaciones]) if cotizaciones else 0
+    max_monto = max([c.get("Equiv. CLP ($)", 0) for c in cotizaciones]) if cotizaciones else 0
     if max_monto > 1000000:
         warn_p = Paragraph(
             f"<b>⚠️ Nota de Control Financiero:</b> El requerimiento supera $1.000.000 CLP "
@@ -515,6 +515,7 @@ with tab_auto:
             return 0
 
     df_auto_editado["Equiv. CLP ($)"] = df_auto_editado.apply(calcular_monto_clp_row, axis=1)
+    st.session_state["datos_solped_actual"] = df_auto_editado
 
     if not df_auto_editado.empty and df_auto_editado["Equiv. CLP ($)"].sum() > 0:
         st.markdown("#### 📈 Gráfico de Evaluación Multimaterial")
