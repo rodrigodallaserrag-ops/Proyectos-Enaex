@@ -39,32 +39,80 @@ def obtener_indicadores_financieros():
 indicadores = obtener_indicadores_financieros()
 
 # -----------------------------------------------------------------------------
-# 2. CARGA Y PROCESAMIENTO DE PLANILLA DE AUTOGESTIÓN MASIVA (+20 MATERIALES)
+# 2. CARGA Y PROCESAMIENTO INTELIGENTE DE PLANILLA DE AUTOGESTIÓN (.XLSM)
 # -----------------------------------------------------------------------------
 def cargar_planilla_autogestion(file):
     """
-    Lee archivos Excel (.xlsx, .xlsm, .xls) y CSV mediante lectura binaria limpia.
-    openpyxl soporta nativamente la extracción de datos desde plantillas con macros (.xlsm).
+    Escanea las pestañas del archivo Excel/XLSM, detecta automáticamente la fila 
+    donde comienza la tabla de datos omitiendo títulos superiores y remueve columnas vacías.
     """
     try:
         nombre = file.name.lower()
         file_bytes = io.BytesIO(file.getvalue())
 
         if nombre.endswith(('.xlsx', '.xlsm', '.xls')):
-            # Se especifica openpyxl para .xlsx y .xlsm con macros
             engine = 'openpyxl' if nombre.endswith(('.xlsx', '.xlsm')) else None
-            df = pd.read_excel(file_bytes, engine=engine)
-            return df
+            excel_file = pd.ExcelFile(file_bytes, engine=engine)
+            
+            # Palabras clave para identificar la fila de encabezados real
+            palabras_clave = [
+                'pos', 'solped', 'código', 'codigo', 'descripción', 'descripcion', 
+                'cantidad', 'um', 'último', 'ultimo', 'oferta', 'proveedor', 'monto'
+            ]
+            
+            df_final = None
+
+            # Recorrer pestañas buscando la tabla de cotizaciones
+            for sheet_name in excel_file.sheet_names:
+                df_raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=None)
+                if df_raw.empty:
+                    continue
+
+                fila_encabezado_idx = None
+                
+                # Buscar la fila que contenga al menos 2 nombres de columna típicos
+                for idx, row in df_raw.iterrows():
+                    valores_fila = row.astype(str).str.lower().tolist()
+                    coincidencias = sum(1 for kw in palabras_clave if any(kw in celda for celda in valores_fila))
+                    if coincidencias >= 2:
+                        fila_encabezado_idx = idx
+                        break
+
+                if fila_encabezado_idx is not None:
+                    # Cortar el DataFrame desde la fila detectada como encabezado
+                    df_clean = df_raw.iloc[fila_encabezado_idx:].copy()
+                    df_clean.columns = df_clean.iloc[0]  # Asignar primera fila como cabecera
+                    df_clean = df_clean.iloc[1:].reset_index(drop=True)  # Eliminar fila de cabecera duplicada
+                    
+                    # Limpiar nombres de columnas
+                    df_clean.columns = [
+                        str(c).strip() if pd.notna(c) and str(c).strip() != 'None' else f"Columna_{i+1}"
+                        for i, c in enumerate(df_clean.columns)
+                    ]
+                    
+                    # Eliminar filas y columnas completamente vacías
+                    df_clean = df_clean.dropna(how='all').dropna(how='all', axis=1)
+                    
+                    # Eliminar columnas secundarias sin nombre útil
+                    df_clean = df_clean.loc[:, ~df_clean.columns.str.startswith('Columna_')]
+
+                    df_final = df_clean
+                    break
+
+            # Fallback en caso de no detectar coincidencia por palabras clave
+            if df_final is None:
+                df_final = pd.read_excel(excel_file, sheet_name=0)
+                df_final = df_final.dropna(how='all').dropna(how='all', axis=1)
+
+            return df_final
 
         elif nombre.endswith('.csv'):
             try:
-                return pd.read_csv(file_bytes, sep=None, engine='python', encoding='utf-8')
+                df = pd.read_csv(file_bytes, sep=None, engine='python', encoding='utf-8')
             except Exception:
                 file_bytes.seek(0)
-                return pd.read_csv(file_bytes, sep=None, engine='python', encoding='latin-1')
-
-        else:
-            return pd.read_excel(file_bytes, engine='openpyxl')
+                df = pd.read_csv(file_bytes, sep=None, engine='python', encoding='latin-1')
+            return df.dropna(how='all').dropna(how='all', axis=1)
 
     except Exception as e:
         st.error(f"Error al procesar la planilla ({file.name}): {e}")
@@ -140,9 +188,9 @@ st.caption("Consolidado de cotizaciones y adjudicación automatizada en una sola
 
 if uploaded_auto is not None:
     df_cargado = cargar_planilla_autogestion(uploaded_auto)
-    if df_cargado is not None:
+    if df_cargado is not None and not df_cargado.empty:
         st.session_state["df_matriz"] = df_cargado
-        st.success(f"✅ Planilla '{uploaded_auto.name}' cargada exitosamente.")
+        st.success(f"✅ Planilla '{uploaded_auto.name}' procesada y cargada correctamente.")
 
 if "df_matriz" not in st.session_state:
     st.session_state["df_matriz"] = generar_matriz_ejemplo()
@@ -167,13 +215,7 @@ df_edited = st.data_editor(
     df_matriz,
     num_rows="dynamic",
     use_container_width=True,
-    height=550,
-    column_config={
-        "Pos": st.column_config.NumberColumn("Pos", disabled=False),
-        "Monto Adjudicado": st.column_config.NumberColumn("Monto Adjudicado ($)", format="$ %d"),
-        "Validación Técnica": st.column_config.CheckboxColumn("Val. Técnica", default=True),
-        "Último precio [USD]": st.column_config.NumberColumn("Últ. Precio USD", format="$ %.2f"),
-    }
+    height=550
 )
 
 st.session_state["df_matriz"] = df_edited
@@ -184,8 +226,9 @@ st.session_state["df_matriz"] = df_edited
 st.divider()
 st.subheader("📈 Resumen Estadístico de Adjudicación")
 
-if not df_edited.empty and "Monto Adjudicado" in df_edited.columns:
-    total_adjudicado = df_edited["Monto Adjudicado"].sum()
+if not df_edited.empty:
+    col_monto = [col for col in df_edited.columns if 'monto' in str(col).lower() or 'adjudicado' in str(col).lower()]
+    total_adjudicado = df_edited[col_monto[0]].sum() if col_monto else 0
     total_items = len(df_edited)
     
     col_m1, col_m2, col_m3 = st.columns(3)
