@@ -52,7 +52,7 @@ def obtener_indicadores_tiempo_real():
 def procesar_y_reparar_planilla(df):
     """
     Renombra las columnas 'Unnamed' explícitamente, promueve encabezados si es necesario, 
-    y mueve la columna de ID (SOLPED/Solicitud) al principio del DataFrame.
+    deduplica columnas idénticas y mueve la columna de ID al principio del DataFrame.
     """
     if df is None or df.empty:
         return df
@@ -101,6 +101,19 @@ def procesar_y_reparar_planilla(df):
         df = df[~mask_repetida].reset_index(drop=True)
 
     df.columns = [str(c).strip() for c in df.columns]
+
+    # --- FIX: Deduplicar nombres de columnas para evitar el error de PyArrow ---
+    vistos = {}
+    columnas_deduplicadas = []
+    for c in df.columns:
+        if c in vistos:
+            vistos[c] += 1
+            columnas_deduplicadas.append(f"{c}_{vistos[c]}")
+        else:
+            vistos[c] = 0
+            columnas_deduplicadas.append(c)
+    df.columns = columnas_deduplicadas
+    # ---------------------------------------------------------------------------
 
     # 4. Encontrar la columna de ID (SOLPED) y moverla al principio
     cols = list(df.columns)
