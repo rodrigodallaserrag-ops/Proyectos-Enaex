@@ -605,7 +605,7 @@ else:
     with col_btn1:
         excel_bytes = generar_excel_estilizado(df, solped, material, sociedad, indicadores)
         st.download_button(
-            label="📥 Descargar Excel Corporativo",
+            label="📥 Descargar Excel",
             data=excel_bytes,
             file_name=f"cuadro_comparativo_solped_{solped}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
