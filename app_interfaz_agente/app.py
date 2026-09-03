@@ -51,82 +51,95 @@ def obtener_indicadores_tiempo_real():
 # =============================================================================
 def procesar_y_reparar_planilla(df):
     """
-    Renombra las columnas 'Unnamed' explícitamente, promueve encabezados si es necesario, 
-    deduplica columnas idénticas y mueve la columna de ID al principio del DataFrame.
+    Busca la fila real de encabezados mediante palabras clave, la promueve, 
+    deduplica columnas y asegura que la ID (SP/SOLPED) quede al inicio.
     """
     if df is None or df.empty:
         return df
 
-    # 1. Mapeo explícito basado en las imágenes de referencia
+    # 1. Escáner agresivo de encabezados
+    # Buscamos en las primeras 20 filas palabras clave típicas de los reportes SAP/Enaex
+    palabras_clave = ['sp', 'solped', 'material', 'pos', 'texto breve', 'centro', 'cantidad']
+    header_idx = -1
+    
+    for idx in range(min(20, len(df))):
+        row_values = df.iloc[idx].astype(str).str.lower().tolist()
+        matches = sum(1 for val in row_values for kw in palabras_clave if kw in val)
+        # Si la fila tiene al menos 2 palabras clave, asumimos que es el encabezado real
+        if matches >= 2:
+            header_idx = idx
+            break
+
+    if header_idx != -1:
+        # Promover esta fila a encabezados
+        nuevas_columnas = []
+        for i, val in enumerate(df.iloc[header_idx]):
+            val_str = str(val).strip()
+            if val_str.lower() in ['nan', 'none', '']:
+                col_orig = str(df.columns[i])
+                if not col_orig.startswith("Unnamed"):
+                    nuevas_columnas.append(col_orig)
+                else:
+                    nuevas_columnas.append(f"Col_Vacia_{i}")
+            else:
+                nuevas_columnas.append(val_str)
+        
+        df.columns = nuevas_columnas
+        # Recortar el dataframe para que empiece en la fila de datos reales
+        df = df.iloc[header_idx + 1:].reset_index(drop=True)
+        
+        # Eliminar las filas "espejo" (ej. cuando la fila 1 repite exactamente el encabezado de la 0)
+        if not df.empty:
+            primer_col = df.columns[0]
+            df = df[df[primer_col].astype(str).str.strip() != str(primer_col).strip()].reset_index(drop=True)
+
+    # 2. Mapeo explícito residual (por si acaso quedan algunas por defecto sin nombre)
     mapeo_columnas = {
-        'Unnamed: 6': 'UM',
-        'Unnamed: 7': 'Solicitante',
-        'Unnamed: 8': 'Centro',
-        'Unnamed: 9': 'Tipo de posición',
-        'Unnamed: 10': 'G. compras',
-        'Unnamed: 11': 'Mod. el',
-        'Unnamed: 12': 'Urgencia',
-        'Unnamed: 13': 'NS',
-        'Unnamed: 14': 'Contrato marco',
-        'Unnamed: 15': 'Observación',
-        'Unnamed: 16': 'Responsable',
-        'Unnamed: 41': 'Total general'
+        'Unnamed: 6': 'UM', 'Unnamed: 7': 'Solicitante', 'Unnamed: 8': 'Centro',
+        'Unnamed: 9': 'Tipo de posición', 'Unnamed: 10': 'G. compras', 'Unnamed: 11': 'Mod. el',
+        'Unnamed: 12': 'Urgencia', 'Unnamed: 13': 'NS', 'Unnamed: 14': 'Contrato marco',
+        'Unnamed: 15': 'Observación', 'Unnamed: 16': 'Responsable', 'Unnamed: 41': 'Total general'
     }
-    df = df.rename(columns=mapeo_columnas)
+    df = df.rename(columns={k: v for k, v in mapeo_columnas.items() if k in df.columns})
 
-    # 2. Intentar promover la fila de encabezados real si aún quedan muchas "Unnamed"
-    unnamed_cols = [c for c in df.columns if str(c).startswith("Unnamed:")]
-    if len(unnamed_cols) > 0:
-        for idx in range(min(10, len(df))):
-            row = df.iloc[idx]
-            celdas_validas = [str(v).strip() for v in row if pd.notna(v) and str(v).strip().lower() not in ['nan', 'none', '']]
-            
-            if len(celdas_validas) >= (len(df.columns) * 0.3):
-                nuevas_columnas = []
-                for i, v in enumerate(row):
-                    v_str = str(v).strip()
-                    if pd.notna(v) and v_str != '' and not v_str.startswith("Unnamed:"):
-                        nuevas_columnas.append(v_str)
-                    else:
-                        nuevas_columnas.append(df.columns[i]) # Mantener el nombre ya mapeado
-                
-                df.columns = nuevas_columnas
-                df = df.iloc[idx + 1:].reset_index(drop=True)
-                break
-
-    # 3. Eliminar filas duplicadas (ej. la fila que se usó como encabezado)
-    if not df.empty:
-        primer_col = df.columns[0]
-        mask_repetida = df[primer_col].astype(str).str.lower().str.strip() == str(primer_col).lower().strip()
-        df = df[~mask_repetida].reset_index(drop=True)
-
-    df.columns = [str(c).strip() for c in df.columns]
-
-    # --- FIX: Deduplicar nombres de columnas para evitar el error de PyArrow ---
+    # 3. Deduplicar nombres de columnas (Evita el error de PyArrow)
     vistos = {}
     columnas_deduplicadas = []
     for c in df.columns:
-        if c in vistos:
-            vistos[c] += 1
-            columnas_deduplicadas.append(f"{c}_{vistos[c]}")
+        c_str = str(c).strip()
+        if c_str in vistos:
+            vistos[c_str] += 1
+            columnas_deduplicadas.append(f"{c_str}_{vistos[c_str]}")
         else:
-            vistos[c] = 0
-            columnas_deduplicadas.append(c)
+            vistos[c_str] = 0
+            columnas_deduplicadas.append(c_str)
     df.columns = columnas_deduplicadas
-    # ---------------------------------------------------------------------------
 
-    # 4. Encontrar la columna de ID (SOLPED) y moverla al principio
+    # 4. Encontrar la columna de ID (SP/SOLPED) y moverla a la Posición 0
     cols = list(df.columns)
     id_col = None
+    
+    # Priorizar búsqueda exacta primero
     for c in cols:
-        if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'pedido']):
+        if c.lower() in ['sp', 'solped', 'solicitud']:
             id_col = c
             break
             
+    # Búsqueda parcial como plan B
+    if not id_col:
+        for c in cols:
+            if any(kw in c.lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'pedido']):
+                id_col = c
+                break
+                
+    # Mover al principio
     if id_col and id_col in cols:
         cols.remove(id_col)
         cols.insert(0, id_col)
         df = df[cols]
+
+    # Quitar cualquier fila que haya quedado 100% en blanco
+    df = df.dropna(how='all')
 
     return df
 
@@ -269,12 +282,12 @@ with st.sidebar:
             # Aplicar la nueva función de mapeo y ordenamiento
             df_procesado = procesar_y_reparar_planilla(df_clean)
             
-            # Ordenar por completitud (opcional, para visualización limpia)
+            # Ordenar por completitud para mostrar primero las filas más llenas
             df_procesado['cantidad_nulos'] = df_procesado.isnull().sum(axis=1)
             df_procesado = df_procesado.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
             
             st.session_state.df_masivo = df_procesado
-            st.success(f"Planilla cargada y mapeada correctamente ({len(st.session_state.df_masivo)} filas)")
+            st.success(f"Planilla cargada y limpiada correctamente ({len(st.session_state.df_masivo)} filas)")
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
 
@@ -283,7 +296,7 @@ with st.sidebar:
 # =============================================================================
 if st.session_state.df_masivo is not None:
     with st.expander("👀 Vista Previa de la Planilla Base Cargada", expanded=False):
-        st.write(f"Mostrando los datos procesados con columnas corregidas e ID al inicio ({len(st.session_state.df_masivo)} registros en total):")
+        st.write(f"Mostrando los datos procesados. La columna 'SP' ha sido priorizada en la primera posición para fácil lectura.")
         st.dataframe(st.session_state.df_masivo, use_container_width=True)
 
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
