@@ -19,6 +19,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+# Deshabilitar advertencias SSL de urllib3 para redes corporativas
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="Consola de Compras - Enaex", layout="wide")
@@ -33,14 +34,12 @@ def cargar_maestro_solpeds(url_sharepoint=""):
     """
     if url_sharepoint:
         try:
-            # Transformación de enlace compartido a enlace directo de descarga
             direct_url = url_sharepoint.replace("?e=", "&download=1").replace("p=1", "download=1")
             df = pd.read_excel(direct_url, dtype={"SOLPED": str, "CODIGO_SAP": str, "POS": int})
             return df, "SharePoint Sincronizado 🟢"
         except Exception:
             pass
             
-    # Base de Datos de prueba (Fallback si no hay URL activa)
     data_demo = {
         "SOLPED": ["10045982", "10045982", "10045983", "10045984"],
         "POS": [10, 20, 10, 10],
@@ -57,20 +56,38 @@ def cargar_maestro_solpeds(url_sharepoint=""):
     return df_demo, "Modo Demostración Local 🟡"
 
 # -----------------------------------------------------------------------------
-# 2. MOTOR FINANCIERO DE MONEDAS
+# 2. MOTOR FINANCIERO DE MONEDAS (OPTIMIZADO PARA REDES ESTRICTAS)
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=3600)  
 def obtener_indicadores_financieros():
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    # Intento 1: Requests con bypass de certificado SSL (Proxy / Red Estricta)
+    try:
+        response = requests.get("https://mindicador.cl/api", headers=headers, timeout=5, verify=False)
+        if response.status_code == 200:
+            data = response.json()
+            if "dolar" in data:
+                return {
+                    "dolar": float(data["dolar"]["valor"]),
+                    "euro": float(data["euro"]["valor"]),
+                    "uf": float(data["uf"]["valor"]),
+                    "fecha": data["dolar"]["fecha"][:10],
+                    "estado": "Online 🟢",
+                }
+    except Exception:
+        pass
+
+    # Intento 2: Urllib con SSL no verificado
     try:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         
-        req = urllib.request.Request(
-            "https://mindicador.cl/api", 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        )
-        with urllib.request.urlopen(req, timeout=8, context=ctx) as response:
+        req = urllib.request.Request("https://mindicador.cl/api", headers=headers)
+        with urllib.request.urlopen(req, timeout=6, context=ctx) as response:
             data = json.loads(response.read().decode('utf-8'))
             if "dolar" in data:
                 return {
@@ -78,11 +95,12 @@ def obtener_indicadores_financieros():
                     "euro": float(data["euro"]["valor"]),
                     "uf": float(data["uf"]["valor"]),
                     "fecha": data["dolar"]["fecha"][:10],
-                    "estado": "Online (Proxy Local) 🟢",
+                    "estado": "Online (Proxy Bypass) 🟢",
                 }
     except Exception:
         pass
 
+    # Fallback si la red bloquea totalmente las conexiones salientes
     return {
         "dolar": 938.0,
         "euro": 1020.0,
@@ -304,7 +322,7 @@ def generar_excel_estilizado(df, solped_info, datos_indicadores):
     return output.getvalue()
 
 # -----------------------------------------------------------------------------
-# 5. INICIALIZACIÓN DE ESTADO Y SIDEBAR INTEGRA CON SHAREPOINT
+# 5. INICIALIZACIÓN DE ESTADO Y SIDEBAR CON CATÁLOGO DE PROVEEDORES
 # -----------------------------------------------------------------------------
 if "cotizaciones" not in st.session_state:
     st.session_state["cotizaciones"] = []
@@ -314,6 +332,9 @@ if "monto_input" not in st.session_state:
 
 if "moneda_input" not in st.session_state:
     st.session_state["moneda_input"] = "CLP"
+
+if "proveedor_input" not in st.session_state:
+    st.session_state["proveedor_input"] = ""
 
 with st.sidebar:
     st.header("🔗 Conexión OneDrive / SharePoint")
@@ -327,12 +348,26 @@ with st.sidebar:
     df_maestro, estado_sp = cargar_maestro_solpeds(url_sharepoint)
     st.caption(f"Estado repositorio: **{estado_sp}**")
 
+    # -------------------------------------------------------------------------
+    # NUEVA SECCIÓN: CARGA DE CATÁLOGO / MAESTRO DE PROVEEDORES (FELIPE)
+    # -------------------------------------------------------------------------
+    st.divider()
+    st.header("📁 Catálogo de Proveedores (Felipe)")
+    archivo_catalogo = st.file_uploader("Cargar Excel Catálogo de Proveedores", type=["xlsx", "xls"], key="uploader_catalogo")
+
+    if archivo_catalogo is not None:
+        try:
+            df_cat = pd.read_excel(archivo_catalogo)
+            st.session_state["df_catalogo"] = df_cat
+            st.success(f"✅ Catálogo cargado ({len(df_cat)} registros)")
+        except Exception as e:
+            st.error(f"Error al leer catálogo: {e}")
+
     st.divider()
     st.header("📌 Búsqueda de Solped")
     
     solped_ingresada = st.text_input("Ingresar N° Solped", value="10045982")
     
-    # Filtrar datos de la Solped ingresada
     df_solped_match = df_maestro[df_maestro["SOLPED"] == solped_ingresada.strip()]
 
     if not df_solped_match.empty:
@@ -341,7 +376,6 @@ with st.sidebar:
         
         row_solped = df_solped_match[df_solped_match["POS"] == pos_seleccionada].iloc[0]
         
-        # Datos extraídos automáticamente
         solped_info = {
             "SOLPED": str(row_solped["SOLPED"]),
             "POS": int(row_solped["POS"]),
@@ -370,7 +404,7 @@ with st.sidebar:
 
     if "Offline" in indicadores["estado"]:
         st.divider()
-        st.warning("⚠️ Ajuste manual de monedas:")
+        st.warning("⚠️ Ajuste manual de monedas (API Offline):")
         indicadores["uf"] = st.number_input("Valor UF", value=float(indicadores["uf"]))
         indicadores["dolar"] = st.number_input("Valor Dólar", value=float(indicadores["dolar"]))
 
@@ -408,7 +442,6 @@ col_eur.metric("Euro", formato_clp(indicadores['euro']))
 
 st.divider()
 
-# Tarjeta Ficha Técnica Solped
 st.markdown(f"""
 <div style="background-color: #F8FAFC; padding: 12px; border-radius: 8px; border: 1px solid #E2E8F0; margin-bottom: 15px;">
     <h4 style="margin: 0 0 8px 0; color: #0F172A;">📋 Ficha TÉCNICA REQUERIMIENTO (SOLPED: {solped_info['SOLPED']})</h4>
@@ -421,9 +454,37 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 7. CARGA MANUAL DE OFERTAS
+# 7. SELECCIÓN DE CATÁLOGO Y CARGA MANUAL DE OFERTAS
 # -----------------------------------------------------------------------------
-st.subheader("➕ Carga Manual de Oferta")
+st.subheader("➕ Carga de Ofertas / Cotización")
+
+# Búsqueda y Autocompletado desde Catálogo de Felipe
+if "df_catalogo" in st.session_state and not st.session_state["df_catalogo"].empty:
+    df_c = st.session_state["df_catalogo"]
+    
+    with st.expander("⚡ Cargar datos automáticamente desde el Catálogo de Felipe", expanded=True):
+        col_id_name = next((c for c in df_c.columns if any(k in c.upper() for k in ["ID", "COD", "RUT", "PROVEEDOR", "NOMBRE"])), df_c.columns[0])
+        lista_ids = df_c[col_id_name].dropna().astype(str).unique().tolist()
+        
+        id_sel = st.selectbox("Seleccionar ID / Proveedor del Catálogo", ["-- Seleccionar --"] + lista_ids)
+        
+        if id_sel != "-- Seleccionar --":
+            match_row = df_c[df_c[col_id_name].astype(str) == id_sel].iloc[0]
+            
+            col_prov_found = next((c for c in df_c.columns if any(k in c.upper() for k in ["PROV", "NOMBRE", "RAZON"])), col_id_name)
+            col_monto_found = next((c for c in df_c.columns if any(k in c.upper() for k in ["PRECIO", "MONTO", "VALOR", "COSTO"])), None)
+            col_moneda_found = next((c for c in df_c.columns if any(k in c.upper() for k in ["MONEDA", "CURRENCY"])), None)
+            
+            if st.button("📥 Cargar Datos de este Proveedor"):
+                st.session_state["proveedor_input"] = str(match_row[col_prov_found])
+                if col_monto_found and pd.notna(match_row[col_monto_found]):
+                    st.session_state["monto_input"] = str(match_row[col_monto_found])
+                if col_moneda_found and pd.notna(match_row[col_moneda_found]):
+                    m_val = str(match_row[col_moneda_found]).upper().strip()
+                    if m_val in ["CLP", "USD", "EUR", "UF"]:
+                        st.session_state["moneda_input"] = m_val
+                st.toast(f"✅ Datos cargados de: {match_row[col_prov_found]}", icon="✨")
+                st.rerun()
 
 def procesar_guardado():
     raw = str(st.session_state.get("monto_input", "")).strip()
@@ -451,7 +512,6 @@ def procesar_guardado():
 
         monto_usd = monto_clp / dolar_actual if dolar_actual > 0 else 0
         
-        # Cálculo Variación % vs Última Compra
         ult_compra = solped_info["ULTIMA_COMPRA_MONTO"]
         var_pct = ((monto_clp - ult_compra) / ult_compra * 100) if ult_compra > 0 else 0.0
 
@@ -507,7 +567,6 @@ else:
 
     st.dataframe(df_visual, use_container_width=True)
 
-    # Métricas de Variación vs Última Compra
     st.markdown("### 📈 Métricas de Adjudicación & Benchmark")
     
     monto_min = df["Equiv. CLP ($)"].min()
@@ -542,7 +601,6 @@ else:
             delta_color="off"
         )
 
-    # Gráfico de barras
     df_chart = df.copy()
     fig_precio = px.bar(
         df_chart,
@@ -555,7 +613,6 @@ else:
     fig_precio.add_hline(y=ult_compra_monto, line_dash="dash", line_color="red", annotation_text="Última Compra")
     st.plotly_chart(fig_precio, use_container_width=True)
 
-    # Gestión y Descargas
     st.markdown("#### 🛠️ Gestión de Filas")
     for i, c in enumerate(st.session_state["cotizaciones"]):
         c_col1, c_col2 = st.columns([5, 1])
