@@ -56,21 +56,20 @@ def cargar_maestro_solpeds(url_sharepoint=""):
     return df_demo, "Modo Demostración Local 🟡"
 
 # -----------------------------------------------------------------------------
-# 2. MOTOR FINANCIERO DE MONEDAS
+# 2. MOTOR FINANCIERO DE MONEDAS MULTIFUENTE (FAILOVER)
 # -----------------------------------------------------------------------------
-@st.cache_data(ttl=3600)  
+@st.cache_data(ttl=1800)  
 def obtener_indicadores_financieros():
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+
+    # Fuente 1: mindicador.cl
     try:
-        # Se utiliza requests para mayor estabilidad en la conexión a la API
-        response = requests.get(
-            "https://mindicador.cl/api", 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'},
-            verify=False,
-            timeout=10
-        )
+        response = requests.get("https://mindicador.cl/api", headers=headers, verify=False, timeout=5)
         if response.status_code == 200:
             data = response.json()
-            if "dolar" in data:
+            if "dolar" in data and "euro" in data and "uf" in data:
                 return {
                     "dolar": float(data["dolar"]["valor"]),
                     "euro": float(data["euro"]["valor"]),
@@ -81,6 +80,54 @@ def obtener_indicadores_financieros():
     except Exception:
         pass
 
+    # Fuente 2: DolarApi Chile
+    try:
+        res_usd = requests.get("https://cl.dolarapi.com/v1/cotizaciones/usd", headers=headers, verify=False, timeout=5)
+        res_eur = requests.get("https://cl.dolarapi.com/v1/cotizaciones/eur", headers=headers, verify=False, timeout=5)
+        res_uf = requests.get("https://cl.dolarapi.com/v1/cotizaciones/uf", headers=headers, verify=False, timeout=5)
+        
+        if res_usd.status_code == 200 and res_eur.status_code == 200 and res_uf.status_code == 200:
+            d_usd = res_usd.json()
+            d_eur = res_eur.json()
+            d_uf = res_uf.json()
+            
+            val_usd = float(d_usd.get("valor") or d_usd.get("compra") or d_usd.get("venta"))
+            val_eur = float(d_eur.get("valor") or d_eur.get("compra") or d_eur.get("venta"))
+            val_uf = float(d_uf.get("valor") or d_uf.get("compra") or d_uf.get("venta"))
+
+            return {
+                "dolar": val_usd,
+                "euro": val_eur,
+                "uf": val_uf,
+                "fecha": datetime.date.today().strftime("%Y-%m-%d"),
+                "estado": "Online (DolarApi) 🟢",
+            }
+    except Exception:
+        pass
+
+    # Fuente 3: Gael API
+    try:
+        res = requests.get("https://api.gael.cl/general/public/monedas", headers=headers, verify=False, timeout=5)
+        if res.status_code == 200:
+            items = res.json()
+            m_dict = {}
+            for item in items:
+                if 'Codigo' in item and 'Valor' in item:
+                    val_clean = str(item['Valor']).replace('.', '').replace(',', '.')
+                    m_dict[item['Codigo']] = float(val_clean)
+            
+            if 'UF' in m_dict and 'USD' in m_dict and 'EUR' in m_dict:
+                return {
+                    "dolar": m_dict['USD'],
+                    "euro": m_dict['EUR'],
+                    "uf": m_dict['UF'],
+                    "fecha": datetime.date.today().strftime("%Y-%m-%d"),
+                    "estado": "Online (Gael API) 🟢",
+                }
+    except Exception:
+        pass
+
+    # Respaldo si todo lo demás falla
     return {
         "dolar": 938.0,
         "euro": 1020.0,
@@ -320,7 +367,7 @@ with st.sidebar:
     col_sp1, col_sp2 = st.columns([1, 1])
     if col_sp1.button("🔄 Recargar Datos"):
         st.cache_data.clear()
-        st.toast("Base de datos de SharePoint actualizada", icon="🔄")
+        st.toast("Base de datos y caché de monedas actualizados", icon="🔄")
 
     df_maestro, estado_sp = cargar_maestro_solpeds(url_sharepoint)
     st.caption(f"Estado repositorio: **{estado_sp}**")
@@ -366,8 +413,7 @@ with st.sidebar:
             "PROVEEDOR_HISTORICO": st.text_input("Prov. Histórico", value="PROVEEDOR BASE")
         }
 
-    # Se utilizan campos de texto (text_input) para evitar los botones de incremento 
-    # y permitir la libre escritura manual, añadiendo también el Euro.
+    # Edición manual de respaldo
     if "Offline" in indicadores["estado"]:
         st.divider()
         st.warning("⚠️ Ajuste manual de monedas (API Offline):")
