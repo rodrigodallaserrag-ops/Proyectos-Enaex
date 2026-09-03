@@ -142,14 +142,17 @@ with st.sidebar:
     st.divider()
     
     st.header("📂 Carga de Archivo Base")
-    # Soporte para .xlsm habilitado en 'type'
     file_masivo = st.file_uploader("Cargar Planilla Maestro/SOLPEDs (Excel/CSV)", type=["xlsx", "xls", "csv", "xlsm"])
+    
     if file_masivo:
         try:
             if file_masivo.name.endswith(".csv"):
                 st.session_state.df_masivo = pd.read_csv(file_masivo)
             else:
-                st.session_state.df_masivo = pd.read_excel(file_masivo)
+                # Modificación clave: Lee todas las hojas y las une para no perder la información real
+                dict_dfs = pd.read_excel(file_masivo, sheet_name=None, engine='openpyxl')
+                st.session_state.df_masivo = pd.concat(dict_dfs.values(), ignore_index=True)
+                
             st.success(f"Planilla cargada correctamente ({len(st.session_state.df_masivo)} filas)")
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
