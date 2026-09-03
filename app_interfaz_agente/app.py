@@ -163,65 +163,240 @@ def cargar_planilla_inteligente(file):
         return None
 
 def extraer_materiales_de_masivo(df, id_solped):
-    col_sp = next((c for c in df.columns if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr'])), None)
+    target = re.sub(r'\.0$', '', str(id_solped).strip().lower())
+    if not target or target == "(id solped)":
+        return []
+
+    col_sp = next((c for c in df.columns if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'doc', 'pedido'])), None)
     if not col_sp:
         return []
-    
-    df_filtrado = df[df[col_sp].astype(str).str.strip().str.upper() == str(id_solped).strip().upper()]
+
+    s_col = df[col_sp].astype(str).str.strip().str.lower().str.replace(r'\.0$', '', regex=True)
+    df_filtrado = df[s_col == target]
+
     if df_filtrado.empty:
         return []
 
     posiciones = []
     for idx, row in enumerate(df_filtrado.to_dict('records')):
         def get_val(keys, default):
-            return next((row[c] for c in row.keys() if any(k in str(c).lower() for k in keys) and pd.notna(row[c])), default)
+            for k in keys:
+                for col in row.keys():
+                    if k in str(col).lower() and pd.notna(row[col]) and str(row[col]).strip() != "":
+                        return row[col]
+            return default
 
+        def clean_num(val, default=0.0):
+            try:
+                if isinstance(val, (int, float)): 
+                    return float(val)
+                s = re.sub(r'[^0-9.,-]', '', str(val)).replace(',', '.')
+                return float(s)
+            except Exception:
+                return default
+
+        mat_val = get_val(['texto', 'desc', 'material', 'denominacion', 'item', 'artículo', 'articulo'], "(Sin Descripción)")
+        
         posiciones.append({
             "Pos": idx + 1,
-            "Material": get_val(['texto', 'desc', 'material', 'item'], "(Material)"),
-            "Centro": get_val(['centro', 'plant', 'almacen'], "(Centro)"),
-            "Cantidad": float(get_val(['cant', 'cantidad'], 1.0)),
-            "UM": str(get_val(['um', 'unidad'], "C/U")).upper(),
-            "Precio Unitario": float(get_val(['precio', 'monto', 'val', 'costo'], 0.0)),
-            "Moneda": str(get_val(['moneda', 'curr'], "CLP")).upper(),
-            "Proveedor": str(get_val(['proveedor', 'vendor', 'prov'], "(Proveedor)")),
+            "Material": str(mat_val),
+            "Centro": str(get_val(['centro', 'plant', 'almacen', 'alm'], "(Centro)")),
+            "Cantidad": clean_num(get_val(['cant', 'cantidad', 'ctd'], 1.0), 1.0),
+            "UM": str(get_val(['um', 'unidad', 'unid'], "C/U")).upper(),
+            "Precio Unitario": clean_num(get_val(['precio', 'monto', 'val', 'costo', 'p.u'], 0.0), 0.0),
+            "Moneda": str(get_val(['moneda', 'curr', 'mon'], "CLP")).upper(),
+            "Proveedor": str(get_val(['proveedor', 'vendor', 'prov', 'nam'], "(Proveedor)")),
             "Calendario de entrega": str(get_val(['calendario', 'fecha', 'entrega', 'plazo'], "(Calendario de entrega)")),
-            "Días Entrega": int(float(get_val(['dias', 'lead', 'tratamiento'], 0))),
-            "Observaciones": "(Observaciones)"
+            "Días Entrega": int(clean_num(get_val(['dias', 'lead', 'tratamiento'], 0), 0)),
+            "Observaciones": str(get_val(['obs', 'observacion', 'comentario'], "(Observaciones)"))
         })
+        
     return posiciones
 
-# =============================================================================
-# TAB 3: HISTÓRICO COMPLETO DE OC (SIN FILTRO DE AÑO 2019)
-# =============================================================================
-with tab_historico:
-    st.subheader("📜 Consulta de Precios Históricos Completa")
-    st.markdown("Suba el maestro de órdenes de compra antiguas para resolver las búsquedas de materiales de **2018, 2017 y anteriores**.")
+# -----------------------------------------------------------------------------
+# 3. GENERADOR DE REPORTES PDF Y EXCEL ESTILIZADOS
+# -----------------------------------------------------------------------------
+def generar_pdf_ejecutivo(solped, material, sociedad, cotizaciones, datos_indicadores):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=letter,
+        rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36
+    )
+    story = []
+    styles = getSampleStyleSheet()
 
-    uploaded_hist = st.file_uploader("Suba la Base Histórica Completa (Excel/CSV)", type=["xlsx", "xlsm", "xls", "csv"], key="historico_oc")
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=16, leading=20, textColor=colors.HexColor('#0F172A'), spaceAfter=4)
+    subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontSize=10, leading=12, textColor=colors.HexColor('#475569'), spaceAfter=14)
+    normal_style = ParagraphStyle('NormalStyle', parent=styles['Normal'], fontSize=9, leading=12)
+    header_table_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontSize=8, leading=10, textColor=colors.whitesmoke, fontName='Helvetica-Bold')
+    cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'], fontSize=8, leading=10)
 
-    if uploaded_hist is not None:
-        df_historico = cargar_planilla_inteligente(uploaded_hist)
-        if df_historico is not None and not df_historico.empty:
-            st.session_state["df_historico"] = df_historico
-            st.success(f"✅ Histórico cargado con éxito ({len(df_historico)} filas disponibles sin límite de años).")
+    story.append(Paragraph("<b>ENAEX — Consola de Compras</b>", title_style))
+    story.append(Paragraph(f"Reporte Ejecutivo de Adjudicación — Solped N° <b>{solped}</b>", subtitle_style))
 
-    if "df_historico" in st.session_state and st.session_state["df_historico"] is not None:
-        df_h = st.session_state["df_historico"]
+    meta_data = [
+        [
+            Paragraph(f"<b>N° Solped:</b> {solped}", normal_style),
+            Paragraph(f"<b>Código Material:</b> {material}", normal_style),
+            Paragraph(f"<b>Sociedad:</b> {sociedad}", normal_style)
+        ],
+        [
+            Paragraph(f"<b>Fecha Emisión:</b> {datetime.date.today().strftime('%d-%m-%Y')}", normal_style),
+            Paragraph(f"<b>Dólar Ref.:</b> ${datos_indicadores['dolar']:,.2f}", normal_style),
+            Paragraph(f"<b>UF Ref.:</b> ${datos_indicadores['uf']:,.2f}", normal_style)
+        ]
+    ]
+    t_meta = Table(meta_data, colWidths=[180, 180, 180])
+    t_meta.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F1F5F9')),
+        ('PADDING', (0,0), (-1,-1), 6),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('LINEBELOW', (0,0), (-1,-1), 1, colors.HexColor('#CBD5E1'))
+    ]))
+    story.append(t_meta)
+    story.append(Spacer(1, 14))
+
+    table_data = [[
+        Paragraph("<b>Proveedor</b>", header_table_style),
+        Paragraph("<b>Monto Orig.</b>", header_table_style),
+        Paragraph("<b>Mon.</b>", header_table_style),
+        Paragraph("<b>Equiv. CLP ($)</b>", header_table_style),
+        Paragraph("<b>Equiv. USD ($)</b>", header_table_style),
+        Paragraph("<b>Plazo Entrega</b>", header_table_style),
+        Paragraph("<b>Observaciones</b>", header_table_style)
+    ]]
+
+    min_clp = min([c.get("Equiv. CLP ($)", 0) for c in cotizaciones]) if cotizaciones else 0
+
+    for c in cotizaciones:
+        monto_orig_fmt = aplicar_formato_regional(c.get("Monto Original", c.get("Precio Unitario", 0)), c.get("Moneda", "CLP"))
+        clp_fmt = f"$ {int(c.get('Equiv. CLP ($)', 0)):,}".replace(",", ".")
+        usd_fmt = f"$ {c.get('Equiv. USD ($)', 0):,.2f}"
         
-        busqueda_hist = st.text_input("Buscar por Material, Código, Proveedor o Año:", value="", placeholder="(Material) / (Proveedor) / (Año)")
+        prov_text = f"<b>{c.get('Proveedor', '(Proveedor)')}</b>"
+        if len(cotizaciones) > 1 and c.get("Equiv. CLP ($)", 0) == min_clp and min_clp > 0:
+            prov_text += "<br/><font color='#16A34A'><b>★ Mejor Oferta</b></font>"
+
+        table_data.append([
+            Paragraph(prov_text, cell_style),
+            Paragraph(monto_orig_fmt, cell_style),
+            Paragraph(str(c.get("Moneda", "CLP")), cell_style),
+            Paragraph(clp_fmt, cell_style),
+            Paragraph(usd_fmt, cell_style),
+            Paragraph(str(c.get("Fecha de Entrega", c.get("Calendario de entrega", "(Calendario de entrega)"))), cell_style),
+            Paragraph(str(c.get("Observaciones", "(Observaciones)")), cell_style)
+        ])
+
+    t_quotes = Table(table_data, colWidths=[105, 65, 30, 75, 70, 85, 110])
+    t_quotes.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#0F172A')),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
+        ('PADDING', (0,0), (-1,-1), 5),
+    ]))
+    story.append(t_quotes)
+    story.append(Spacer(1, 15))
+
+    max_monto = max([c.get("Equiv. CLP ($)", 0) for c in cotizaciones]) if cotizaciones else 0
+    if max_monto > 1000000:
+        warn_p = Paragraph(
+            f"<b>⚠️ Nota de Control Financiero:</b> El requerimiento supera $1.000.000 CLP "
+            f"(Máximo detectado: {formato_clp(max_monto)} CLP). Requiere validación de acuerdo a matriz de firmas vigente.",
+            normal_style
+        )
+        story.append(warn_p)
+        story.append(Spacer(1, 15))
+
+    story.append(Spacer(1, 25))
+    sig_data = [
+        [
+            Paragraph("___________________________________<br/><b>Elaborado por:</b> Analista de Compras", cell_style),
+            Paragraph("___________________________________<br/><b>Aprobado por:</b> Jefatura de Abastecimiento", cell_style)
+        ]
+    ]
+    t_sig = Table(sig_data, colWidths=[270, 270])
+    t_sig.setStyle(TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ]))
+    story.append(t_sig)
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def generar_excel_estilizado(df, solped, material, sociedad, datos_indicadores):
+    output = io.BytesIO()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Cuadro Comparativo"
+    ws.views.sheetView[0].showGridLines = True
+
+    navy_fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    title_font = Font(name="Calibri", size=16, bold=True, color="0F172A")
+    sub_font = Font(name="Calibri", size=10, italic=True, color="475569")
+    bold_font = Font(name="Calibri", size=10, bold=True)
+    regular_font = Font(name="Calibri", size=10)
+    
+    green_fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
+    meta_fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+    
+    thin_border = Border(
+        left=Side(style='thin', color='CBD5E1'), right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'), bottom=Side(style='thin', color='CBD5E1')
+    )
+
+    ws.cell(row=1, column=1, value="ENAEX — Consola de Compras").font = title_font
+    ws.cell(row=2, column=1, value=f"Cuadro Comparativo de Cotizaciones — Solped N° {solped}").font = sub_font
+
+    meta_data = [
+        [f"N° Solped: {solped}", f"Código Material: {material}", f"Sociedad: {sociedad}"],
+        [f"Fecha Emisión: {datetime.date.today().strftime('%d-%m-%Y')}", f"Dólar Ref.: ${datos_indicadores['dolar']:,.2f}", f"UF Ref.: ${datos_indicadores['uf']:,.2f}"]
+    ]
+    
+    for r_idx, row_data in enumerate(meta_data, start=4):
+        for c_idx, val in enumerate(row_data, start=1):
+            cell = ws.cell(row=r_idx, column=c_idx, value=val)
+            cell.font = bold_font
+            cell.fill = meta_fill
+            cell.border = thin_border
+
+    headers = list(df.columns)
+    start_row = 7
+    
+    for c_idx, h in enumerate(headers, start=1):
+        cell = ws.cell(row=start_row, column=c_idx, value=h)
+        cell.fill = navy_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    col_clp_name = next((c for c in df.columns if "CLP" in str(c)), None)
+    min_clp = df[col_clp_name].min() if col_clp_name and not df.empty else 0
+
+    for r_offset, (_, row) in enumerate(df.iterrows()):
+        current_row = start_row + 1 + r_offset
+        is_best = (len(df) > 1 and col_clp_name and row[col_clp_name] == min_clp and min_clp > 0)
         
-        # Si el usuario escribe algo, filtramos; de lo contrario, mostramos la tabla completa
-        if busqueda_hist.strip():
-            mask = df_h.astype(str).apply(lambda col: col.str.contains(busqueda_hist.strip(), case=False, na=False)).any(axis=1)
-            res_hist = df_h[mask]
-            st.markdown(f"**Registros Históricos Encontrados ({len(res_hist)}):**")
-            st.dataframe(res_hist, use_container_width=True)
-        else:
-            st.markdown(f"**Vista Previa de la Base Histórica Completa ({len(df_h)} filas cargadas):**")
-            st.dataframe(df_h, use_container_width=True)
-    else:
-        st.info("💡 Suba un archivo histórico para consultar precios anteriores a 2019.")
+        for c_idx, col_name in enumerate(headers, start=1):
+            cell_val = row[col_name]
+            cell = ws.cell(row=current_row, column=c_idx, value=cell_val)
+            cell.font = bold_font if is_best else regular_font
+            if is_best:
+                cell.fill = green_fill
+            cell.border = thin_border
+
+    for col in ws.columns:
+        max_len = 0
+        col_letter = get_column_letter(col[0].column)
+        for cell in col:
+            val = str(cell.value or '')
+            max_len = max(max_len, len(val))
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 14)
+
+    wb.save(output)
+    return output.getvalue()
 
 # -----------------------------------------------------------------------------
 # 4. INICIALIZACION Y BARRA LATERAL
@@ -514,14 +689,18 @@ with tab_historico:
             st.success(f"✅ Histórico cargado con éxito ({len(df_historico)} filas disponibles sin límite de años).")
 
     if "df_historico" in st.session_state and st.session_state["df_historico"] is not None:
+        df_h = st.session_state["df_historico"]
+        
         busqueda_hist = st.text_input("Buscar por Material, Código, Proveedor o Año:", value="", placeholder="(Material) / (Proveedor) / (Año)")
         
         if busqueda_hist.strip():
-            df_h = st.session_state["df_historico"]
             mask = df_h.astype(str).apply(lambda col: col.str.contains(busqueda_hist.strip(), case=False, na=False)).any(axis=1)
             res_hist = df_h[mask]
             st.markdown(f"**Registros Históricos Encontrados ({len(res_hist)}):**")
             st.dataframe(res_hist, use_container_width=True)
+        else:
+            st.markdown(f"**Vista Previa de la Base Histórica Completa ({len(df_h)} filas cargadas):**")
+            st.dataframe(df_h, use_container_width=True)
     else:
         st.info("💡 Suba un archivo histórico para consultar precios anteriores a 2019.")
 
