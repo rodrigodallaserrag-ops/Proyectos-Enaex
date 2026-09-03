@@ -39,13 +39,13 @@ def obtener_indicadores_financieros():
 indicadores = obtener_indicadores_financieros()
 
 # -----------------------------------------------------------------------------
-# 2. CARGA Y PROCESAMIENTO ROBUSTO DE PLANILLA DE AUTOGESTIÓN (.XLSM)
+# 2. CARGA Y PROCESAMIENTO INTELIGENTE DE MATRIZ DE COMPRAS (.XLSM)
 # -----------------------------------------------------------------------------
 def cargar_planilla_autogestion(file):
     """
-    Escanea las pestañas del archivo Excel/XLSM, detecta automáticamente la fila 
-    donde comienza la tabla de datos omitiendo títulos superiores y convirtiendo
-    cada celda a string para prevenir errores de tipo float.
+    Escanea hojas y filas buscando la tabla de materiales real según densidad
+    de columnas clave de compras (Solped, Código, Descripción, Cantidad, etc.),
+    omitiendo tarjetas o bloques de resumen superiores.
     """
     try:
         nombre = file.name.lower()
@@ -55,66 +55,71 @@ def cargar_planilla_autogestion(file):
             engine = 'openpyxl' if nombre.endswith(('.xlsx', '.xlsm')) else None
             excel_file = pd.ExcelFile(file_bytes, engine=engine)
             
-            palabras_clave = [
-                'pos', 'solped', 'código', 'codigo', 'descripción', 'descripcion', 
-                'cantidad', 'um', 'último', 'ultimo', 'oferta', 'proveedor', 'monto'
+            # Palabras clave distintivas de la tabla principal de materiales
+            palabras_clave_fuertes = [
+                'solped', 'código', 'codigo', 'descripción', 'descripcion', 
+                'cantidad', 'um', 'u.m.', 'precio', 'proveedor', 'oferta', 
+                'incoterm', 'adjudicado', 'monto', 'lead time', 'material', 'posición', 'posicion'
             ]
             
-            df_final = None
+            mejor_sheet = None
+            mejor_fila_idx = None
+            max_coincidencias = 0
 
+            # 1. Escanear pestañas y filas para hallar la cabecera con mayor coincidencia
             for sheet_name in excel_file.sheet_names:
                 try:
                     df_raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=None)
                 except Exception:
                     continue
 
-                if df_raw.empty:
+                if df_raw.empty or len(df_raw) < 2:
                     continue
 
-                fila_encabezado_idx = None
+                for idx in range(min(40, len(df_raw))):
+                    row = df_raw.iloc[idx]
+                    celdas_texto = [str(val).strip().lower() for val in row.values if pd.notna(val) and str(val).strip() != '']
+                    
+                    # Se requiere al menos 3 columnas pobladas para considerarse cabecera
+                    if len(celdas_texto) < 3:
+                        continue
+                        
+                    coincidencias = sum(1 for kw in palabras_clave_fuertes if any(kw in celda for celda in celdas_texto))
+                    
+                    if coincidencias > max_coincidencias:
+                        max_coincidencias = coincidencias
+                        mejor_sheet = sheet_name
+                        mejor_fila_idx = idx
+
+            # 2. Extraer y estructurar la tabla principal detectada
+            if mejor_sheet is not None and max_coincidencias >= 2:
+                df_raw = pd.read_excel(excel_file, sheet_name=mejor_sheet, header=None)
+                df_clean = df_raw.iloc[mejor_fila_idx:].copy()
                 
-                # Buscar fila de encabezados convirtiendo cada celda de forma ultra segura a texto
-                for idx, row in df_raw.iterrows():
-                    celdas_texto = [str(val).lower() for val in row.values if pd.notna(val)]
-                    
-                    coincidencias = 0
-                    for kw in palabras_clave:
-                        if any(kw in celda for celda in celdas_texto):
-                            coincidencias += 1
-                            
-                    if coincidencias >= 2:
-                        fila_encabezado_idx = idx
-                        break
+                encabezados = []
+                for i, col_val in enumerate(df_clean.iloc[0]):
+                    val_str = str(col_val).strip() if pd.notna(col_val) else ""
+                    if val_str != "" and val_str.lower() not in ["none", "nan", "unnamed"]:
+                        encabezados.append(val_str)
+                    else:
+                        encabezados.append(f"Columna_{i+1}")
+                
+                df_clean.columns = encabezados
+                df_clean = df_clean.iloc[1:].reset_index(drop=True)
+                df_clean = df_clean.dropna(how='all')
+                
+                # Conservar solo columnas estructuradas con nombre válido
+                cols_utiles = [col for col in df_clean.columns if not str(col).startswith("Columna_")]
+                if len(cols_utiles) >= 2:
+                    df_clean = df_clean[cols_utiles]
+                
+                # Filtrar filas de residuos o vacías
+                df_clean = df_clean.dropna(thresh=2)
+                return df_clean
 
-                if fila_encabezado_idx is not None:
-                    df_clean = df_raw.iloc[fila_encabezado_idx:].copy()
-                    
-                    # Generar encabezados limpios
-                    nuevos_encabezados = []
-                    for i, col_val in enumerate(df_clean.iloc[0]):
-                        val_str = str(col_val).strip() if pd.notna(col_val) else ""
-                        if val_str != "" and val_str.lower() != "none" and val_str.lower() != "nan":
-                            nuevos_encabezados.append(val_str)
-                        else:
-                            nuevos_encabezados.append(f"Columna_{i+1}")
-                    
-                    df_clean.columns = nuevos_encabezados
-                    df_clean = df_clean.iloc[1:].reset_index(drop=True)
-                    df_clean = df_clean.dropna(how='all')
-                    
-                    # Filtrar columnas genéricas residuales
-                    cols_validas = [c for c in df_clean.columns if not str(c).startswith("Columna_")]
-                    if cols_validas:
-                        df_clean = df_clean[cols_validas]
-                    
-                    df_final = df_clean
-                    break
-
-            if df_final is None or df_final.empty:
-                df_final = pd.read_excel(excel_file, sheet_name=0)
-                df_final = df_final.dropna(how='all').dropna(how='all', axis=1)
-
-            return df_final
+            # Fallback en caso de no hallar coincidencia explícita
+            df_fallback = pd.read_excel(excel_file, sheet_name=0)
+            return df_fallback.dropna(how='all').dropna(how='all', axis=1)
 
         elif nombre.endswith('.csv'):
             try:
@@ -200,7 +205,7 @@ if uploaded_auto is not None:
     df_cargado = cargar_planilla_autogestion(uploaded_auto)
     if df_cargado is not None and not df_cargado.empty:
         st.session_state["df_matriz"] = df_cargado
-        st.success(f"✅ Planilla '{uploaded_auto.name}' procesada y cargada correctamente.")
+        st.success(f"✅ Planilla '{uploaded_auto.name}' procesada e importada correctamente.")
 
 if "df_matriz" not in st.session_state:
     st.session_state["df_matriz"] = generar_matriz_ejemplo()
