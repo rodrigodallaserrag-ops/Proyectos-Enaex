@@ -88,7 +88,7 @@ def extraer_materiales_de_masivo(df, id_solped):
                 return default
 
         posiciones.append({
-            "Pos": idx + 1,
+            "Pos": int(idx + 1),
             "Material": str(get_val(['texto', 'desc', 'material', 'denominacion', 'item', 'artículo', 'articulo', 'breve'], f"Material {idx+1}")),
             "Centro": str(get_val(['centro', 'plant', 'almacen', 'alm'], "E001")),
             "Cantidad": clean_num(get_val(['cant', 'cantidad', 'ctd'], 1.0), 1.0),
@@ -96,7 +96,7 @@ def extraer_materiales_de_masivo(df, id_solped):
             "Precio Unitario": clean_num(get_val(['precio', 'monto', 'val', 'costo', 'p.u', 'neto'], 0.0), 0.0),
             "Moneda": str(get_val(['moneda', 'curr', 'mon'], "CLP")).upper(),
             "Proveedor": str(get_val(['proveedor', 'vendor', 'prov', 'nam'], "")),
-            "Calendario de entrega": str(date.today()),
+            "Calendario de entrega": date.today(),  # Se guarda como tipo date
             "Observaciones": str(get_val(['obs', 'observacion', 'comentario'], ""))
         })
         
@@ -180,14 +180,19 @@ with tabs[0]:
         else:
             st.info("Carga una planilla maestra en el menú lateral para realizar la búsqueda automática por SOLPED.")
 
-    # Corrección de validación de clave en session_state
     key_editor = f"editor_{solped_id}" if (solped_id and f"editor_{solped_id}" in st.session_state) else "editor_default"
     
     df_inicial = st.session_state.get(key_editor, pd.DataFrame([{
         "Pos": 1, "Material": "(Material)", "Centro": "(Centro)", "Cantidad": 1.0, 
         "UM": "C/U", "Precio Unitario": 0.0, "Moneda": "CLP", 
-        "Proveedor": "", "Calendario de entrega": str(date.today()), "Observaciones": ""
+        "Proveedor": "", "Calendario de entrega": date.today(), "Observaciones": ""
     }]))
+
+    # Homologación explícita de tipos de datos para evitar descalce en data_editor
+    if not df_inicial.empty:
+        df_inicial["Precio Unitario"] = pd.to_numeric(df_inicial["Precio Unitario"], errors='coerce').fillna(0.0)
+        df_inicial["Cantidad"] = pd.to_numeric(df_inicial["Cantidad"], errors='coerce').fillna(1.0)
+        df_inicial["Calendario de entrega"] = pd.to_datetime(df_inicial["Calendario de entrega"]).dt.date
 
     edited_df = st.data_editor(
         df_inicial,
@@ -240,13 +245,19 @@ with tabs[1]:
         st.session_state["manual_grid_df"] = pd.DataFrame([{
             "Pos": 1, "Material": "Ítem Manual", "Cantidad": 1.0, "UM": "C/U",
             "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", 
-            "Calendario de entrega": str(date.today()), "Observaciones": ""
+            "Calendario de entrega": date.today(), "Observaciones": ""
         }])
+
+    df_manual = st.session_state["manual_grid_df"]
+    if not df_manual.empty:
+        df_manual["Precio Unitario"] = pd.to_numeric(df_manual["Precio Unitario"], errors='coerce').fillna(0.0)
+        df_manual["Cantidad"] = pd.to_numeric(df_manual["Cantidad"], errors='coerce').fillna(1.0)
+        df_manual["Calendario de entrega"] = pd.to_datetime(df_manual["Calendario de entrega"]).dt.date
 
     st.write("### Tabla de Cotización de Proveedor")
     
     cotizacion_df = st.data_editor(
-        st.session_state["manual_grid_df"],
+        df_manual,
         num_rows="dynamic",
         use_container_width=True,
         key="cotizacion_manual_editor",
