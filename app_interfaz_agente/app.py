@@ -4,6 +4,7 @@ import numpy as np
 import re
 import requests
 from datetime import datetime, date
+import io
 
 # =============================================================================
 # CONFIGURACIÓN DE PÁGINA
@@ -291,7 +292,6 @@ with tabs[0]:
         st.write("")
         btn_extraer = st.button("📤 Extraer Materiales", type="primary", use_container_width=True)
 
-    # Aquí está corregida la línea que daba error de sintaxis
     if (btn_extraer or solped_id) and solped_id.strip():
         if st.session_state.df_masivo is not None:
             materiales = extraer_materiales_de_masivo(st.session_state.df_masivo, solped_id)
@@ -403,7 +403,7 @@ with tabs[1]:
         st.success("¡Cotización agregada al Cuadro Comparativo!")
 
 # =============================================================================
-# TAB 3: CUADRO COMPARATIVO INTEGRADO
+# TAB 3: CUADRO COMPARATIVO INTEGRADO & DESCARGAS
 # =============================================================================
 with tabs[2]:
     st.subheader("📊 Cuadro Comparativo Integrado")
@@ -451,10 +451,7 @@ with tabs[2]:
         
         with col_graf1:
             st.markdown(f"**💰 Comparativa de Monto Total por SOLPED ({moneda_vista})**")
-            # Agrupamos por SOLPED para ver cómo se compara cada requerimiento entre sí
             df_monto_solped = df_comp.groupby("SOLPED")["Monto Total Visualizado"].sum().reset_index()
-            # El parámetro color="SOLPED" le dará un color distinto a cada barra de forma automática
-            # El parámetro height=350 mantiene el gráfico compacto
             st.bar_chart(df_monto_solped, x="SOLPED", y="Monto Total Visualizado", color="SOLPED", height=350)
             
         with col_graf2:
@@ -462,8 +459,42 @@ with tabs[2]:
             df_dias_solped = df_comp.groupby("SOLPED")["Días para Entrega"].mean().reset_index()
             st.bar_chart(df_dias_solped, x="SOLPED", y="Días para Entrega", color="SOLPED", height=350)
 
+        st.divider()
+        st.subheader("📥 Exportar Reporte")
+        st.write("Descarga los datos del cuadro comparativo listos para ser presentados o guardados como PDF desde Excel.")
+        
+        # Procesamiento en memoria del archivo Excel
+        buffer_excel = io.BytesIO()
+        with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+            df_comp.to_excel(writer, index=False, sheet_name='Comparativo Enaex')
+        archivo_excel = buffer_excel.getvalue()
+        
+        # Procesamiento en memoria de archivo CSV (alternativa ligera)
+        archivo_csv = df_comp.to_csv(index=False).encode('utf-8')
+        
+        col_down1, col_down2, col_down3 = st.columns([1, 1, 2])
+        
+        with col_down1:
+            st.download_button(
+                label="📊 Descargar Excel",
+                data=archivo_excel,
+                file_name=f"Reporte_Comparativo_{date.today()}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                type="primary"
+            )
+            
+        with col_down2:
+            st.download_button(
+                label="📄 Descargar CSV",
+                data=archivo_csv,
+                file_name=f"Reporte_Comparativo_{date.today()}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
         st.write("")
-        if st.button("🗑️ Limpiar Cuadro Comparativo"):
+        if st.button("🗑️ Limpiar Cuadro Comparativo", use_container_width=False):
             st.session_state.ofertas_manuales = []
             st.rerun()
     else:
