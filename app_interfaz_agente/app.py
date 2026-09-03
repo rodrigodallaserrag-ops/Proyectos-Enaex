@@ -39,12 +39,13 @@ def obtener_indicadores_financieros():
 indicadores = obtener_indicadores_financieros()
 
 # -----------------------------------------------------------------------------
-# 2. CARGA Y PROCESAMIENTO INTELIGENTE DE PLANILLA DE AUTOGESTIÓN (.XLSM)
+# 2. CARGA Y PROCESAMIENTO ROBUSTO DE PLANILLA DE AUTOGESTIÓN (.XLSM)
 # -----------------------------------------------------------------------------
 def cargar_planilla_autogestion(file):
     """
     Escanea las pestañas del archivo Excel/XLSM, detecta automáticamente la fila 
-    donde comienza la tabla de datos omitiendo títulos superiores y remueve columnas vacías.
+    donde comienza la tabla de datos omitiendo títulos superiores y convirtiendo
+    cada celda a string para prevenir errores de tipo float.
     """
     try:
         nombre = file.name.lower()
@@ -54,7 +55,6 @@ def cargar_planilla_autogestion(file):
             engine = 'openpyxl' if nombre.endswith(('.xlsx', '.xlsm')) else None
             excel_file = pd.ExcelFile(file_bytes, engine=engine)
             
-            # Palabras clave para identificar la fila de encabezados real
             palabras_clave = [
                 'pos', 'solped', 'código', 'codigo', 'descripción', 'descripcion', 
                 'cantidad', 'um', 'último', 'ultimo', 'oferta', 'proveedor', 'monto'
@@ -62,45 +62,55 @@ def cargar_planilla_autogestion(file):
             
             df_final = None
 
-            # Recorrer pestañas buscando la tabla de cotizaciones
             for sheet_name in excel_file.sheet_names:
-                df_raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=None)
+                try:
+                    df_raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=None)
+                except Exception:
+                    continue
+
                 if df_raw.empty:
                     continue
 
                 fila_encabezado_idx = None
                 
-                # Buscar la fila que contenga al menos 2 nombres de columna típicos
+                # Buscar fila de encabezados convirtiendo cada celda de forma ultra segura a texto
                 for idx, row in df_raw.iterrows():
-                    valores_fila = row.astype(str).str.lower().tolist()
-                    coincidencias = sum(1 for kw in palabras_clave if any(kw in celda for celda in valores_fila))
+                    celdas_texto = [str(val).lower() for val in row.values if pd.notna(val)]
+                    
+                    coincidencias = 0
+                    for kw in palabras_clave:
+                        if any(kw in celda for celda in celdas_texto):
+                            coincidencias += 1
+                            
                     if coincidencias >= 2:
                         fila_encabezado_idx = idx
                         break
 
                 if fila_encabezado_idx is not None:
-                    # Cortar el DataFrame desde la fila detectada como encabezado
                     df_clean = df_raw.iloc[fila_encabezado_idx:].copy()
-                    df_clean.columns = df_clean.iloc[0]  # Asignar primera fila como cabecera
-                    df_clean = df_clean.iloc[1:].reset_index(drop=True)  # Eliminar fila de cabecera duplicada
                     
-                    # Limpiar nombres de columnas
-                    df_clean.columns = [
-                        str(c).strip() if pd.notna(c) and str(c).strip() != 'None' else f"Columna_{i+1}"
-                        for i, c in enumerate(df_clean.columns)
-                    ]
+                    # Generar encabezados limpios
+                    nuevos_encabezados = []
+                    for i, col_val in enumerate(df_clean.iloc[0]):
+                        val_str = str(col_val).strip() if pd.notna(col_val) else ""
+                        if val_str != "" and val_str.lower() != "none" and val_str.lower() != "nan":
+                            nuevos_encabezados.append(val_str)
+                        else:
+                            nuevos_encabezados.append(f"Columna_{i+1}")
                     
-                    # Eliminar filas y columnas completamente vacías
-                    df_clean = df_clean.dropna(how='all').dropna(how='all', axis=1)
+                    df_clean.columns = nuevos_encabezados
+                    df_clean = df_clean.iloc[1:].reset_index(drop=True)
+                    df_clean = df_clean.dropna(how='all')
                     
-                    # Eliminar columnas secundarias sin nombre útil
-                    df_clean = df_clean.loc[:, ~df_clean.columns.str.startswith('Columna_')]
-
+                    # Filtrar columnas genéricas residuales
+                    cols_validas = [c for c in df_clean.columns if not str(c).startswith("Columna_")]
+                    if cols_validas:
+                        df_clean = df_clean[cols_validas]
+                    
                     df_final = df_clean
                     break
 
-            # Fallback en caso de no detectar coincidencia por palabras clave
-            if df_final is None:
+            if df_final is None or df_final.empty:
                 df_final = pd.read_excel(excel_file, sheet_name=0)
                 df_final = df_final.dropna(how='all').dropna(how='all', axis=1)
 
@@ -228,7 +238,12 @@ st.subheader("📈 Resumen Estadístico de Adjudicación")
 
 if not df_edited.empty:
     col_monto = [col for col in df_edited.columns if 'monto' in str(col).lower() or 'adjudicado' in str(col).lower()]
-    total_adjudicado = df_edited[col_monto[0]].sum() if col_monto else 0
+    if col_monto:
+        monto_series = pd.to_numeric(df_edited[col_monto[0]], errors='coerce').fillna(0)
+        total_adjudicado = float(monto_series.sum())
+    else:
+        total_adjudicado = 0.0
+        
     total_items = len(df_edited)
     
     col_m1, col_m2, col_m3 = st.columns(3)
