@@ -144,7 +144,9 @@ def generar_excel_estilizado(df, moneda_vista):
 
 def clean_str_pdf(txt):
     """Limpia caracteres especiales para evitar errores de codificación en PDF"""
-    s = str(txt or '')
+    if pd.isna(txt) or txt is None or str(txt).strip().lower() in ['none', 'nan', '']:
+        return "N/A"
+    s = str(txt)
     reemplazos = {'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','á':'a','é':'e','í':'i','ó':'o','ú':'u','Ñ':'N','ñ':'n','°':''}
     for k, v in reemplazos.items():
         s = s.replace(k, v)
@@ -237,7 +239,10 @@ def generar_pdf(df, moneda_vista):
         pdf.ln()
         fill = not fill
 
-    return bytes(pdf.output())
+    out = pdf.output(dest='S')
+    if isinstance(out, str):
+        return out.encode('latin-1')
+    return bytes(out)
 
 # =============================================================================
 # FUNCIONES AUXILIARES Y BÚSQUEDA ROBUSTA
@@ -488,8 +493,7 @@ with tabs[0]:
     with col_input:
         solped_id = st.text_input("Buscar ID SOLPED en la planilla:", placeholder="Ej: PR175798 o 175798")
     with col_btn:
-        st.write("")
-        st.write("")
+        st.container()
         btn_extraer = st.button("📤 Extraer Materiales", type="primary", use_container_width=True)
 
     if (btn_extraer or solped_id) and solped_id.strip():
@@ -549,8 +553,7 @@ with tabs[1]:
     with col_s1:
         manual_solped = st.text_input("Ingresar N° SOLPED para Autocompletar:", placeholder="Ej: PR175798")
     with col_s2:
-        st.write("")
-        st.write("")
+        st.container()
         btn_cargar_manual = st.button("📥 Cargar Requerimiento", use_container_width=True)
 
     if btn_cargar_manual and manual_solped:
@@ -611,11 +614,10 @@ with tabs[2]:
     if st.session_state.ofertas_manuales:
         df_comp = pd.DataFrame(st.session_state.ofertas_manuales)
         
-        # Limpieza de valores nulos/cadena vacía
-        df_comp['SOLPED'] = df_comp['SOLPED'].fillna('N/A').astype(str)
-        df_comp['SOLPED'] = df_comp['SOLPED'].replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
-        df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str)
-        df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace({'': 'Sin Especificar', 'none': 'Sin Especificar', 'None': 'Sin Especificar'})
+        # Saneamiento estricto de nulos y cadenas 'None'
+        df_comp['SOLPED'] = df_comp['SOLPED'].fillna('N/A').astype(str).replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
+        df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str).replace({'': 'Sin Especificar', 'none': 'Sin Especificar', 'None': 'Sin Especificar'})
+        df_comp['Proveedor Visual'] = df_comp['Proveedor']
 
         # Selector de Moneda de Visualización
         moneda_vista = st.radio(
@@ -688,32 +690,34 @@ with tabs[2]:
         st.subheader("📥 Exportar Reportes")
         st.write("Genera y descarga el informe en tu formato de preferencia:")
         
-        # Generar archivos
-        bytes_excel = generar_excel_estilizado(df_comp, moneda_vista)
-        bytes_pdf = generar_pdf(df_comp, moneda_vista)
-        
-        col_down1, col_down2, col_down3 = st.columns([1, 1, 2])
-        
-        with col_down1:
-            st.download_button(
-                label="📊 Reporte Excel",
-                data=bytes_excel,
-                file_name=f"Reporte_Comparativo_{date.today()}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-                type="primary"
-            )
+        try:
+            bytes_excel = generar_excel_estilizado(df_comp, moneda_vista)
+            bytes_pdf = generar_pdf(df_comp, moneda_vista)
             
-        with col_down2:
-            st.download_button(
-                label="📄 Descargar Reporte PDF",
-                data=bytes_pdf,
-                file_name=f"Reporte_Comparativo_{date.today()}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
+            col_down1, col_down2, col_down3 = st.columns([1, 1, 2])
+            
+            with col_down1:
+                st.download_button(
+                    label="📊 Reporte Excel",
+                    data=bytes_excel,
+                    file_name=f"Reporte_Comparativo_{date.today()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    type="primary"
+                )
+                
+            with col_down2:
+                st.download_button(
+                    label="📄 Descargar Reporte PDF",
+                    data=bytes_pdf,
+                    file_name=f"Reporte_Comparativo_{date.today()}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+        except Exception as err:
+            st.error(f"Error al preparar archivos de exportación: {err}")
 
-        st.write("")
+        st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🗑️ Limpiar Cuadro Comparativo", use_container_width=False):
             st.session_state.ofertas_manuales = []
             st.rerun()
