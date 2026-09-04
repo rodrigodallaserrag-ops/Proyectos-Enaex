@@ -6,6 +6,13 @@ import requests
 from datetime import datetime, date
 import io
 
+# Librerías para diseño de Excel
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+# Librería para generación de PDF
+from fpdf import FPDF
+
 # =============================================================================
 # CONFIGURACIÓN DE PÁGINA
 # =============================================================================
@@ -46,6 +53,191 @@ def obtener_indicadores_tiempo_real():
     except Exception:
         pass
     return valores_defecto
+
+# =============================================================================
+# FUNCIONES DE EXPORTACIÓN Y FORMATO (EXCEL Y PDF)
+# =============================================================================
+def generar_excel_estilizado(df, moneda_vista):
+    """Genera un archivo Excel con diseño corporativo elegante, bordes, formatos numéricos y anchos ajustados."""
+    buffer_excel = io.BytesIO()
+    
+    cols_export = [
+        'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
+        'Precio Unitario', 'Moneda', 'Proveedor Visual', 
+        'Calendario de entrega', 'Días para Entrega', 'Monto Total Visualizado'
+    ]
+    
+    df_export = df[[c for c in cols_export if c in df.columns]].copy()
+    df_export.rename(columns={
+        'Proveedor Visual': 'Proveedor', 
+        'Monto Total Visualizado': f'Total ({moneda_vista})'
+    }, inplace=True)
+    
+    with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+        df_export.to_excel(writer, index=False, sheet_name='Cuadro Comparativo', startrow=3)
+        
+        workbook = writer.book
+        worksheet = writer.sheets['Cuadro Comparativo']
+        
+        # Estilos visuales
+        HEADER_FILL = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+        ZEBRA_FILL = PatternFill(start_color="F9FAFB", end_color="F9FAFB", fill_type="solid")
+        
+        TITLE_FONT = Font(name="Calibri", size=15, bold=True, color="1E3A8A")
+        SUBTITLE_FONT = Font(name="Calibri", size=10, italic=True, color="6B7280")
+        HEADER_FONT = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        DATA_FONT = Font(name="Calibri", size=10)
+        
+        THIN_BORDER = Border(
+            left=Side(style='thin', color='E5E7EB'),
+            right=Side(style='thin', color='E5E7EB'),
+            top=Side(style='thin', color='E5E7EB'),
+            bottom=Side(style='thin', color='E5E7EB')
+        )
+        
+        # Título del Reporte
+        worksheet['A1'] = "ENAEX - CUADRO COMPARATIVO DE OFERTAS"
+        worksheet['A1'].font = TITLE_FONT
+        worksheet['A2'] = f"Fecha de informe: {date.today().strftime('%d/%m/%Y')} | Moneda base: {moneda_vista}"
+        worksheet['A2'].font = SUBTITLE_FONT
+        
+        # Formato de Encabezados de Tabla (Fila 4)
+        for col_num in range(1, len(df_export.columns) + 1):
+            cell = worksheet.cell(row=4, column=col_num)
+            cell.fill = HEADER_FILL
+            cell.font = HEADER_FONT
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = THIN_BORDER
+        
+        # Formato de Filas de Datos
+        for row_idx, row in enumerate(worksheet.iter_rows(min_row=5, max_row=4 + len(df_export), min_col=1, max_col=len(df_export.columns)), start=5):
+            use_zebra = (row_idx % 2 == 0)
+            for cell in row:
+                cell.font = DATA_FONT
+                cell.border = THIN_BORDER
+                if use_zebra:
+                    cell.fill = ZEBRA_FILL
+                
+                col_header = worksheet.cell(row=4, column=cell.column).value
+                if col_header in ['Precio Unitario', f'Total ({moneda_vista})']:
+                    cell.number_format = '$#,##0.00'
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                elif col_header in ['Cantidad', 'Pos', 'Días para Entrega']:
+                    cell.number_format = '#,##0'
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                elif col_header in ['SOLPED', 'Moneda', 'UM', 'Centro']:
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                else:
+                    cell.alignment = Alignment(horizontal='left', vertical='center')
+
+        # Autoajuste inteligente de ancho de columnas
+        for col in worksheet.columns:
+            max_len = 0
+            col_letter = get_column_letter(col[0].column)
+            for cell in col:
+                if cell.row < 4: continue
+                if cell.value:
+                    max_len = max(max_len, len(str(cell.value)))
+            worksheet.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    return buffer_excel.getvalue()
+
+def clean_str_pdf(txt):
+    """Limpia caracteres especiales para evitar errores de codificación en PDF"""
+    s = str(txt or '')
+    reemplazos = {'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','á':'a','é':'e','í':'i','ó':'o','ú':'u','Ñ':'N','ñ':'n','°':''}
+    for k, v in reemplazos.items():
+        s = s.replace(k, v)
+    return s.encode('latin-1', 'ignore').decode('latin-1')
+
+class PDFReport(FPDF):
+    def header(self):
+        self.set_font('Helvetica', 'B', 14)
+        self.set_text_color(30, 58, 138)
+        self.cell(0, 8, 'ENAEX - EVALUACION COMPARATIVA DE OFERTAS', ln=True, align='C')
+        self.set_font('Helvetica', 'I', 9)
+        self.set_text_color(100, 100, 100)
+        self.cell(0, 5, f'Fecha de Emision: {date.today().strftime("%d/%m/%Y")}', ln=True, align='C')
+        self.ln(4)
+
+    def footer(self):
+        self.set_y(-12)
+        self.set_font('Helvetica', 'I', 8)
+        self.set_text_color(128, 128, 128)
+        self.cell(0, 10, f'Pagina {self.page_no()}/{{nb}} - Documento Generado Automáticamente', align='C')
+
+def generar_pdf(df, moneda_vista):
+    """Genera un archivo PDF ejecutivo en formato horizontal (A4)"""
+    pdf = PDFReport(orientation='L', unit='mm', format='A4')
+    pdf.alias_nb_pages()
+    pdf.add_page()
+    
+    # Resumen superior
+    monto_total = df["Monto Total Visualizado"].sum()
+    pdf.set_fill_color(243, 244, 246)
+    pdf.rect(10, pdf.get_y(), 277, 10, style='F')
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_text_color(30, 58, 138)
+    pdf.cell(0, 8, f'  RESUMEN GENERAL: Total Ofertas Evaluadas: {len(df)}    |    Monto Acumulado ({moneda_vista}): ${monto_total:,.2f}', ln=True)
+    pdf.ln(4)
+
+    # Encabezados de tabla PDF
+    cols = [
+        ("SOLPED", 30),
+        ("Material", 80),
+        ("Proveedor", 55),
+        ("Cant.", 18),
+        ("Mon", 18),
+        (f"Total ({moneda_vista})", 40),
+        ("Entrega", 36)
+    ]
+
+    pdf.set_font('Helvetica', 'B', 8)
+    pdf.set_fill_color(30, 58, 138)
+    pdf.set_text_color(255, 255, 255)
+
+    for name, width in cols:
+        pdf.cell(width, 7, name, border=1, align='C', fill=True)
+    pdf.ln()
+
+    # Filas de datos PDF
+    pdf.set_font('Helvetica', '', 8)
+    pdf.set_text_color(0, 0, 0)
+    
+    fill = False
+    for _, row in df.iterrows():
+        if pdf.get_y() > 180:
+            pdf.add_page()
+            pdf.set_font('Helvetica', 'B', 8)
+            pdf.set_fill_color(30, 58, 138)
+            pdf.set_text_color(255, 255, 255)
+            for name, width in cols:
+                pdf.cell(width, 7, name, border=1, align='C', fill=True)
+            pdf.ln()
+            pdf.set_font('Helvetica', '', 8)
+            pdf.set_text_color(0, 0, 0)
+
+        pdf.set_fill_color(249, 250, 251) if fill else pdf.set_fill_color(255, 255, 255)
+
+        solped = clean_str_pdf(row.get('SOLPED', ''))[:18]
+        material = clean_str_pdf(row.get('Material', ''))[:48]
+        proveedor = clean_str_pdf(row.get('Proveedor Visual', ''))[:32]
+        cant = f"{row.get('Cantidad', 0):,.0f}"
+        mon = clean_str_pdf(row.get('Moneda', 'CLP'))
+        monto = f"${row.get('Monto Total Visualizado', 0):,.2f}"
+        dias = f"{int(row.get('Días para Entrega', 0))} dias"
+
+        pdf.cell(cols[0][1], 6, solped, border=1, align='C', fill=True)
+        pdf.cell(cols[1][1], 6, material, border=1, align='L', fill=True)
+        pdf.cell(cols[2][1], 6, proveedor, border=1, align='L', fill=True)
+        pdf.cell(cols[3][1], 6, cant, border=1, align='C', fill=True)
+        pdf.cell(cols[4][1], 6, mon, border=1, align='C', fill=True)
+        pdf.cell(cols[5][1], 6, monto, border=1, align='R', fill=True)
+        pdf.cell(cols[6][1], 6, dias, border=1, align='C', fill=True)
+        pdf.ln()
+        fill = not fill
+
+    return bytes(pdf.output())
 
 # =============================================================================
 # FUNCIONES AUXILIARES Y BÚSQUEDA ROBUSTA
@@ -273,7 +465,7 @@ with st.sidebar:
 # =============================================================================
 if st.session_state.df_masivo is not None:
     with st.expander("👀 Vista Previa de la Planilla Base Cargada", expanded=False):
-        st.write(f"Mostrando los datos procesados. La columna 'SP' ha sido priorizada en la primera posición para fácil lectura.")
+        st.write("Mostrando los datos procesados. La columna 'SP' ha sido priorizada en la primera posición para fácil lectura.")
         st.dataframe(st.session_state.df_masivo, use_container_width=True)
 
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
@@ -418,7 +610,7 @@ with tabs[2]:
             horizontal=True
         )
         
-        # Asignar la columna total dinámica según la moneda seleccionada
+        # Asignar la columna total dinámica
         if moneda_vista == "CLP":
             df_comp["Monto Total Visualizado"] = df_comp["Total CLP"]
         elif moneda_vista == "USD":
@@ -434,31 +626,20 @@ with tabs[2]:
         
         df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace("", "Sin Especificar")
 
-        # =============================================================================
-        # MOTOR DE RECOMENDACIÓN (LÓGICA DE ESTILOS)
-        # =============================================================================
+        # Motor de recomendación visual
         st.markdown("### 🏆 Motor de Recomendación")
-        st.info("💡 **Guía de colores:** Se resalta en **verde** la opción más económica y en **azul** la entrega más rápida (cuando hay 2 o más ofertas compitiendo por el mismo material).")
+        st.info("💡 **Guía de colores:** Se resalta en **verde** la opción más económica y en **azul** la entrega más rápida para cada material.")
         
         def highlight_best(df):
-            # Crea un DataFrame vacío con la misma forma para aplicar estilos
             styles = pd.DataFrame('', index=df.index, columns=df.columns)
-            
-            # Agrupar por SOLPED y Material para comparar ofertas equivalentes
             for name, group in df.groupby(['SOLPED', 'Material']):
-                if len(group) > 1: # Solo aplicamos lógica si hay más de 1 cotización para el mismo ítem
-                    # Índice del monto mínimo
+                if len(group) > 1:
                     min_monto_idx = group['Monto Total Visualizado'].idxmin()
-                    # Índice de menor tiempo de entrega
                     min_dias_idx = group['Días para Entrega'].idxmin()
-                    
-                    # Aplicar estilos CSS a celdas específicas
                     styles.loc[min_monto_idx, 'Monto Total Visualizado'] = 'background-color: #D1FAE5; color: #065F46; font-weight: bold;'
                     styles.loc[min_dias_idx, 'Días para Entrega'] = 'background-color: #DBEAFE; color: #1E3A8A; font-weight: bold;'
-                    
             return styles
 
-        # Aplicar el formateo de estilo y moneda a la tabla
         styled_df_comp = df_comp.style.apply(highlight_best, axis=None).format({
             "Monto Total Visualizado": "$ {:,.2f}",
             "Precio Unitario": "$ {:,.2f}",
@@ -467,7 +648,6 @@ with tabs[2]:
             "Total EUR": "$ {:,.2f}"
         })
 
-        # Mostrar tabla comparativa estilizada
         st.dataframe(styled_df_comp, use_container_width=True)
         
         col_c1, col_c2 = st.columns(2)
@@ -493,24 +673,19 @@ with tabs[2]:
             st.bar_chart(df_dias_solped, x="SOLPED", y="Días para Entrega", color="SOLPED", height=350)
 
         st.divider()
-        st.subheader("📥 Exportar Reporte")
-        st.write("Descarga los datos del cuadro comparativo listos para ser presentados o guardados como PDF desde Excel.")
+        st.subheader("📥 Exportar Reportes")
+        st.write("Genera y descarga el informe en tu formato de preferencia:")
         
-        # Procesamiento en memoria del archivo Excel
-        buffer_excel = io.BytesIO()
-        with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
-            df_comp.to_excel(writer, index=False, sheet_name='Comparativo Enaex')
-        archivo_excel = buffer_excel.getvalue()
-        
-        # Procesamiento en memoria de archivo CSV (alternativa ligera)
-        archivo_csv = df_comp.to_csv(index=False).encode('utf-8')
+        # Generar archivos
+        bytes_excel = generar_excel_estilizado(df_comp, moneda_vista)
+        bytes_pdf = generar_pdf(df_comp, moneda_vista)
         
         col_down1, col_down2, col_down3 = st.columns([1, 1, 2])
         
         with col_down1:
             st.download_button(
-                label="📊 Descargar Excel",
-                data=archivo_excel,
+                label="📊 Descargar Excel Estilizado",
+                data=bytes_excel,
                 file_name=f"Reporte_Comparativo_{date.today()}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
@@ -519,10 +694,10 @@ with tabs[2]:
             
         with col_down2:
             st.download_button(
-                label="📄 Descargar CSV",
-                data=archivo_csv,
-                file_name=f"Reporte_Comparativo_{date.today()}.csv",
-                mime="text/csv",
+                label="📄 Descargar Reporte PDF",
+                data=bytes_pdf,
+                file_name=f"Reporte_Comparativo_{date.today()}.pdf",
+                mime="application/pdf",
                 use_container_width=True
             )
 
