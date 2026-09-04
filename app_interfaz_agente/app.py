@@ -218,7 +218,10 @@ def generar_pdf(df, moneda_vista):
                 pdf.set_font('Helvetica', '', 8)
                 pdf.set_text_color(0, 0, 0)
 
-            pdf.set_fill_color(249, 250, 251) if fill else pdf.set_fill_color(255, 255, 255)
+            if fill:
+                pdf.set_fill_color(249, 250, 251)
+            else:
+                pdf.set_fill_color(255, 255, 255)
 
             solped = clean_str_pdf(row.get('SOLPED', ''))[:18]
             material = clean_str_pdf(row.get('Material', ''))[:48]
