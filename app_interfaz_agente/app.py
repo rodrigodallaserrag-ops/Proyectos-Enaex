@@ -434,8 +434,41 @@ with tabs[2]:
         
         df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace("", "Sin Especificar")
 
-        # Mostrar tabla comparativa
-        st.dataframe(df_comp, use_container_width=True)
+        # =============================================================================
+        # MOTOR DE RECOMENDACIÓN (LÓGICA DE ESTILOS)
+        # =============================================================================
+        st.markdown("### 🏆 Motor de Recomendación")
+        st.info("💡 **Guía de colores:** Se resalta en **verde** la opción más económica y en **azul** la entrega más rápida (cuando hay 2 o más ofertas compitiendo por el mismo material).")
+        
+        def highlight_best(df):
+            # Crea un DataFrame vacío con la misma forma para aplicar estilos
+            styles = pd.DataFrame('', index=df.index, columns=df.columns)
+            
+            # Agrupar por SOLPED y Material para comparar ofertas equivalentes
+            for name, group in df.groupby(['SOLPED', 'Material']):
+                if len(group) > 1: # Solo aplicamos lógica si hay más de 1 cotización para el mismo ítem
+                    # Índice del monto mínimo
+                    min_monto_idx = group['Monto Total Visualizado'].idxmin()
+                    # Índice de menor tiempo de entrega
+                    min_dias_idx = group['Días para Entrega'].idxmin()
+                    
+                    # Aplicar estilos CSS a celdas específicas
+                    styles.loc[min_monto_idx, 'Monto Total Visualizado'] = 'background-color: #D1FAE5; color: #065F46; font-weight: bold;'
+                    styles.loc[min_dias_idx, 'Días para Entrega'] = 'background-color: #DBEAFE; color: #1E3A8A; font-weight: bold;'
+                    
+            return styles
+
+        # Aplicar el formateo de estilo y moneda a la tabla
+        styled_df_comp = df_comp.style.apply(highlight_best, axis=None).format({
+            "Monto Total Visualizado": "$ {:,.2f}",
+            "Precio Unitario": "$ {:,.2f}",
+            "Total CLP": "$ {:,.2f}",
+            "Total USD": "$ {:,.2f}",
+            "Total EUR": "$ {:,.2f}"
+        })
+
+        # Mostrar tabla comparativa estilizada
+        st.dataframe(styled_df_comp, use_container_width=True)
         
         col_c1, col_c2 = st.columns(2)
         with col_c1:
