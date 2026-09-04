@@ -33,14 +33,19 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =============================================================================
-# OBTENCIÓN DE INDICADORES FINANCIEROS EN TIEMPO REAL (API)
+# OBTENCIÓN DE INDICADORES FINANCIEROS EN TIEMPO REAL (API CON FALLBACK)
 # =============================================================================
 @st.cache_data(ttl=3600)
 def obtener_indicadores_tiempo_real():
-    """Consulta la API de mindicador.cl para obtener USD, EUR y UF actualizados"""
+    """Consulta APIs de indicadores con User-Agent personalizado y respaldo en caso de fallo"""
     valores_defecto = {"USD": 950.0, "EUR": 1020.0, "UF": 38000.0, "estado": False}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    # Intentar fuente principal: mindicador.cl
     try:
-        response = requests.get("https://mindicador.cl/api", timeout=5)
+        response = requests.get("https://mindicador.cl/api", headers=headers, timeout=8)
         if response.status_code == 200:
             data = response.json()
             return {
@@ -51,6 +56,33 @@ def obtener_indicadores_tiempo_real():
             }
     except Exception:
         pass
+
+    # Intentar fuente de respaldo: DolarApi Chile
+    try:
+        response_alt = requests.get("https://dolarapi.com/v1/chile/cotizaciones", headers=headers, timeout=8)
+        if response_alt.status_code == 200:
+            data_alt = response_alt.json()
+            res = {}
+            for item in data_alt:
+                codigo = str(item.get("codigo", "")).upper()
+                valor = float(item.get("venta") or item.get("valor") or 0.0)
+                if codigo in ["USD", "DOLAR"]:
+                    res["USD"] = valor
+                elif codigo in ["EUR", "EURO"]:
+                    res["EUR"] = valor
+                elif codigo == "UF":
+                    res["UF"] = valor
+            
+            if "USD" in res:
+                return {
+                    "USD": res.get("USD", 950.0),
+                    "EUR": res.get("EUR", 1020.0),
+                    "UF": res.get("UF", 38000.0),
+                    "estado": True
+                }
+    except Exception:
+        pass
+
     return valores_defecto
 
 # =============================================================================
