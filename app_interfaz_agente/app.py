@@ -22,14 +22,13 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilos CSS personalizados
+# Estilos CSS personalizados (sin clases de badges residuales)
 st.markdown("""
 <style>
     .main-header { font-size: 1.8rem; font-weight: 700; color: #1E3A8A; margin-bottom: 0.5rem; }
     .sub-header { font-size: 1rem; color: #4B5563; margin-bottom: 1.5rem; }
     .stTable { font-size: 0.85rem; }
     .metric-card { background-color: #F3F4F6; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #1E3A8A; }
-    .badge-best { background-color: #D1FAE5; color: #065F46; padding: 0.2rem 0.5rem; border-radius: 0.25rem; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -101,7 +100,7 @@ def generar_excel_estilizado(df, moneda_vista):
         worksheet['A2'] = f"Fecha de informe: {date.today().strftime('%d/%m/%Y')} | Moneda base: {moneda_vista}"
         worksheet['A2'].font = SUBTITLE_FONT
         
-        # Formato de Encabezados de Tabla (Fila 4)
+        # Formato de Encabezados de Tabla
         for col_num in range(1, len(df_export.columns) + 1):
             cell = worksheet.cell(row=4, column=col_num)
             cell.fill = HEADER_FILL
@@ -144,9 +143,7 @@ def generar_excel_estilizado(df, moneda_vista):
 
 def clean_str_pdf(txt):
     """Limpia caracteres especiales para evitar errores de codificación en PDF"""
-    if pd.isna(txt) or txt is None or str(txt).strip().lower() in ['none', 'nan', '']:
-        return "N/A"
-    s = str(txt)
+    s = str(txt or '')
     reemplazos = {'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','á':'a','é':'e','í':'i','ó':'o','ú':'u','Ñ':'N','ñ':'n','°':''}
     for k, v in reemplazos.items():
         s = s.replace(k, v)
@@ -227,7 +224,10 @@ def generar_pdf(df, moneda_vista):
         cant = f"{row.get('Cantidad', 0):,.0f}"
         mon = clean_str_pdf(row.get('Moneda', 'CLP'))
         monto = f"${row.get('Monto Total Visualizado', 0):,.2f}"
-        dias = f"{int(row.get('Días para Entrega', 0))} dias"
+        
+        dias_val = row.get('Días para Entrega', 0)
+        dias_val = 0 if pd.isna(dias_val) else int(dias_val)
+        dias = f"{dias_val} dias"
 
         pdf.cell(cols[0][1], 6, solped, border=1, align='C', fill=True)
         pdf.cell(cols[1][1], 6, material, border=1, align='L', fill=True)
@@ -239,10 +239,7 @@ def generar_pdf(df, moneda_vista):
         pdf.ln()
         fill = not fill
 
-    out = pdf.output(dest='S')
-    if isinstance(out, str):
-        return out.encode('latin-1')
-    return bytes(out)
+    return bytes(pdf.output())
 
 # =============================================================================
 # FUNCIONES AUXILIARES Y BÚSQUEDA ROBUSTA
@@ -493,7 +490,8 @@ with tabs[0]:
     with col_input:
         solped_id = st.text_input("Buscar ID SOLPED en la planilla:", placeholder="Ej: PR175798 o 175798")
     with col_btn:
-        st.container()
+        st.write("")
+        st.write("")
         btn_extraer = st.button("📤 Extraer Materiales", type="primary", use_container_width=True)
 
     if (btn_extraer or solped_id) and solped_id.strip():
@@ -553,7 +551,8 @@ with tabs[1]:
     with col_s1:
         manual_solped = st.text_input("Ingresar N° SOLPED para Autocompletar:", placeholder="Ej: PR175798")
     with col_s2:
-        st.container()
+        st.write("")
+        st.write("")
         btn_cargar_manual = st.button("📥 Cargar Requerimiento", use_container_width=True)
 
     if btn_cargar_manual and manual_solped:
@@ -614,10 +613,11 @@ with tabs[2]:
     if st.session_state.ofertas_manuales:
         df_comp = pd.DataFrame(st.session_state.ofertas_manuales)
         
-        # Saneamiento estricto de nulos y cadenas 'None'
-        df_comp['SOLPED'] = df_comp['SOLPED'].fillna('N/A').astype(str).replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
-        df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str).replace({'': 'Sin Especificar', 'none': 'Sin Especificar', 'None': 'Sin Especificar'})
-        df_comp['Proveedor Visual'] = df_comp['Proveedor']
+        # Limpieza de valores nulos/cadena vacía
+        df_comp['SOLPED'] = df_comp['SOLPED'].fillna('N/A').astype(str)
+        df_comp['SOLPED'] = df_comp['SOLPED'].replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
+        df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str)
+        df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace({'': 'Sin Especificar', 'none': 'Sin Especificar', 'None': 'Sin Especificar'})
 
         # Selector de Moneda de Visualización
         moneda_vista = st.radio(
@@ -638,9 +638,9 @@ with tabs[2]:
         df_comp['Calendario de entrega'] = pd.to_datetime(df_comp['Calendario de entrega'])
         hoy = pd.Timestamp(date.today())
         df_comp['Días para Entrega'] = (df_comp['Calendario de entrega'] - hoy).dt.days
-        df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: x if x > 0 else 0)
+        df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: x if pd.notna(x) and x > 0 else 0)
 
-        # Motor de recomendación visual
+        # Motor de recomendación visual integrado en la tabla
         st.markdown("### 🏆 Motor de Recomendación")
         st.info("💡 **Guía de colores:** Se resalta en **verde** la opción más económica y en **azul** la entrega más rápida para cada material.")
         
@@ -690,34 +690,32 @@ with tabs[2]:
         st.subheader("📥 Exportar Reportes")
         st.write("Genera y descarga el informe en tu formato de preferencia:")
         
-        try:
-            bytes_excel = generar_excel_estilizado(df_comp, moneda_vista)
-            bytes_pdf = generar_pdf(df_comp, moneda_vista)
+        # Generar archivos binarios para descarga directa
+        bytes_excel = generar_excel_estilizado(df_comp, moneda_vista)
+        bytes_pdf = generar_pdf(df_comp, moneda_vista)
+        
+        col_down1, col_down2, _ = st.columns([1, 1, 2])
+        
+        with col_down1:
+            st.download_button(
+                label="📊 Reporte Excel",
+                data=bytes_excel,
+                file_name=f"Reporte_Comparativo_{date.today()}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                type="primary"
+            )
             
-            col_down1, col_down2, col_down3 = st.columns([1, 1, 2])
-            
-            with col_down1:
-                st.download_button(
-                    label="📊 Reporte Excel",
-                    data=bytes_excel,
-                    file_name=f"Reporte_Comparativo_{date.today()}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                    type="primary"
-                )
-                
-            with col_down2:
-                st.download_button(
-                    label="📄 Descargar Reporte PDF",
-                    data=bytes_pdf,
-                    file_name=f"Reporte_Comparativo_{date.today()}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
-                )
-        except Exception as err:
-            st.error(f"Error al preparar archivos de exportación: {err}")
+        with col_down2:
+            st.download_button(
+                label="📄 Descargar Reporte PDF",
+                data=bytes_pdf,
+                file_name=f"Reporte_Comparativo_{date.today()}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.write("")
         if st.button("🗑️ Limpiar Cuadro Comparativo", use_container_width=False):
             st.session_state.ofertas_manuales = []
             st.rerun()
