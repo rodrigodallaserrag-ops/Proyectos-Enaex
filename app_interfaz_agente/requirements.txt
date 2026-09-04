@@ -5,3 +5,4 @@ requests
 openpyxl
 reportlab
 plotly
+fpdf2
