@@ -22,7 +22,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilos CSS personalizados (sin clases de badges residuales)
+# Estilos CSS personalizados
 st.markdown("""
 <style>
     .main-header { font-size: 1.8rem; font-weight: 700; color: #1E3A8A; margin-bottom: 0.5rem; }
@@ -134,7 +134,8 @@ def generar_excel_estilizado(df, moneda_vista):
             max_len = 0
             col_letter = get_column_letter(col[0].column)
             for cell in col:
-                if cell.row < 4: continue
+                if cell.row < 4:
+                    continue
                 if cell.value:
                     max_len = max(max_len, len(str(cell.value)))
             worksheet.column_dimensions[col_letter].width = max(max_len + 4, 12)
@@ -167,79 +168,85 @@ class PDFReport(FPDF):
 
 def generar_pdf(df, moneda_vista):
     """Genera un archivo PDF ejecutivo en formato horizontal (A4)"""
-    pdf = PDFReport(orientation='L', unit='mm', format='A4')
-    pdf.alias_nb_pages()
-    pdf.add_page()
-    
-    # Resumen superior
-    monto_total = df["Monto Total Visualizado"].sum()
-    pdf.set_fill_color(243, 244, 246)
-    pdf.rect(10, pdf.get_y(), 277, 10, style='F')
-    pdf.set_font('Helvetica', 'B', 9)
-    pdf.set_text_color(30, 58, 138)
-    pdf.cell(0, 8, f'  RESUMEN GENERAL: Total Ofertas Evaluadas: {len(df)}    |    Monto Acumulado ({moneda_vista}): ${monto_total:,.2f}', ln=True)
-    pdf.ln(4)
-
-    # Encabezados de tabla PDF
-    cols = [
-        ("SOLPED", 30),
-        ("Material", 80),
-        ("Proveedor", 55),
-        ("Cant.", 18),
-        ("Mon", 18),
-        (f"Total ({moneda_vista})", 40),
-        ("Entrega", 36)
-    ]
-
-    pdf.set_font('Helvetica', 'B', 8)
-    pdf.set_fill_color(30, 58, 138)
-    pdf.set_text_color(255, 255, 255)
-
-    for name, width in cols:
-        pdf.cell(width, 7, name, border=1, align='C', fill=True)
-    pdf.ln()
-
-    # Filas de datos PDF
-    pdf.set_font('Helvetica', '', 8)
-    pdf.set_text_color(0, 0, 0)
-    
-    fill = False
-    for _, row in df.iterrows():
-        if pdf.get_y() > 180:
-            pdf.add_page()
-            pdf.set_font('Helvetica', 'B', 8)
-            pdf.set_fill_color(30, 58, 138)
-            pdf.set_text_color(255, 255, 255)
-            for name, width in cols:
-                pdf.cell(width, 7, name, border=1, align='C', fill=True)
-            pdf.ln()
-            pdf.set_font('Helvetica', '', 8)
-            pdf.set_text_color(0, 0, 0)
-
-        pdf.set_fill_color(249, 250, 251) if fill else pdf.set_fill_color(255, 255, 255)
-
-        solped = clean_str_pdf(row.get('SOLPED', ''))[:18]
-        material = clean_str_pdf(row.get('Material', ''))[:48]
-        proveedor = clean_str_pdf(row.get('Proveedor Visual', ''))[:32]
-        cant = f"{row.get('Cantidad', 0):,.0f}"
-        mon = clean_str_pdf(row.get('Moneda', 'CLP'))
-        monto = f"${row.get('Monto Total Visualizado', 0):,.2f}"
+    try:
+        pdf = PDFReport(orientation='L', unit='mm', format='A4')
+        pdf.alias_nb_pages()
+        pdf.add_page()
         
-        dias_val = row.get('Días para Entrega', 0)
-        dias_val = 0 if pd.isna(dias_val) else int(dias_val)
-        dias = f"{dias_val} dias"
+        # Resumen superior
+        monto_total = df["Monto Total Visualizado"].sum()
+        pdf.set_fill_color(243, 244, 246)
+        pdf.rect(10, pdf.get_y(), 277, 10, style='F')
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_text_color(30, 58, 138)
+        pdf.cell(0, 8, f'  RESUMEN GENERAL: Total Ofertas Evaluadas: {len(df)}    |    Monto Acumulado ({moneda_vista}): ${monto_total:,.2f}', ln=True)
+        pdf.ln(4)
 
-        pdf.cell(cols[0][1], 6, solped, border=1, align='C', fill=True)
-        pdf.cell(cols[1][1], 6, material, border=1, align='L', fill=True)
-        pdf.cell(cols[2][1], 6, proveedor, border=1, align='L', fill=True)
-        pdf.cell(cols[3][1], 6, cant, border=1, align='C', fill=True)
-        pdf.cell(cols[4][1], 6, mon, border=1, align='C', fill=True)
-        pdf.cell(cols[5][1], 6, monto, border=1, align='R', fill=True)
-        pdf.cell(cols[6][1], 6, dias, border=1, align='C', fill=True)
+        # Encabezados de tabla PDF
+        cols = [
+            ("SOLPED", 30),
+            ("Material", 80),
+            ("Proveedor", 55),
+            ("Cant.", 18),
+            ("Mon", 18),
+            (f"Total ({moneda_vista})", 40),
+            ("Entrega", 36)
+        ]
+
+        pdf.set_font('Helvetica', 'B', 8)
+        pdf.set_fill_color(30, 58, 138)
+        pdf.set_text_color(255, 255, 255)
+
+        for name, width in cols:
+            pdf.cell(width, 7, name, border=1, align='C', fill=True)
         pdf.ln()
-        fill = not fill
 
-    return bytes(pdf.output())
+        # Filas de datos PDF
+        pdf.set_font('Helvetica', '', 8)
+        pdf.set_text_color(0, 0, 0)
+        
+        fill = False
+        for _, row in df.iterrows():
+            if pdf.get_y() > 180:
+                pdf.add_page()
+                pdf.set_font('Helvetica', 'B', 8)
+                pdf.set_fill_color(30, 58, 138)
+                pdf.set_text_color(255, 255, 255)
+                for name, width in cols:
+                    pdf.cell(width, 7, name, border=1, align='C', fill=True)
+                pdf.ln()
+                pdf.set_font('Helvetica', '', 8)
+                pdf.set_text_color(0, 0, 0)
+
+            pdf.set_fill_color(249, 250, 251) if fill else pdf.set_fill_color(255, 255, 255)
+
+            solped = clean_str_pdf(row.get('SOLPED', ''))[:18]
+            material = clean_str_pdf(row.get('Material', ''))[:48]
+            proveedor = clean_str_pdf(row.get('Proveedor Visual', ''))[:32]
+            cant = f"{row.get('Cantidad', 0):,.0f}"
+            mon = clean_str_pdf(row.get('Moneda', 'CLP'))
+            monto = f"${row.get('Monto Total Visualizado', 0):,.2f}"
+            
+            dias_val = row.get('Días para Entrega', 0)
+            dias_val = 0 if pd.isna(dias_val) else int(dias_val)
+            dias = f"{dias_val} dias"
+
+            pdf.cell(cols[0][1], 6, solped, border=1, align='C', fill=True)
+            pdf.cell(cols[1][1], 6, material, border=1, align='L', fill=True)
+            pdf.cell(cols[2][1], 6, proveedor, border=1, align='L', fill=True)
+            pdf.cell(cols[3][1], 6, cant, border=1, align='C', fill=True)
+            pdf.cell(cols[4][1], 6, mon, border=1, align='C', fill=True)
+            pdf.cell(cols[5][1], 6, monto, border=1, align='R', fill=True)
+            pdf.cell(cols[6][1], 6, dias, border=1, align='C', fill=True)
+            pdf.ln()
+            fill = not fill
+
+        out = pdf.output(dest='S') if hasattr(pdf, 'output') else b""
+        if isinstance(out, str):
+            return out.encode('latin-1')
+        return bytes(out)
+    except Exception:
+        return b""
 
 # =============================================================================
 # FUNCIONES AUXILIARES Y BÚSQUEDA ROBUSTA
@@ -697,23 +704,25 @@ with tabs[2]:
         col_down1, col_down2, _ = st.columns([1, 1, 2])
         
         with col_down1:
-            st.download_button(
-                label="📊 Reporte Excel",
-                data=bytes_excel,
-                file_name=f"Reporte_Comparativo_{date.today()}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-                type="primary"
-            )
+            if bytes_excel:
+                st.download_button(
+                    label="📊 Reporte Excel",
+                    data=bytes_excel,
+                    file_name=f"Reporte_Comparativo_{date.today()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    type="primary"
+                )
             
         with col_down2:
-            st.download_button(
-                label="📄 Descargar Reporte PDF",
-                data=bytes_pdf,
-                file_name=f"Reporte_Comparativo_{date.today()}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
+            if bytes_pdf:
+                st.download_button(
+                    label="📄 Descargar Reporte PDF",
+                    data=bytes_pdf,
+                    file_name=f"Reporte_Comparativo_{date.today()}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
 
         st.write("")
         if st.button("🗑️ Limpiar Cuadro Comparativo", use_container_width=False):
