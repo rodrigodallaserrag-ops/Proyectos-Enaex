@@ -361,7 +361,6 @@ def extraer_materiales_de_masivo(df, id_solped):
                         return row[col]
             return default
 
-        # Función corregida para el parseo de números y formato chileno/latino
         def clean_num(val, default=0.0):
             try:
                 if isinstance(val, (int, float)): 
@@ -612,6 +611,12 @@ with tabs[2]:
     if st.session_state.ofertas_manuales:
         df_comp = pd.DataFrame(st.session_state.ofertas_manuales)
         
+        # Limpieza de valores nulos/cadena vacía
+        df_comp['SOLPED'] = df_comp['SOLPED'].fillna('N/A').astype(str)
+        df_comp['SOLPED'] = df_comp['SOLPED'].replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
+        df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str)
+        df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace({'': 'Sin Especificar', 'none': 'Sin Especificar', 'None': 'Sin Especificar'})
+
         # Selector de Moneda de Visualización
         moneda_vista = st.radio(
             "💱 Seleccionar Moneda de Visualización:", 
@@ -632,8 +637,6 @@ with tabs[2]:
         hoy = pd.Timestamp(date.today())
         df_comp['Días para Entrega'] = (df_comp['Calendario de entrega'] - hoy).dt.days
         df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: x if x > 0 else 0)
-        
-        df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace("", "Sin Especificar")
 
         # Motor de recomendación visual
         st.markdown("### 🏆 Motor de Recomendación")
@@ -674,12 +677,12 @@ with tabs[2]:
         with col_graf1:
             st.markdown(f"**💰 Comparativa de Monto Total por SOLPED ({moneda_vista})**")
             df_monto_solped = df_comp.groupby("SOLPED")["Monto Total Visualizado"].sum().reset_index()
-            st.bar_chart(df_monto_solped, x="SOLPED", y="Monto Total Visualizado", color="SOLPED", height=350)
+            st.bar_chart(df_monto_solped, x="SOLPED", y="Monto Total Visualizado", height=350)
             
         with col_graf2:
             st.markdown("**⏳ Promedio Días de Entrega por SOLPED**")
             df_dias_solped = df_comp.groupby("SOLPED")["Días para Entrega"].mean().reset_index()
-            st.bar_chart(df_dias_solped, x="SOLPED", y="Días para Entrega", color="SOLPED", height=350)
+            st.bar_chart(df_dias_solped, x="SOLPED", y="Días para Entrega", height=350)
 
         st.divider()
         st.subheader("📥 Exportar Reportes")
@@ -693,7 +696,7 @@ with tabs[2]:
         
         with col_down1:
             st.download_button(
-                label="📊 Descargar Excel Estilizado",
+                label="📊 Reporte Excel",
                 data=bytes_excel,
                 file_name=f"Reporte_Comparativo_{date.today()}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
