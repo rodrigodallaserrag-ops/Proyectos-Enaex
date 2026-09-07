@@ -198,7 +198,7 @@ def generar_pdf(df, moneda_vista):
         pdf.alias_nb_pages()
         pdf.add_page()
         
-        monto_total = df["Monto Total Visualizado"].sum()
+        monto_total = df["Monto Total Visualizado"].sum() if "Monto Total Visualizado" in df.columns else 0.0
         pdf.set_fill_color(243, 244, 246)
         pdf.rect(10, pdf.get_y(), 277, 10, style='F')
         pdf.set_font('Helvetica', 'B', 9)
@@ -313,14 +313,11 @@ def procesar_y_reparar_planilla(df):
             primer_col = df.columns[0]
             df = df[df[primer_col].astype(str).str.strip() != str(primer_col).strip()].reset_index(drop=True)
 
-    # -------------------------------------------------------------------------
-    # INSPECCIÓN DINÁMICA: Asigna el primer dato válido de la columna como encabezado
-    # -------------------------------------------------------------------------
+    # Inspection dinámica
     nuevos_nombres = {}
     for col in df.columns:
         col_str = str(col).strip()
         if col_str.startswith("Col_Vacia_") or col_str.startswith("Unnamed:"):
-            # Buscar el primer valor no vacio y no nulo disponible en esa columna
             valores_validos = [
                 str(val).strip() for val in df[col].dropna() 
                 if str(val).strip().lower() not in ['nan', 'none', '']
@@ -331,7 +328,6 @@ def procesar_y_reparar_planilla(df):
     if nuevos_nombres:
         df = df.rename(columns=nuevos_nombres)
 
-    # Deduplicación de encabezados para evitar duplicados
     vistos = {}
     columnas_deduplicadas = []
     for c in df.columns:
@@ -469,6 +465,12 @@ if "df_masivo" not in st.session_state:
 if "ofertas_manuales" not in st.session_state:
     st.session_state.ofertas_manuales = []
 
+# Opciones estándar de Transporte
+OPCIONES_TRANSPORTE = [
+    "T. Gil", "T. Bello", "Pullman", "Retiramos", 
+    "EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAT", "DDP"
+]
+
 # =============================================================================
 # ENCABEZADO Y PARÁMETROS GLOBALES
 # =============================================================================
@@ -573,7 +575,7 @@ with tabs[0]:
             "Pos": st.column_config.NumberColumn("Pos", disabled=True),
             "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
             "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
-            "Método de Transporte": st.column_config.SelectboxColumn("Método de Transporte", options=["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAT", "DDP"]),
+            "Método de Transporte": st.column_config.SelectboxColumn("Método de Transporte", options=OPCIONES_TRANSPORTE),
             "Calendario de entrega": st.column_config.DateColumn("Fecha Entrega")
         }
     )
@@ -637,7 +639,7 @@ with tabs[1]:
         column_config={
             "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
             "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
-            "Método de Transporte": st.column_config.SelectboxColumn("Método de Transporte", options=["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAT", "DDP"]),
+            "Método de Transporte": st.column_config.SelectboxColumn("Método de Transporte", options=OPCIONES_TRANSPORTE),
             "Calendario de entrega": st.column_config.DateColumn("Calendario de entrega")
         }
     )
@@ -667,7 +669,7 @@ with tabs[2]:
         df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str)
         df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace({'': 'Sin Especificar', 'none': 'Sin Especificar', 'None': 'Sin Especificar'})
 
-        # Aseguramos el orden de las columnas para que el Transporte sea visible de inmediato en la tabla final
+        # Orden de columnas
         cols_orden = [
             'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
             'Precio Unitario', 'Moneda', 'Proveedor Visual', 'Método de Transporte', 
@@ -676,12 +678,26 @@ with tabs[2]:
         cols_orden = [c for c in cols_orden if c in df_comp.columns]
         df_comp = df_comp[cols_orden]
 
+        # ---------------------------------------------------------------------
+        # CONTROLES Y FILTROS EN EL CUADRO COMPARATIVO
+        # ---------------------------------------------------------------------
         moneda_vista = st.radio(
             "💱 Seleccionar Moneda de Visualización:", 
             options=["CLP", "USD", "EUR"], 
             horizontal=True
         )
-        
+
+        # Mini Menú Transporte
+        transporte_filtro = st.selectbox(
+            "🚚 Transporte:",
+            options=["Todos"] + OPCIONES_TRANSPORTE,
+            index=0
+        )
+
+        # Aplicar filtro por Transporte si no es "Todos"
+        if transporte_filtro != "Todos" and "Método de Transporte" in df_comp.columns:
+            df_comp = df_comp[df_comp["Método de Transporte"] == transporte_filtro]
+
         if moneda_vista == "CLP":
             df_comp["Monto Total Visualizado"] = df_comp["Total CLP"]
         elif moneda_vista == "USD":
@@ -707,67 +723,70 @@ with tabs[2]:
                     styles.loc[min_dias_idx, 'Días para Entrega'] = 'background-color: #DBEAFE; color: #1E3A8A; font-weight: bold;'
             return styles
 
-        styled_df_comp = df_comp.style.apply(highlight_best, axis=None).format({
-            "Monto Total Visualizado": "$ {:,.2f}",
-            "Precio Unitario": "$ {:,.2f}",
-            "Total CLP": "$ {:,.2f}",
-            "Total USD": "$ {:,.2f}",
-            "Total EUR": "$ {:,.2f}"
-        })
+        if not df_comp.empty:
+            styled_df_comp = df_comp.style.apply(highlight_best, axis=None).format({
+                "Monto Total Visualizado": "$ {:,.2f}",
+                "Precio Unitario": "$ {:,.2f}",
+                "Total CLP": "$ {:,.2f}",
+                "Total USD": "$ {:,.2f}",
+                "Total EUR": "$ {:,.2f}"
+            })
 
-        st.dataframe(styled_df_comp, use_container_width=True)
-        
-        col_c1, col_c2 = st.columns(2)
-        with col_c1:
-            st.metric("Total Ofertas Registradas", len(df_comp))
-        with col_c2:
-            monto_acumulado = df_comp["Monto Total Visualizado"].sum()
-            st.metric(f"Monto Total Acumulado ({moneda_vista})", f"$ {monto_acumulado:,.2f}")
+            st.dataframe(styled_df_comp, use_container_width=True)
             
-        st.divider()
-        st.subheader("📈 Gráficos Comparativos por SOLPED")
-        
-        col_graf1, col_graf2 = st.columns(2)
-        
-        with col_graf1:
-            st.markdown(f"**💰 Comparativa de Monto Total por SOLPED ({moneda_vista})**")
-            df_monto_solped = df_comp.groupby("SOLPED")["Monto Total Visualizado"].sum().reset_index()
-            st.bar_chart(df_monto_solped, x="SOLPED", y="Monto Total Visualizado", height=350)
+            col_c1, col_c2 = st.columns(2)
+            with col_c1:
+                st.metric("Total Ofertas Registradas", len(df_comp))
+            with col_c2:
+                monto_acumulado = df_comp["Monto Total Visualizado"].sum()
+                st.metric(f"Monto Total Acumulado ({moneda_vista})", f"$ {monto_acumulado:,.2f}")
+                
+            st.divider()
+            st.subheader("📈 Gráficos Comparativos por SOLPED")
             
-        with col_graf2:
-            st.markdown("**⏳ Promedio Días de Entrega por SOLPED**")
-            df_dias_solped = df_comp.groupby("SOLPED")["Días para Entrega"].mean().reset_index()
-            st.bar_chart(df_dias_solped, x="SOLPED", y="Días para Entrega", height=350)
+            col_graf1, col_graf2 = st.columns(2)
+            
+            with col_graf1:
+                st.markdown(f"**💰 Comparativa de Monto Total por SOLPED ({moneda_vista})**")
+                df_monto_solped = df_comp.groupby("SOLPED")["Monto Total Visualizado"].sum().reset_index()
+                st.bar_chart(df_monto_solped, x="SOLPED", y="Monto Total Visualizado", height=350)
+                
+            with col_graf2:
+                st.markdown("**⏳ Promedio Días de Entrega por SOLPED**")
+                df_dias_solped = df_comp.groupby("SOLPED")["Días para Entrega"].mean().reset_index()
+                st.bar_chart(df_dias_solped, x="SOLPED", y="Días para Entrega", height=350)
 
-        st.divider()
-        st.subheader("📥 Exportar Reportes")
-        st.write("Genera y descarga el informe en tu formato de preferencia:")
-        
-        bytes_excel = generar_excel_estilizado(df_comp, moneda_vista)
-        bytes_pdf = generar_pdf(df_comp, moneda_vista)
-        
-        col_down1, col_down2, _ = st.columns([1, 1, 2])
-        
-        with col_down1:
-            if bytes_excel:
-                st.download_button(
-                    label="📊 Reporte Excel",
-                    data=bytes_excel,
-                    file_name=f"Reporte_Comparativo_{date.today()}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                    type="primary"
-                )
+            st.divider()
+            st.subheader("📥 Exportar Reportes")
+            st.write("Genera y descarga el informe en tu formato de preferencia:")
             
-        with col_down2:
-            if bytes_pdf:
-                st.download_button(
-                    label="📄 Descargar Reporte PDF",
-                    data=bytes_pdf,
-                    file_name=f"Reporte_Comparativo_{date.today()}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
-                )
+            bytes_excel = generar_excel_estilizado(df_comp, moneda_vista)
+            bytes_pdf = generar_pdf(df_comp, moneda_vista)
+            
+            col_down1, col_down2, _ = st.columns([1, 1, 2])
+            
+            with col_down1:
+                if bytes_excel:
+                    st.download_button(
+                        label="📊 Reporte Excel",
+                        data=bytes_excel,
+                        file_name=f"Reporte_Comparativo_{date.today()}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        type="primary"
+                    )
+                
+            with col_down2:
+                if bytes_pdf:
+                    st.download_button(
+                        label="📄 Descargar Reporte PDF",
+                        data=bytes_pdf,
+                        file_name=f"Reporte_Comparativo_{date.today()}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+        else:
+            st.warning("No hay registros que coincidan con el tipo de transporte seleccionado.")
 
         st.write("")
         if st.button("🗑️ Limpiar Cuadro Comparativo", use_container_width=False):
