@@ -43,7 +43,6 @@ def obtener_indicadores_tiempo_real():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
-    # Intentar fuente principal: mindicador.cl
     try:
         response = requests.get("https://mindicador.cl/api", headers=headers, timeout=8)
         if response.status_code == 200:
@@ -57,7 +56,6 @@ def obtener_indicadores_tiempo_real():
     except Exception:
         pass
 
-    # Intentar fuente de respaldo: DolarApi Chile
     try:
         response_alt = requests.get("https://dolarapi.com/v1/chile/cotizaciones", headers=headers, timeout=8)
         if response_alt.status_code == 200:
@@ -94,7 +92,7 @@ def generar_excel_estilizado(df, moneda_vista):
     
     cols_export = [
         'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
-        'Precio Unitario', 'Moneda', 'Proveedor Visual', 
+        'Precio Unitario', 'Moneda', 'Proveedor Visual', 'Transporte',
         'Calendario de entrega', 'Días para Entrega', 'Monto Total Visualizado'
     ]
     
@@ -110,7 +108,6 @@ def generar_excel_estilizado(df, moneda_vista):
         workbook = writer.book
         worksheet = writer.sheets['Cuadro Comparativo']
         
-        # Estilos visuales
         HEADER_FILL = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
         ZEBRA_FILL = PatternFill(start_color="F9FAFB", end_color="F9FAFB", fill_type="solid")
         
@@ -126,13 +123,11 @@ def generar_excel_estilizado(df, moneda_vista):
             bottom=Side(style='thin', color='E5E7EB')
         )
         
-        # Título del Reporte
         worksheet['A1'] = "ENAEX - CUADRO COMPARATIVO DE OFERTAS"
         worksheet['A1'].font = TITLE_FONT
         worksheet['A2'] = f"Fecha de informe: {date.today().strftime('%d/%m/%Y')} | Moneda base: {moneda_vista}"
         worksheet['A2'].font = SUBTITLE_FONT
         
-        # Formato de Encabezados de Tabla
         for col_num in range(1, len(df_export.columns) + 1):
             cell = worksheet.cell(row=4, column=col_num)
             cell.fill = HEADER_FILL
@@ -140,7 +135,6 @@ def generar_excel_estilizado(df, moneda_vista):
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
             cell.border = THIN_BORDER
         
-        # Formato de Filas de Datos
         for row_idx, row in enumerate(worksheet.iter_rows(min_row=5, max_row=4 + len(df_export), min_col=1, max_col=len(df_export.columns)), start=5):
             use_zebra = (row_idx % 2 == 0)
             for cell in row:
@@ -156,12 +150,11 @@ def generar_excel_estilizado(df, moneda_vista):
                 elif col_header in ['Cantidad', 'Pos', 'Días para Entrega']:
                     cell.number_format = '#,##0'
                     cell.alignment = Alignment(horizontal='center', vertical='center')
-                elif col_header in ['SOLPED', 'Moneda', 'UM', 'Centro']:
+                elif col_header in ['SOLPED', 'Moneda', 'UM', 'Centro', 'Transporte']:
                     cell.alignment = Alignment(horizontal='center', vertical='center')
                 else:
                     cell.alignment = Alignment(horizontal='left', vertical='center')
 
-        # Autoajuste inteligente de ancho de columnas
         for col in worksheet.columns:
             max_len = 0
             col_letter = get_column_letter(col[0].column)
@@ -205,7 +198,6 @@ def generar_pdf(df, moneda_vista):
         pdf.alias_nb_pages()
         pdf.add_page()
         
-        # Resumen superior
         monto_total = df["Monto Total Visualizado"].sum()
         pdf.set_fill_color(243, 244, 246)
         pdf.rect(10, pdf.get_y(), 277, 10, style='F')
@@ -214,15 +206,16 @@ def generar_pdf(df, moneda_vista):
         pdf.cell(0, 8, f'  RESUMEN GENERAL: Total Ofertas Evaluadas: {len(df)}    |    Monto Acumulado ({moneda_vista}): ${monto_total:,.2f}', ln=True)
         pdf.ln(4)
 
-        # Encabezados de tabla PDF
+        # Ajuste de columnas para incluir "Transporte" en el PDF
         cols = [
-            ("SOLPED", 30),
-            ("Material", 80),
-            ("Proveedor", 55),
-            ("Cant.", 18),
-            ("Mon", 18),
-            (f"Total ({moneda_vista})", 40),
-            ("Entrega", 36)
+            ("SOLPED", 20),
+            ("Material", 72),
+            ("Proveedor", 42),
+            ("Transp.", 20),
+            ("Cant.", 15),
+            ("Mon", 15),
+            (f"Total ({moneda_vista})", 35),
+            ("Entrega", 30)
         ]
 
         pdf.set_font('Helvetica', 'B', 8)
@@ -233,7 +226,6 @@ def generar_pdf(df, moneda_vista):
             pdf.cell(width, 7, name, border=1, align='C', fill=True)
         pdf.ln()
 
-        # Filas de datos PDF
         pdf.set_font('Helvetica', '', 8)
         pdf.set_text_color(0, 0, 0)
         
@@ -255,9 +247,10 @@ def generar_pdf(df, moneda_vista):
             else:
                 pdf.set_fill_color(255, 255, 255)
 
-            solped = clean_str_pdf(row.get('SOLPED', ''))[:18]
-            material = clean_str_pdf(row.get('Material', ''))[:48]
-            proveedor = clean_str_pdf(row.get('Proveedor Visual', ''))[:32]
+            solped = clean_str_pdf(row.get('SOLPED', ''))[:15]
+            material = clean_str_pdf(row.get('Material', ''))[:45]
+            proveedor = clean_str_pdf(row.get('Proveedor Visual', ''))[:28]
+            transporte = clean_str_pdf(row.get('Transporte', ''))[:12]
             cant = f"{row.get('Cantidad', 0):,.0f}"
             mon = clean_str_pdf(row.get('Moneda', 'CLP'))
             monto = f"${row.get('Monto Total Visualizado', 0):,.2f}"
@@ -269,10 +262,11 @@ def generar_pdf(df, moneda_vista):
             pdf.cell(cols[0][1], 6, solped, border=1, align='C', fill=True)
             pdf.cell(cols[1][1], 6, material, border=1, align='L', fill=True)
             pdf.cell(cols[2][1], 6, proveedor, border=1, align='L', fill=True)
-            pdf.cell(cols[3][1], 6, cant, border=1, align='C', fill=True)
-            pdf.cell(cols[4][1], 6, mon, border=1, align='C', fill=True)
-            pdf.cell(cols[5][1], 6, monto, border=1, align='R', fill=True)
-            pdf.cell(cols[6][1], 6, dias, border=1, align='C', fill=True)
+            pdf.cell(cols[3][1], 6, transporte, border=1, align='C', fill=True)
+            pdf.cell(cols[4][1], 6, cant, border=1, align='C', fill=True)
+            pdf.cell(cols[5][1], 6, mon, border=1, align='C', fill=True)
+            pdf.cell(cols[6][1], 6, monto, border=1, align='R', fill=True)
+            pdf.cell(cols[7][1], 6, dias, border=1, align='C', fill=True)
             pdf.ln()
             fill = not fill
 
@@ -320,11 +314,15 @@ def procesar_y_reparar_planilla(df):
             primer_col = df.columns[0]
             df = df[df[primer_col].astype(str).str.strip() != str(primer_col).strip()].reset_index(drop=True)
 
+    # AQUÍ SE ACTUALIZÓ EL MAPEO DE COLUMNAS PARA INCLUIR LAS 'Col_Vacia_XX'
     mapeo_columnas = {
         'Unnamed: 6': 'UM', 'Unnamed: 7': 'Solicitante', 'Unnamed: 8': 'Centro',
         'Unnamed: 9': 'Tipo de posición', 'Unnamed: 10': 'G. compras', 'Unnamed: 11': 'Mod. el',
         'Unnamed: 12': 'Urgencia', 'Unnamed: 13': 'NS', 'Unnamed: 14': 'Contrato marco',
-        'Unnamed: 15': 'Observación', 'Unnamed: 16': 'Responsable', 'Unnamed: 41': 'Total general'
+        'Unnamed: 15': 'Observación', 'Unnamed: 16': 'Responsable', 'Unnamed: 41': 'Total general',
+        'Col_Vacia_13': 'UM', 'Col_Vacia_14': 'Solicitante', 'Col_Vacia_15': 'Centro',
+        'Col_Vacia_16': 'Tipo de posición', 'Col_Vacia_17': 'G. compras', 'Col_Vacia_18': 'Mod. el',
+        'Col_Vacia_19': 'Urgencia'
     }
     df = df.rename(columns={k: v for k, v in mapeo_columnas.items() if k in df.columns})
 
@@ -430,6 +428,7 @@ def extraer_materiales_de_masivo(df, id_solped):
             "Precio Unitario": clean_num(get_val(['precio', 'monto', 'val', 'costo', 'p.u', 'neto'], 0.0), 0.0),
             "Moneda": str(get_val(['moneda', 'curr', 'mon'], "CLP")).upper(),
             "Proveedor": str(get_val(['proveedor', 'vendor', 'prov', 'nam'], "")),
+            "Transporte": "EXW", # <--- NUEVA COLUMNA INCOTERM AÑADIDA
             "Calendario de entrega": date.today(),
             "Observaciones": str(get_val(['obs', 'observacion', 'comentario'], ""))
         })
@@ -549,10 +548,11 @@ with tabs[0]:
 
     key_editor = f"editor_{solped_id}" if (solped_id and f"editor_{solped_id}" in st.session_state) else "editor_default"
     
+    # SE AGREGÓ "Transporte" A LOS DATOS INICIALES
     df_inicial = st.session_state.get(key_editor, pd.DataFrame([{
         "Pos": 1, "Material": "(Material)", "Centro": "(Centro)", "Cantidad": 1.0, 
         "UM": "C/U", "Precio Unitario": 0.0, "Moneda": "CLP", 
-        "Proveedor": "", "Calendario de entrega": date.today(), "Observaciones": ""
+        "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": ""
     }]))
 
     if not df_inicial.empty:
@@ -560,6 +560,7 @@ with tabs[0]:
         df_inicial["Cantidad"] = pd.to_numeric(df_inicial["Cantidad"], errors='coerce').fillna(1.0)
         df_inicial["Calendario de entrega"] = pd.to_datetime(df_inicial["Calendario de entrega"]).dt.date
 
+    # SE AGREGÓ EL SELECTBOX DE TRANSPORTE
     edited_df = st.data_editor(
         df_inicial,
         num_rows="dynamic",
@@ -568,6 +569,7 @@ with tabs[0]:
             "Pos": st.column_config.NumberColumn("Pos", disabled=True),
             "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
             "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
+            "Transporte": st.column_config.SelectboxColumn("Transporte", options=["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAT", "DDP"]),
             "Calendario de entrega": st.column_config.DateColumn("Fecha Entrega")
         }
     )
@@ -611,7 +613,7 @@ with tabs[1]:
     if "manual_grid_df" not in st.session_state:
         st.session_state["manual_grid_df"] = pd.DataFrame([{
             "Pos": 1, "Material": "Ítem Manual", "Cantidad": 1.0, "UM": "C/U",
-            "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", 
+            "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", "Transporte": "EXW",
             "Calendario de entrega": date.today(), "Observaciones": ""
         }])
 
@@ -631,6 +633,7 @@ with tabs[1]:
         column_config={
             "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
             "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
+            "Transporte": st.column_config.SelectboxColumn("Transporte", options=["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAT", "DDP"]),
             "Calendario de entrega": st.column_config.DateColumn("Calendario de entrega")
         }
     )
@@ -655,20 +658,17 @@ with tabs[2]:
     if st.session_state.ofertas_manuales:
         df_comp = pd.DataFrame(st.session_state.ofertas_manuales)
         
-        # Limpieza de valores nulos/cadena vacía
         df_comp['SOLPED'] = df_comp['SOLPED'].fillna('N/A').astype(str)
         df_comp['SOLPED'] = df_comp['SOLPED'].replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
         df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str)
         df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace({'': 'Sin Especificar', 'none': 'Sin Especificar', 'None': 'Sin Especificar'})
 
-        # Selector de Moneda de Visualización
         moneda_vista = st.radio(
             "💱 Seleccionar Moneda de Visualización:", 
             options=["CLP", "USD", "EUR"], 
             horizontal=True
         )
         
-        # Asignar la columna total dinámica
         if moneda_vista == "CLP":
             df_comp["Monto Total Visualizado"] = df_comp["Total CLP"]
         elif moneda_vista == "USD":
@@ -676,13 +676,11 @@ with tabs[2]:
         elif moneda_vista == "EUR":
             df_comp["Monto Total Visualizado"] = df_comp["Total EUR"]
 
-        # Calcular días restantes de entrega
         df_comp['Calendario de entrega'] = pd.to_datetime(df_comp['Calendario de entrega'])
         hoy = pd.Timestamp(date.today())
         df_comp['Días para Entrega'] = (df_comp['Calendario de entrega'] - hoy).dt.days
         df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: x if pd.notna(x) and x > 0 else 0)
 
-        # Motor de recomendación visual integrado en la tabla
         st.markdown("### 🏆 Motor de Recomendación")
         st.info("💡 **Guía de colores:** Se resalta en **verde** la opción más económica y en **azul** la entrega más rápida para cada material.")
         
@@ -732,7 +730,6 @@ with tabs[2]:
         st.subheader("📥 Exportar Reportes")
         st.write("Genera y descarga el informe en tu formato de preferencia:")
         
-        # Generar archivos binarios para descarga directa
         bytes_excel = generar_excel_estilizado(df_comp, moneda_vista)
         bytes_pdf = generar_pdf(df_comp, moneda_vista)
         
