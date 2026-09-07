@@ -86,7 +86,7 @@ def obtener_indicadores_tiempo_real():
 # =============================================================================
 # FUNCIONES DE EXPORTACIÓN Y FORMATO (EXCEL Y PDF)
 # =============================================================================
-def generar_excel_estilizado(df, moneda_vista):
+def generar_excel_estilizado(df, moneda_vista, transporte_reporte="No Especificado"):
     """Genera un archivo Excel con diseño corporativo elegante, bordes, formatos numéricos y anchos ajustados."""
     buffer_excel = io.BytesIO()
     
@@ -125,7 +125,13 @@ def generar_excel_estilizado(df, moneda_vista):
         
         worksheet['A1'] = "ENAEX - CUADRO COMPARATIVO DE OFERTAS"
         worksheet['A1'].font = TITLE_FONT
-        worksheet['A2'] = f"Fecha de informe: {date.today().strftime('%d/%m/%Y')} | Moneda base: {moneda_vista}"
+        
+        # Se agrega el Transporte a la cabecera si fue seleccionado
+        subtitulo = f"Fecha de informe: {date.today().strftime('%d/%m/%Y')} | Moneda base: {moneda_vista}"
+        if transporte_reporte and transporte_reporte != "No Especificado":
+            subtitulo += f" | Transporte General: {transporte_reporte}"
+            
+        worksheet['A2'] = subtitulo
         worksheet['A2'].font = SUBTITLE_FONT
         
         for col_num in range(1, len(df_export.columns) + 1):
@@ -189,9 +195,9 @@ class PDFReport(FPDF):
         self.set_y(-12)
         self.set_font('Helvetica', 'I', 8)
         self.set_text_color(128, 128, 128)
-        self.cell(0, 10, f'Pagina {self.page_no()}/{{nb}} - Documento Generado Automáticamente', align='C')
+        self.cell(0, 10, f'Pagina {self.page_no()}/{{nb}} - Documento Generado Automaticamente', align='C')
 
-def generar_pdf(df, moneda_vista):
+def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
     """Genera un archivo PDF ejecutivo en formato horizontal (A4)"""
     try:
         pdf = PDFReport(orientation='L', unit='mm', format='A4')
@@ -203,7 +209,13 @@ def generar_pdf(df, moneda_vista):
         pdf.rect(10, pdf.get_y(), 277, 10, style='F')
         pdf.set_font('Helvetica', 'B', 9)
         pdf.set_text_color(30, 58, 138)
-        pdf.cell(0, 8, f'  RESUMEN GENERAL: Total Ofertas Evaluadas: {len(df)}    |    Monto Acumulado ({moneda_vista}): ${monto_total:,.2f}', ln=True)
+        
+        # Se agrega el Transporte a la cabecera si fue seleccionado
+        resumen_txt = f'  RESUMEN GENERAL: Total Ofertas Evaluadas: {len(df)}    |    Monto Acumulado ({moneda_vista}): ${monto_total:,.2f}'
+        if transporte_reporte and transporte_reporte != "No Especificado":
+            resumen_txt += f'    |    Transporte General: {transporte_reporte}'
+            
+        pdf.cell(0, 8, resumen_txt, ln=True)
         pdf.ln(4)
 
         cols = [
@@ -679,7 +691,7 @@ with tabs[2]:
         df_comp = df_comp[cols_orden]
 
         # ---------------------------------------------------------------------
-        # CONTROLES Y FILTROS EN EL CUADRO COMPARATIVO
+        # CONTROLES Y PARÁMETROS PARA REPORTE
         # ---------------------------------------------------------------------
         moneda_vista = st.radio(
             "💱 Seleccionar Moneda de Visualización:", 
@@ -687,16 +699,12 @@ with tabs[2]:
             horizontal=True
         )
 
-        # Mini Menú Transporte
-        transporte_filtro = st.selectbox(
-            "🚚 Transporte:",
-            options=["Todos"] + OPCIONES_TRANSPORTE,
+        # Dropdown para añadir el transporte general a las cabeceras de Excel y PDF (NO FILTRA)
+        transporte_reporte = st.selectbox(
+            "🚚 Transporte General (Se incluirá en la cabecera del reporte exportado):",
+            options=["No Especificado"] + OPCIONES_TRANSPORTE,
             index=0
         )
-
-        # Aplicar filtro por Transporte si no es "Todos"
-        if transporte_filtro != "Todos" and "Método de Transporte" in df_comp.columns:
-            df_comp = df_comp[df_comp["Método de Transporte"] == transporte_filtro]
 
         if moneda_vista == "CLP":
             df_comp["Monto Total Visualizado"] = df_comp["Total CLP"]
@@ -760,8 +768,9 @@ with tabs[2]:
             st.subheader("📥 Exportar Reportes")
             st.write("Genera y descarga el informe en tu formato de preferencia:")
             
-            bytes_excel = generar_excel_estilizado(df_comp, moneda_vista)
-            bytes_pdf = generar_pdf(df_comp, moneda_vista)
+            # Se inyecta la variable de transporte seleccionado al momento de generar archivos
+            bytes_excel = generar_excel_estilizado(df_comp, moneda_vista, transporte_reporte)
+            bytes_pdf = generar_pdf(df_comp, moneda_vista, transporte_reporte)
             
             col_down1, col_down2, _ = st.columns([1, 1, 2])
             
@@ -785,8 +794,6 @@ with tabs[2]:
                         mime="application/pdf",
                         use_container_width=True
                     )
-        else:
-            st.warning("No hay registros que coincidan con el tipo de transporte seleccionado.")
 
         st.write("")
         if st.button("🗑️ Limpiar Cuadro Comparativo", use_container_width=False):
