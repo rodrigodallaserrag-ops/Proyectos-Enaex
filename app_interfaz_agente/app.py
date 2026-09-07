@@ -92,7 +92,7 @@ def generar_excel_estilizado(df, moneda_vista):
     
     cols_export = [
         'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
-        'Precio Unitario', 'Moneda', 'Proveedor Visual', 'Transporte',
+        'Precio Unitario', 'Moneda', 'Proveedor Visual', 'Método de Transporte',
         'Calendario de entrega', 'Días para Entrega', 'Monto Total Visualizado'
     ]
     
@@ -150,7 +150,7 @@ def generar_excel_estilizado(df, moneda_vista):
                 elif col_header in ['Cantidad', 'Pos', 'Días para Entrega']:
                     cell.number_format = '#,##0'
                     cell.alignment = Alignment(horizontal='center', vertical='center')
-                elif col_header in ['SOLPED', 'Moneda', 'UM', 'Centro', 'Transporte']:
+                elif col_header in ['SOLPED', 'Moneda', 'UM', 'Centro', 'Método de Transporte']:
                     cell.alignment = Alignment(horizontal='center', vertical='center')
                 else:
                     cell.alignment = Alignment(horizontal='left', vertical='center')
@@ -210,7 +210,7 @@ def generar_pdf(df, moneda_vista):
             ("SOLPED", 20),
             ("Material", 72),
             ("Proveedor", 42),
-            ("Transp.", 20),
+            ("Transporte", 20),
             ("Cant.", 15),
             ("Mon", 15),
             (f"Total ({moneda_vista})", 35),
@@ -249,7 +249,7 @@ def generar_pdf(df, moneda_vista):
             solped = clean_str_pdf(row.get('SOLPED', ''))[:15]
             material = clean_str_pdf(row.get('Material', ''))[:45]
             proveedor = clean_str_pdf(row.get('Proveedor Visual', ''))[:28]
-            transporte = clean_str_pdf(row.get('Transporte', ''))[:12]
+            transporte = clean_str_pdf(row.get('Método de Transporte', ''))[:12]
             cant = f"{row.get('Cantidad', 0):,.0f}"
             mon = clean_str_pdf(row.get('Moneda', 'CLP'))
             monto = f"${row.get('Monto Total Visualizado', 0):,.2f}"
@@ -434,7 +434,7 @@ def extraer_materiales_de_masivo(df, id_solped):
             "Precio Unitario": clean_num(get_val(['precio', 'monto', 'val', 'costo', 'p.u', 'neto'], 0.0), 0.0),
             "Moneda": str(get_val(['moneda', 'curr', 'mon'], "CLP")).upper(),
             "Proveedor": str(get_val(['proveedor', 'vendor', 'prov', 'nam'], "")),
-            "Transporte": "EXW",
+            "Método de Transporte": "EXW",
             "Calendario de entrega": date.today(),
             "Observaciones": str(get_val(['obs', 'observacion', 'comentario'], ""))
         })
@@ -557,7 +557,7 @@ with tabs[0]:
     df_inicial = st.session_state.get(key_editor, pd.DataFrame([{
         "Pos": 1, "Material": "(Material)", "Centro": "(Centro)", "Cantidad": 1.0, 
         "UM": "C/U", "Precio Unitario": 0.0, "Moneda": "CLP", 
-        "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": ""
+        "Proveedor": "", "Método de Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": ""
     }]))
 
     if not df_inicial.empty:
@@ -573,7 +573,7 @@ with tabs[0]:
             "Pos": st.column_config.NumberColumn("Pos", disabled=True),
             "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
             "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
-            "Transporte": st.column_config.SelectboxColumn("Transporte", options=["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAT", "DDP"]),
+            "Método de Transporte": st.column_config.SelectboxColumn("Método de Transporte", options=["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAT", "DDP"]),
             "Calendario de entrega": st.column_config.DateColumn("Fecha Entrega")
         }
     )
@@ -617,7 +617,7 @@ with tabs[1]:
     if "manual_grid_df" not in st.session_state:
         st.session_state["manual_grid_df"] = pd.DataFrame([{
             "Pos": 1, "Material": "Ítem Manual", "Cantidad": 1.0, "UM": "C/U",
-            "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", "Transporte": "EXW",
+            "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", "Método de Transporte": "EXW",
             "Calendario de entrega": date.today(), "Observaciones": ""
         }])
 
@@ -637,7 +637,7 @@ with tabs[1]:
         column_config={
             "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
             "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
-            "Transporte": st.column_config.SelectboxColumn("Transporte", options=["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAT", "DDP"]),
+            "Método de Transporte": st.column_config.SelectboxColumn("Método de Transporte", options=["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAT", "DDP"]),
             "Calendario de entrega": st.column_config.DateColumn("Calendario de entrega")
         }
     )
@@ -666,6 +666,15 @@ with tabs[2]:
         df_comp['SOLPED'] = df_comp['SOLPED'].replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
         df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str)
         df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace({'': 'Sin Especificar', 'none': 'Sin Especificar', 'None': 'Sin Especificar'})
+
+        # Aseguramos el orden de las columnas para que el Transporte sea visible de inmediato en la tabla final
+        cols_orden = [
+            'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
+            'Precio Unitario', 'Moneda', 'Proveedor Visual', 'Método de Transporte', 
+            'Calendario de entrega', 'Total CLP', 'Total USD', 'Total EUR', 'Observaciones'
+        ]
+        cols_orden = [c for c in cols_orden if c in df_comp.columns]
+        df_comp = df_comp[cols_orden]
 
         moneda_vista = st.radio(
             "💱 Seleccionar Moneda de Visualización:", 
