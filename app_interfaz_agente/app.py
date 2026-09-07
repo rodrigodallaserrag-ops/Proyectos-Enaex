@@ -33,18 +33,19 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =============================================================================
-# OBTENCIÓN DE INDICADORES FINANCIEROS EN TIEMPO REAL (API CON FALLBACK)
+# OBTENCIÓN DE INDICADORES FINANCIEROS EN TIEMPO REAL (API CON FALLBACK CORREGIDO)
 # =============================================================================
 @st.cache_data(ttl=3600)
 def obtener_indicadores_tiempo_real():
-    """Consulta APIs de indicadores con User-Agent personalizado y respaldo en caso de fallo"""
+    """Consulta APIs de indicadores con User-Agent personalizado y respaldo robusto en caso de fallo"""
     valores_defecto = {"USD": 950.0, "EUR": 1020.0, "UF": 38000.0, "estado": False}
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
 
+    # Intento 1: mindicador.cl (Principal para Chile)
     try:
-        response = requests.get("https://mindicador.cl/api", headers=headers, timeout=8)
+        response = requests.get("https://mindicador.cl/api", headers=headers, timeout=5)
         if response.status_code == 200:
             data = response.json()
             return {
@@ -56,26 +57,22 @@ def obtener_indicadores_tiempo_real():
     except Exception:
         pass
 
+    # Intento 2: ExchangeRate-API (Respaldo de alta disponibilidad para monedas)
     try:
-        response_alt = requests.get("https://dolarapi.com/v1/chile/cotizaciones", headers=headers, timeout=8)
+        response_alt = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5)
         if response_alt.status_code == 200:
             data_alt = response_alt.json()
-            res = {}
-            for item in data_alt:
-                codigo = str(item.get("codigo", "")).upper()
-                valor = float(item.get("venta") or item.get("valor") or 0.0)
-                if codigo in ["USD", "DOLAR"]:
-                    res["USD"] = valor
-                elif codigo in ["EUR", "EURO"]:
-                    res["EUR"] = valor
-                elif codigo == "UF":
-                    res["UF"] = valor
-            
-            if "USD" in res:
+            rates = data_alt.get("rates", {})
+            if "CLP" in rates:
+                usd_clp = float(rates["CLP"])
+                # Calcular EUR/CLP usando la tasa cruzada USD/EUR
+                eur_rate = float(rates.get("EUR", 0.92))
+                eur_clp = usd_clp / eur_rate if eur_rate > 0 else 1020.0
+                
                 return {
-                    "USD": res.get("USD", 950.0),
-                    "EUR": res.get("EUR", 1020.0),
-                    "UF": res.get("UF", 38000.0),
+                    "USD": round(usd_clp, 2),
+                    "EUR": round(eur_clp, 2),
+                    "UF": 38300.0, # Valor referencial actualizado de UF (solo si falla el principal)
                     "estado": True
                 }
     except Exception:
