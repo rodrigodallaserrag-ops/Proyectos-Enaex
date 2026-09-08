@@ -38,24 +38,23 @@ st.markdown("""
 def obtener_indicadores_tiempo_real():
     valores_defecto = {"USD": 950.0, "EUR": 1020.0, "UF": 38000.0, "estado": False}
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
     try:
-        response = requests.get("[https://mindicador.cl/api](https://mindicador.cl/api)", headers=headers, timeout=5)
+        response = requests.get("https://mindicador.cl/api", headers=headers, timeout=5)
         if response.status_code == 200:
             data = response.json()
-            return {
-                "USD": float(data.get("dolar", {}).get("valor", 950.0)),
-                "EUR": float(data.get("euro", {}).get("valor", 1020.0)),
-                "UF": float(data.get("uf", {}).get("valor", 38000.0)),
-                "estado": True
-            }
+            usd = float(data.get("dolar", {}).get("valor", 950.0))
+            eur = float(data.get("euro", {}).get("valor", 1020.0))
+            uf = float(data.get("uf", {}).get("valor", 38000.0))
+            if usd > 0 and eur > 0 and uf > 0:
+                return {"USD": usd, "EUR": eur, "UF": uf, "estado": True}
     except Exception:
         pass
 
     try:
-        response_alt = requests.get("[https://open.er-api.com/v6/latest/USD](https://open.er-api.com/v6/latest/USD)", timeout=5)
+        response_alt = requests.get("https://open.er-api.com/v6/latest/USD", headers=headers, timeout=5)
         if response_alt.status_code == 200:
             data_alt = response_alt.json()
             rates = data_alt.get("rates", {})
@@ -195,7 +194,7 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
         pdf.cell(0, 8, resumen_txt, ln=True)
         pdf.ln(4)
 
-        cols = [("SOLPED", 20), ("Material", 72), ("Proveedor", 42), ("Transporte", 20),
+        cols = [("SOLPED", 22), ("Material", 70), ("Proveedor", 42), ("Transporte", 20),
                 ("Cant.", 15), ("Mon", 15), (f"Total ({moneda_vista})", 35), ("Entrega", 30)]
 
         pdf.set_font('Helvetica', 'B', 8)
@@ -278,7 +277,7 @@ def procesar_y_reparar_planilla(df):
 
     df.columns = deduplicar_columnas(df.columns)
 
-    palabras_clave = ['solped', 'material', 'pos', 'texto', 'centro', 'cant', 'proveedor', 'acreedor', 'vendor', 'documento', 'precio', 'moneda']
+    palabras_clave = ['solped', 'material', 'pos', 'texto', 'centro', 'cant', 'cantidad', 'proveedor', 'acreedor', 'vendor', 'documento', 'precio', 'moneda', 'solicitud', 'requerimiento', 'denominacion', 'descripcion']
     
     current_cols_lower = " ".join([str(c).lower() for c in df.columns])
     current_matches = sum(1 for kw in palabras_clave if kw in current_cols_lower)
@@ -286,29 +285,29 @@ def procesar_y_reparar_planilla(df):
     header_idx = -1
     best_matches = current_matches
     
-    if current_matches < 3:
-        for idx in range(min(20, len(df))):
-            row_str = " ".join([str(val).lower() for val in df.iloc[idx]])
-            matches = sum(1 for kw in palabras_clave if kw in row_str)
-            if matches > best_matches and matches >= 3:
-                header_idx = idx
-                best_matches = matches
+    # Evalúa las primeras 25 filas para detectar si la cabecera no está en la fila 0
+    for idx in range(min(25, len(df))):
+        row_str = " ".join([str(val).lower() for val in df.iloc[idx]])
+        matches = sum(1 for kw in palabras_clave if kw in row_str)
+        if matches > best_matches:
+            header_idx = idx
+            best_matches = matches
 
-        if header_idx != -1:
-            nuevas_columnas = []
-            for i, val in enumerate(df.iloc[header_idx]):
-                val_str = str(val).strip()
-                if val_str.lower() in ['nan', 'none', '']:
-                    col_orig = str(df.columns[i])
-                    nuevas_columnas.append(col_orig if not col_orig.startswith("Unnamed") else f"Col_Vacia_{i}")
-                else: nuevas_columnas.append(val_str)
-            
-            df.columns = deduplicar_columnas(nuevas_columnas)
-            df = df.iloc[header_idx + 1:].reset_index(drop=True)
-            if not df.empty:
-                col_0_series = df.iloc[:, 0].astype(str).str.strip()
-                col_0_nombre = str(df.columns[0]).strip()
-                df = df[col_0_series != col_0_nombre].reset_index(drop=True)
+    if header_idx != -1:
+        nuevas_columnas = []
+        for i, val in enumerate(df.iloc[header_idx]):
+            val_str = str(val).strip()
+            if val_str.lower() in ['nan', 'none', '']:
+                col_orig = str(df.columns[i])
+                nuevas_columnas.append(col_orig if not col_orig.startswith("Unnamed") else f"Col_Vacia_{i}")
+            else: nuevas_columnas.append(val_str)
+        
+        df.columns = deduplicar_columnas(nuevas_columnas)
+        df = df.iloc[header_idx + 1:].reset_index(drop=True)
+        if not df.empty:
+            col_0_series = df.iloc[:, 0].astype(str).str.strip()
+            col_0_nombre = str(df.columns[0]).strip()
+            df = df[col_0_series != col_0_nombre].reset_index(drop=True)
 
     nuevos_nombres = {}
     for idx, col in enumerate(df.columns):
@@ -324,11 +323,21 @@ def procesar_y_reparar_planilla(df):
 
     df.columns = deduplicar_columnas(df.columns)
 
+    # Identificación y estandarización precisa de la columna SOLPED
     cols = list(df.columns)
-    id_col = next((c for c in cols if str(c).lower() in ['sp', 'solped', 'solicitud']), None)
+    id_col = None
+    for c in cols:
+        c_low = str(c).lower().strip()
+        if c_low in ['sp', 'solped', 'solicitud', 'n° solped', 'num solped', 'solped/pos', 'sol.pedido']:
+            id_col = c
+            break
             
     if not id_col:
-        id_col = next((c for c in cols if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'pedido'])), None)
+        for c in cols:
+            c_low = str(c).lower().strip()
+            if any(kw in c_low for kw in ['solped', 'solicitud', 'requerimiento', 'pr', 'pedido']):
+                id_col = c
+                break
                 
     if id_col and id_col in cols:
         df = df.rename(columns={id_col: 'SOLPED'})
@@ -343,25 +352,33 @@ def extraer_materiales_de_masivo(df, id_solped):
     if df is None or df.empty: return []
         
     raw_search = str(id_solped).strip()
-    if not raw_search or raw_search.lower() in ["(id solped)", "none", "nan", ""]: return []
+    if not raw_search or raw_search.lower() in ["(id solped)", "none", "nan", "", "n/a"]: return []
         
     digits_search = re.sub(r'\D', '', raw_search)
-    sp_cols = [c for c in df.columns if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'doc', 'pedido', 'compra'])]
-    if not sp_cols: sp_cols = list(df.columns)
+    clean_search = re.sub(r'[^a-zA-Z0-9]', '', raw_search).lower()
+
+    # Priorizar búsqueda en columna de SOLPED identificada
+    sp_cols = [c for c in df.columns if any(kw in str(c).lower() for kw in ['solped', 'solicitud', 'sp', 'requerimiento', 'pedido', 'pr'])]
+    if not sp_cols:
+        sp_cols = [df.columns[0]]
 
     df_filtrado = pd.DataFrame()
     for col in sp_cols:
-        col_idx = df.columns.get_loc(col)
-        if isinstance(col_idx, (slice, list, np.ndarray)):
-            col_series = df.iloc[:, col_idx[0]].astype(str).str.strip()
-        else:
-            col_series = df.iloc[:, col_idx].astype(str).str.strip()
-
-        mask = col_series.str.lower() == raw_search.lower()
-        if not mask.any() and digits_search:
-            digits_col = col_series.str.replace(r'\D', '', regex=True)
-            mask = digits_col == digits_search
-        if not mask.any(): mask = col_series.str.lower().str.contains(raw_search.lower(), regex=False)
+        col_series = df[col].astype(str).str.strip()
+        col_series_clean = col_series.apply(lambda x: re.sub(r'[^a-zA-Z0-9]', '', str(x)).lower())
+        
+        # 1. Coincidencia Exacta Limpia
+        mask = col_series_clean == clean_search
+        
+        # 2. Coincidencia por Dígitos Exactos
+        if not mask.any() and len(digits_search) >= 3:
+            col_digits = col_series.str.replace(r'\D', '', regex=True)
+            mask = col_digits == digits_search
+            
+        # 3. Substring estricto si el término es de al menos 4 caracteres
+        if not mask.any() and len(clean_search) >= 4:
+            mask = col_series_clean.str.contains(clean_search, regex=False)
+            
         if mask.any():
             df_filtrado = df[mask]
             break
@@ -393,22 +410,27 @@ def extraer_materiales_de_masivo(df, id_solped):
                 return float(s)
             except: return default
 
+        solped_real = get_val(['solped', 'solicitud', 'sp', 'requerimiento', 'pedido'], raw_search)
         mat_desc = get_val(['texto breve de material', 'texto breve', 'denominación del material', 'denominacion del material', 'descripción del material', 'descripcion del material', 'descripción', 'descripcion', 'denominacion', 'denominación', 'material', 'texto', 'item', 'artículo', 'articulo', 'breve'], f"Material {idx+1}")
         centro_desc = get_val(['nombre centro', 'nombre del centro', 'denominación centro', 'denominacion centro', 'descripción centro', 'descripcion centro', 'texto centro', 'centro', 'plant', 'almacen', 'alm'], "E001")
         proveedor_sugerido = str(get_val(['proveedor', 'vendor', 'prov', 'nam', 'razon social', 'acreedor', 'nombre proveedor', 'nombre_proveedor', 'nom_prov', 'lifnr', 'nombre del proveedor', 'supplier', 'nombre', 'distribuidor'], ""))
+        
+        pos_val = get_val(['pos', 'posicion', 'posición', 'item', 'linea'], idx + 1)
+        try: pos_num = int(clean_num(pos_val, idx + 1))
+        except: pos_num = idx + 1
+
         cant_raw = clean_num(get_val(['cant', 'cantidad', 'ctd'], 1.0), 1.0)
         cant_clean = int(cant_raw) if float(cant_raw).is_integer() else cant_raw
 
         fecha_hist = get_val(['fecha', 'date', 'entrega', 'creacion', 'f.pedido'], None)
         fecha_parsed = date.today()
         if fecha_hist and fecha_hist != "":
-            try:
-                fecha_parsed = pd.to_datetime(fecha_hist).date()
-            except:
-                fecha_parsed = date.today()
+            try: fecha_parsed = pd.to_datetime(fecha_hist).date()
+            except: fecha_parsed = date.today()
 
         posiciones.append({
-            "Pos": int(idx + 1),
+            "SOLPED": str(solped_real),
+            "Pos": pos_num,
             "Material": str(mat_desc),
             "Centro": str(centro_desc),
             "Cantidad": cant_clean,
@@ -440,19 +462,30 @@ def leer_archivo_cached(file_bytes, file_name):
             df_raw = pd.read_csv(io.BytesIO(file_bytes))
         else:
             xls = pd.ExcelFile(io.BytesIO(file_bytes), engine='openpyxl')
-            df_raw = pd.DataFrame()
             
-            nombres_relevantes = [s for s in xls.sheet_names if any(k in s.lower() for k in ['base', 'dato', 'detalle', 'solped', 'cuadro', 'mat', 'reporte'])]
-            orden_busqueda = nombres_relevantes + [s for s in xls.sheet_names if s not in nombres_relevantes]
+            # Evaluación inteligente de pestañas para evitar hojas de referencias o categorías
+            best_sheet = None
+            best_score = -1
+            keywords_scoring = ['solped', 'material', 'pos', 'texto', 'centro', 'cant', 'cantidad', 'proveedor', 'acreedor', 'vendor', 'precio', 'monto', 'pr', 'requerimiento']
             
-            for sheet in orden_busqueda:
-                df_tmp = pd.read_excel(xls, sheet_name=sheet)
-                if len(df_tmp.dropna(how='all')) > 10:
-                    df_raw = df_tmp
-                    break
+            for sheet in xls.sheet_names:
+                try:
+                    df_tmp = pd.read_excel(xls, sheet_name=sheet, nrows=30)
+                    if df_tmp.empty: continue
                     
-            if df_raw.empty:
-                df_raw = pd.read_excel(xls, sheet_name=xls.sheet_names[0])
+                    sheet_text = " ".join(df_tmp.columns.astype(str).str.lower()) + " " + " ".join(df_tmp.fillna('').astype(str).values.flatten()[:200]).lower()
+                    score = sum(1 for kw in keywords_scoring if kw in sheet_text)
+                    
+                    if any(k in sheet.lower() for k in ['base', 'dato', 'solped', 'detalle', 'cuadro', 'mat', 'reporte', 'pr']):
+                        score += 3
+                        
+                    if score > best_score:
+                        best_score = score
+                        best_sheet = sheet
+                except Exception:
+                    continue
+            
+            df_raw = pd.read_excel(xls, sheet_name=best_sheet if best_sheet else xls.sheet_names[0])
             
         df_clean = df_raw.dropna(axis=1, how='all').dropna(axis=0, how='all')
         df_clean.columns = deduplicar_columnas(df_clean.columns)
@@ -490,8 +523,8 @@ with st.sidebar:
     st.header("⚙️ Parámetros de Cambio")
     indicadores = obtener_indicadores_tiempo_real()
     
-    if indicadores["estado"]: st.success("🟢 Indicadores actualizados")
-    else: st.warning("⚠️ Sin conexión a API. Valores por defecto.")
+    if indicadores["estado"]: st.success("🟢 Indicadores actualizados en vivo")
+    else: st.warning("⚠️ Usando valores por defecto (Sin conexión).")
         
     if st.button("🔄 Actualizar Tasas API", use_container_width=True):
         st.cache_data.clear()
@@ -504,21 +537,21 @@ with st.sidebar:
     st.divider()
     
     st.header("📂 Carga de Archivos Base")
-    file_autogestion = st.file_uploader("1. Plantilla Autogestión (Estructura Ordenada Base)", type=["xlsx", "xls", "csv", "xlsm"])
-    file_cuadro = st.file_uploader("2. Cuadro Comparativo (Datos Brutos / Proveedores e Histórico)", type=["xlsx", "xls", "csv", "xlsm"])
+    file_autogestion = st.file_uploader("1. Plantilla Autogestión (Estructura Base)", type=["xlsx", "xls", "csv", "xlsm"])
+    file_cuadro = st.file_uploader("2. Cuadro Comparativo (Datos Brutos / Histórico)", type=["xlsx", "xls", "csv", "xlsm"])
     
     if st.button("Procesar y Unir Archivos", type="primary", use_container_width=True):
         if file_autogestion:
             df_base = leer_archivo(file_autogestion)
             st.session_state.df_masivo = df_base
             if df_base is not None:
-                st.success(f"Plantilla Base (Autogestión) cargada ({len(df_base)} filas).")
+                st.success(f"Plantilla Base cargada ({len(df_base)} filas).")
             
         if file_cuadro:
             df_raw_hist = leer_archivo(file_cuadro)
             st.session_state.df_historico = df_raw_hist
             if df_raw_hist is not None:
-                st.success(f"Cuadro Comparativo Bruto / Histórico cargado ({len(df_raw_hist)} filas).")
+                st.success(f"Cuadro Bruto / Histórico cargado ({len(df_raw_hist)} filas).")
 
         if st.session_state.df_masivo is not None and st.session_state.df_historico is not None:
             col_mat_base = next((c for c in st.session_state.df_masivo.columns if 'material' in str(c).lower()), None)
@@ -539,7 +572,7 @@ with st.sidebar:
 
                 df_merged = pd.merge(st.session_state.df_masivo, df_hist_unique, left_on=col_mat_base, right_on=col_mat_hist, how='left', suffixes=('', '_Bruto'))
                 st.session_state.df_masivo = df_merged
-                st.success("✅ Datos brutos de proveedores e histórico integrados.")
+                st.success("✅ Datos brutos e histórico integrados.")
             else:
                 st.warning("No se encontró la columna 'Material' en ambas planillas para realizar el cruce.")
 
@@ -570,7 +603,7 @@ with tabs[0]:
                 st.session_state[f"lista_solped_{solped_id}"] = mats
                 st.success(f"Se encontraron {len(mats)} posiciones para la SOLPED **{solped_id}**")
             else:
-                st.warning(f"No se encontraron registros para la SOLPED '{solped_id}'.")
+                st.warning(f"No se encontraron registros exactos para la SOLPED '{solped_id}'.")
         else:
             st.info("Carga las planillas en el menú lateral y haz clic en Procesar.")
 
@@ -578,7 +611,7 @@ with tabs[0]:
 
     if key_lista not in st.session_state:
         st.session_state[key_lista] = [{
-            "Pos": 1, "Material": "PROYECTOR LED 50W DS1", "Centro": "E024", "Cantidad": 10, 
+            "SOLPED": "PR151762", "Pos": 1, "Material": "PROYECTOR LED 50W DS1", "Centro": "E024", "Cantidad": 10, 
             "UM": "CADA UNO", "Precio Unitario": 8190.0, "Moneda": "CLP", 
             "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": ""
         }]
@@ -593,9 +626,9 @@ with tabs[0]:
             with st.container(border=True):
                 col_title, col_del = st.columns([8, 2])
                 with col_title:
-                    st.markdown(f"### Pos {item['Pos']}: {item['Material']}")
+                    st.markdown(f"### SOLPED: {item.get('SOLPED', solped_id)} | Pos {item['Pos']}: {item['Material']}")
                     st.markdown(
-                        f"<div style='color: #8C8C8C; font-size: 0.9em; white-space: normal; word-break: break-word; overflow-wrap: anywhere; padding-bottom: 10px;'>"
+                        f"<div style='color: #8C8C8C; font-size: 0.9em; padding-bottom: 10px;'>"
                         f"<b>Centro:</b> {item['Centro']} | <b>UM Original:</b> {item['UM']}</div>", 
                         unsafe_allow_html=True
                     )
@@ -623,10 +656,8 @@ with tabs[0]:
 
                 valor_fecha = item.get("Calendario de entrega", date.today())
                 if isinstance(valor_fecha, str):
-                    try:
-                        valor_fecha = datetime.strptime(valor_fecha, "%Y-%m-%d").date()
-                    except:
-                        valor_fecha = date.today()
+                    try: valor_fecha = datetime.strptime(valor_fecha, "%Y-%m-%d").date()
+                    except: valor_fecha = date.today()
                 
                 item["Calendario de entrega"] = c6.date_input("Fecha Entrega", value=valor_fecha, key=f"date_{key_lista}_{idx}")
 
@@ -639,7 +670,8 @@ with tabs[0]:
             for r in st.session_state[key_lista]:
                 clp, usd, eur = convertir_moneda(float(r["Precio Unitario"]) * float(r["Cantidad"]), r["Moneda"], tc_usd, tc_uf, tc_eur)
                 item_guardar = r.copy()
-                item_guardar["SOLPED"] = solped_id if solped_id else "N/A"
+                if not item_guardar.get("SOLPED") or item_guardar.get("SOLPED") in ["", "N/A", "None", "nan"]:
+                    item_guardar["SOLPED"] = solped_id if solped_id else "N/A"
                 item_guardar["Total CLP"] = clp
                 item_guardar["Total USD"] = usd
                 item_guardar["Total EUR"] = eur
@@ -670,7 +702,7 @@ with tabs[1]:
 
     if "manual_items_list" not in st.session_state:
         st.session_state["manual_items_list"] = [{
-            "Pos": 1, "Material": "Ítem Manual 1", "Centro": "E001", "Cantidad": 1, "UM": "C/U",
+            "SOLPED": "MANUAL", "Pos": 1, "Material": "Ítem Manual 1", "Centro": "E001", "Cantidad": 1, "UM": "C/U",
             "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", "Transporte": "EXW",
             "Calendario de entrega": date.today(), "Observaciones": ""
         }]
@@ -679,6 +711,7 @@ with tabs[1]:
     
     if st.button("➕ Agregar Nuevo Material a la Lista"):
         lista_manual.append({
+            "SOLPED": manual_solped if manual_solped else "MANUAL",
             "Pos": len(lista_manual) + 1, "Material": "Nuevo Material", "Centro": "E001", "Cantidad": 1, "UM": "C/U",
             "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", "Transporte": "EXW",
             "Calendario de entrega": date.today(), "Observaciones": ""
@@ -715,10 +748,8 @@ with tabs[1]:
 
             valor_fecha_man = item.get("Calendario de entrega", date.today())
             if isinstance(valor_fecha_man, str):
-                try:
-                    valor_fecha_man = datetime.strptime(valor_fecha_man, "%Y-%m-%d").date()
-                except:
-                    valor_fecha_man = date.today()
+                try: valor_fecha_man = datetime.strptime(valor_fecha_man, "%Y-%m-%d").date()
+                except: valor_fecha_man = date.today()
             
             item["Calendario de entrega"] = c6.date_input("Fecha Entrega", value=valor_fecha_man, key=f"man_date_{idx}")
 
@@ -730,7 +761,8 @@ with tabs[1]:
         for item in st.session_state["manual_items_list"]:
             clp, usd, eur = convertir_moneda(float(item["Precio Unitario"]) * float(item["Cantidad"]), item["Moneda"], tc_usd, tc_uf, tc_eur)
             item_guardar = item.copy()
-            item_guardar["SOLPED"] = manual_solped if manual_solped else "MANUAL"
+            if not item_guardar.get("SOLPED") or item_guardar.get("SOLPED") in ["", "N/A", "None", "nan"]:
+                item_guardar["SOLPED"] = manual_solped if manual_solped else "MANUAL"
             item_guardar["Total CLP"] = clp
             item_guardar["Total USD"] = usd
             item_guardar["Total EUR"] = eur
@@ -745,6 +777,9 @@ with tabs[2]:
     
     if st.session_state.ofertas_manuales:
         df_comp = pd.DataFrame(st.session_state.ofertas_manuales)
+        
+        if 'SOLPED' not in df_comp.columns:
+            df_comp['SOLPED'] = 'N/A'
         df_comp['SOLPED'] = df_comp['SOLPED'].fillna('N/A').astype(str).replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
         
         df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str).str.strip()
@@ -757,7 +792,10 @@ with tabs[2]:
             'Precio Unitario', 'Moneda', 'Proveedor Visual', 'Transporte', 
             'Calendario de entrega', 'Total CLP', 'Total USD', 'Total EUR', 'Observaciones'
         ]
-        df_comp = df_comp[[c for c in cols_orden if c in df_comp.columns]]
+        
+        existing_cols = [c for c in cols_orden if c in df_comp.columns]
+        other_cols = [c for c in df_comp.columns if c not in cols_orden and c not in ['Total CLP', 'Total USD', 'Total EUR']]
+        df_comp = df_comp[existing_cols + other_cols]
 
         moneda_vista = st.radio("💱 Seleccionar Moneda de Visualización:", options=["CLP", "USD", "EUR"], horizontal=True)
         transporte_reporte = st.selectbox("🚚 Transporte General (Cabecera reporte):", options=["No Especificado"] + OPCIONES_TRANSPORTE, index=0)
@@ -777,10 +815,14 @@ with tabs[2]:
         
         def highlight_best(df):
             styles = pd.DataFrame('', index=df.index, columns=df.columns)
-            for name, group in df.groupby(['SOLPED', 'Material']):
-                if len(group) > 1:
-                    styles.loc[group['Monto Total Visualizado'].idxmin(), 'Monto Total Visualizado'] = 'background-color: #D1FAE5; color: #065F46; font-weight: bold;'
-                    styles.loc[group['Días para Entrega'].idxmin(), 'Días para Entrega'] = 'background-color: #DBEAFE; color: #1E3A8A; font-weight: bold;'
+            group_cols = [c for c in ['SOLPED', 'Material'] if c in df.columns]
+            if group_cols:
+                for name, group in df.groupby(group_cols):
+                    if len(group) > 1:
+                        if 'Monto Total Visualizado' in df.columns:
+                            styles.loc[group['Monto Total Visualizado'].idxmin(), 'Monto Total Visualizado'] = 'background-color: #D1FAE5; color: #065F46; font-weight: bold;'
+                        if 'Días para Entrega' in df.columns:
+                            styles.loc[group['Días para Entrega'].idxmin(), 'Días para Entrega'] = 'background-color: #DBEAFE; color: #1E3A8A; font-weight: bold;'
             return styles
 
         if not df_comp.empty:
