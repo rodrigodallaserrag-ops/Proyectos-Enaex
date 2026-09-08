@@ -263,7 +263,7 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
 def procesar_y_reparar_planilla(df):
     if df is None or df.empty: return df
 
-    palabras_clave = ['sp', 'solped', 'material', 'pos', 'texto breve', 'centro', 'cantidad', 'proveedor', 'documento']
+    palabras_clave = ['sp', 'solped', 'material', 'pos', 'texto breve', 'centro', 'cantidad', 'proveedor', 'acreedor', 'vendor', 'documento']
     header_idx = -1
     
     for idx in range(min(20, len(df))):
@@ -353,7 +353,7 @@ def extraer_materiales_de_masivo(df, id_solped):
                 for col in row.keys():
                     if k in str(col).lower() and pd.notna(row[col]):
                         val_str = str(row[col]).strip()
-                        if val_str != "" and val_str.lower() not in ["nan", "none"]:
+                        if val_str != "" and val_str.lower() not in ["nan", "none", "null"]:
                             candidates.append(val_str)
             if not candidates:
                 return default
@@ -385,10 +385,24 @@ def extraer_materiales_de_masivo(df, id_solped):
             "E001"
         )
 
-        proveedor_sugerido = str(get_val(['proveedor', 'vendor', 'prov', 'nam', 'razon social'], ""))
+        # Búsqueda ampliada de proveedores para abarcar campos históricos y de compras
+        proveedor_sugerido = str(get_val([
+            'proveedor', 'vendor', 'prov', 'nam', 'razon social', 'acreedor',
+            'nombre proveedor', 'nombre_proveedor', 'nom_prov', 'lifnr',
+            'nombre del proveedor', 'supplier', 'nombre', 'distribuidor'
+        ], ""))
 
         cant_raw = clean_num(get_val(['cant', 'cantidad', 'ctd'], 1.0), 1.0)
         cant_clean = int(cant_raw) if float(cant_raw).is_integer() else cant_raw
+
+        # Extracción de fecha de entrega o fecha histórica
+        fecha_hist = get_val(['fecha', 'date', 'entrega', 'creacion', 'f.pedido'], None)
+        fecha_parsed = date.today()
+        if fecha_hist and fecha_hist != "":
+            try:
+                fecha_parsed = pd.to_datetime(fecha_hist).date()
+            except:
+                fecha_parsed = date.today()
 
         posiciones.append({
             "Pos": int(idx + 1),
@@ -396,12 +410,12 @@ def extraer_materiales_de_masivo(df, id_solped):
             "Centro": str(centro_desc),
             "Cantidad": cant_clean,
             "UM": str(get_val(['um', 'unidad', 'unid', 'medida'], "C/U")).upper(),
-            "Precio Unitario": clean_num(get_val(['precio', 'monto', 'val', 'costo', 'p.u', 'neto'], 0.0), 0.0),
+            "Precio Unitario": clean_num(get_val(['precio', 'monto', 'val', 'costo', 'p.u', 'neto', 'p.unitario'], 0.0), 0.0),
             "Moneda": str(get_val(['moneda', 'curr', 'mon'], "CLP")).upper(),
             "Proveedor": proveedor_sugerido,
-            "Transporte": "EXW",
-            "Calendario de entrega": date.today(),
-            "Observaciones": str(get_val(['obs', 'observacion', 'comentario'], ""))
+            "Transporte": str(get_val(['transporte', 'incoterm', 'despacho'], "EXW")),
+            "Calendario de entrega": fecha_parsed,
+            "Observaciones": str(get_val(['obs', 'observacion', 'comentario', 'notas'], ""))
         })
     return posiciones
 
@@ -476,9 +490,9 @@ with st.sidebar:
         if file_cuadro:
             df_raw_hist = leer_archivo(file_cuadro)
             st.session_state.df_historico = df_raw_hist
-            st.success(f"Cuadro Comparativo Bruto cargado ({len(df_raw_hist)} filas).")
+            st.success(f"Cuadro Comparativo Bruto / Histórico cargado ({len(df_raw_hist)} filas).")
 
-        # Cruce de información: Enriquecer Autogestión con Cuadro Comparativo
+        # Cruce de información: Enriquecer Autogestión con Cuadro Comparativo e Histórico sin filtrar por fechas
         if st.session_state.df_masivo is not None and st.session_state.df_historico is not None:
             col_mat_base = next((c for c in st.session_state.df_masivo.columns if 'material' in str(c).lower()), None)
             col_mat_hist = next((c for c in st.session_state.df_historico.columns if 'material' in str(c).lower()), None)
@@ -487,13 +501,20 @@ with st.sidebar:
                 st.session_state.df_masivo[col_mat_base] = st.session_state.df_masivo[col_mat_base].astype(str).str.strip()
                 st.session_state.df_historico[col_mat_hist] = st.session_state.df_historico[col_mat_hist].astype(str).str.strip()
 
-                # Desduplicar el histórico para evitar repeticiones accidentales al hacer el Join
+                # Ordenar por fecha si existe para tomar el registro más relevante pero preservando todos los anteriores (incluyendo pre-2019)
+                col_fecha_hist = next((c for c in st.session_state.df_historico.columns if any(k in str(c).lower() for k in ['fecha', 'date', 'ano', 'año', 'creacion'])), None)
+                if col_fecha_hist:
+                    st.session_state.df_historico['_fecha_tmp'] = pd.to_datetime(st.session_state.df_historico[col_fecha_hist], errors='coerce')
+                    st.session_state.df_historico = st.session_state.df_historico.sort_values(by='_fecha_tmp', ascending=False)
+
                 df_hist_unique = st.session_state.df_historico.drop_duplicates(subset=[col_mat_hist], keep='first')
-                
-                # Unir datos brutos de proveedores e histórico a la plantilla estructurada
+                if '_fecha_tmp' in df_hist_unique.columns:
+                    df_hist_unique = df_hist_unique.drop(columns=['_fecha_tmp'])
+
+                # Unir datos brutos de proveedores e histórico
                 df_merged = pd.merge(st.session_state.df_masivo, df_hist_unique, left_on=col_mat_base, right_on=col_mat_hist, how='left', suffixes=('', '_Bruto'))
                 st.session_state.df_masivo = df_merged
-                st.success("✅ Datos brutos de proveedores e histórico integrados en la estructura ordenada.")
+                st.success("✅ Datos brutos de proveedores e histórico (de todas las fechas) integrados.")
             else:
                 st.warning("No se encontró la columna 'Material' en ambas planillas para realizar el cruce.")
 
@@ -700,8 +721,12 @@ with tabs[2]:
     if st.session_state.ofertas_manuales:
         df_comp = pd.DataFrame(st.session_state.ofertas_manuales)
         df_comp['SOLPED'] = df_comp['SOLPED'].fillna('N/A').astype(str).replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
-        df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str)
-        df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace({'': 'Sin Especificar', 'none': 'Sin Especificar', 'None': 'Sin Especificar'})
+        
+        # Mapeo limpio y robusto del campo Proveedor
+        df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str).str.strip()
+        df_comp['Proveedor Visual'] = df_comp['Proveedor'].apply(
+            lambda x: 'Sin Especificar' if x in ['', 'none', 'None', 'nan', 'NULL', 'null'] else x
+        )
 
         cols_orden = [
             'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
@@ -717,11 +742,13 @@ with tabs[2]:
         elif moneda_vista == "USD": df_comp["Monto Total Visualizado"] = df_comp["Total USD"]
         elif moneda_vista == "EUR": df_comp["Monto Total Visualizado"] = df_comp["Total EUR"]
 
-        df_comp['Calendario de entrega'] = pd.to_datetime(df_comp['Calendario de entrega'])
+        df_comp['Calendario de entrega'] = pd.to_datetime(df_comp['Calendario de entrega'], errors='coerce')
         hoy = pd.Timestamp(date.today())
+        
+        # Cálculo seguro de Días para Entrega sin descartar fechas históricas antiguas
         df_comp['Días para Entrega'] = (df_comp['Calendario de entrega'] - hoy).dt.days
-        df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: x if pd.notna(x) and x > 0 else 0)
-        df_comp['Calendario de entrega'] = df_comp['Calendario de entrega'].dt.strftime('%d/%m/%Y')
+        df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: int(x) if pd.notna(x) and x > 0 else 0)
+        df_comp['Calendario de entrega'] = df_comp['Calendario de entrega'].dt.strftime('%d/%m/%Y').fillna('N/A')
 
         st.markdown("### 🏆 Motor de Recomendación")
         
