@@ -231,7 +231,6 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
             mon = clean_str_pdf(row.get('Moneda', 'CLP'))
             monto = f"${row.get('Monto Total Visualizado', 0):,.2f}"
             
-            # Formatear fecha para el PDF si existe, si no, mostrar los días
             if pd.notna(row.get('Calendario de entrega')):
                 try:
                     fecha_str = pd.to_datetime(row['Calendario de entrega']).strftime('%d/%m/%Y')
@@ -259,12 +258,12 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
     except Exception: return b""
 
 # =============================================================================
-# FUNCIONES AUXILIARES Y BÚSQUEDA ROBUSTA
+# FUNCIONES AUXILIARES Y LECTURA DE PLANILLAS
 # =============================================================================
 def procesar_y_reparar_planilla(df):
     if df is None or df.empty: return df
 
-    palabras_clave = ['sp', 'solped', 'material', 'pos', 'texto breve', 'centro', 'cantidad']
+    palabras_clave = ['sp', 'solped', 'material', 'pos', 'texto breve', 'centro', 'cantidad', 'proveedor', 'documento']
     header_idx = -1
     
     for idx in range(min(20, len(df))):
@@ -358,7 +357,6 @@ def extraer_materiales_de_masivo(df, id_solped):
                             candidates.append(val_str)
             if not candidates:
                 return default
-            # Filtrar candidatos que no tengan puntos suspensivos (...) para evitar textos cortados
             sin_truncar = [c for c in candidates if '...' not in c and '…' not in c]
             if sin_truncar:
                 return max(sin_truncar, key=len)
@@ -387,6 +385,9 @@ def extraer_materiales_de_masivo(df, id_solped):
             "E001"
         )
 
+        # Si el Dataframe fue cruzado con el histórico, extraerá de las columnas con proveedor histórico
+        proveedor_sugerido = str(get_val(['proveedor', 'vendor', 'prov', 'nam'], ""))
+
         posiciones.append({
             "Pos": int(idx + 1),
             "Material": str(mat_desc),
@@ -395,7 +396,7 @@ def extraer_materiales_de_masivo(df, id_solped):
             "UM": str(get_val(['um', 'unidad', 'unid', 'medida'], "C/U")).upper(),
             "Precio Unitario": clean_num(get_val(['precio', 'monto', 'val', 'costo', 'p.u', 'neto'], 0.0), 0.0),
             "Moneda": str(get_val(['moneda', 'curr', 'mon'], "CLP")).upper(),
-            "Proveedor": str(get_val(['proveedor', 'vendor', 'prov', 'nam'], "")),
+            "Proveedor": proveedor_sugerido,
             "Transporte": "EXW",
             "Calendario de entrega": date.today(),
             "Observaciones": str(get_val(['obs', 'observacion', 'comentario'], ""))
@@ -413,10 +414,27 @@ def convertir_moneda(monto, moneda_origen, tc_usd, tc_uf, tc_eur):
     eur = clp / tc_eur if tc_eur > 0 else 0.0
     return clp, usd, eur
 
+def leer_archivo(file_uploader):
+    try:
+        if file_uploader.name.endswith(".csv"): df_raw = pd.read_csv(file_uploader)
+        else:
+            dict_dfs = pd.read_excel(file_uploader, sheet_name=None, engine='openpyxl')
+            df_raw = pd.concat(dict_dfs.values(), ignore_index=True)
+            
+        df_clean = df_raw.dropna(axis=1, how='all').dropna(axis=0, how='all')
+        df_procesado = procesar_y_reparar_planilla(df_clean)
+        df_procesado['cantidad_nulos'] = df_procesado.isnull().sum(axis=1)
+        df_procesado = df_procesado.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
+        return df_procesado
+    except Exception as e:
+        st.error(f"Error al leer el archivo {file_uploader.name}: {e}")
+        return None
+
 # =============================================================================
 # INICIALIZACIÓN DE ESTADO
 # =============================================================================
 if "df_masivo" not in st.session_state: st.session_state.df_masivo = None
+if "df_historico" not in st.session_state: st.session_state.df_historico = None
 if "ofertas_manuales" not in st.session_state: st.session_state.ofertas_manuales = []
 
 OPCIONES_TRANSPORTE = ["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAT", "DDP"]
@@ -443,28 +461,44 @@ with st.sidebar:
     tc_eur = st.number_input("Tipo de Cambio EUR / CLP", value=indicadores["EUR"], step=1.0, format="%.2f")
     st.divider()
     
-    st.header("📂 Carga de Archivo Base")
-    file_masivo = st.file_uploader("Cargar Planilla Maestro/SOLPEDs", type=["xlsx", "xls", "csv", "xlsm"])
+    st.header("📂 Carga de Archivos Base")
+    file_masivo = st.file_uploader("1. Planilla Cuadro Comparativo (SOLPEDs)", type=["xlsx", "xls", "csv", "xlsm"])
+    file_autogestion = st.file_uploader("2. Planilla Autogestión / Históricos (Opcional)", type=["xlsx", "xls", "csv", "xlsm"])
     
-    if file_masivo:
-        try:
-            if file_masivo.name.endswith(".csv"): df_raw = pd.read_csv(file_masivo)
-            else:
-                dict_dfs = pd.read_excel(file_masivo, sheet_name=None, engine='openpyxl')
-                df_raw = pd.concat(dict_dfs.values(), ignore_index=True)
-                
-            df_clean = df_raw.dropna(axis=1, how='all').dropna(axis=0, how='all')
-            df_procesado = procesar_y_reparar_planilla(df_clean)
-            df_procesado['cantidad_nulos'] = df_procesado.isnull().sum(axis=1)
-            df_procesado = df_procesado.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
+    if st.button("Procesar y Unir Archivos", type="primary", use_container_width=True):
+        if file_masivo:
+            df_base = leer_archivo(file_masivo)
+            st.session_state.df_masivo = df_base
+            st.success(f"Planilla Base cargada ({len(df_base)} filas).")
             
-            st.session_state.df_masivo = df_procesado
-            st.success(f"Planilla cargada correctamente ({len(st.session_state.df_masivo)} filas)")
-        except Exception as e:
-            st.error(f"Error al leer el archivo: {e}")
+        if file_autogestion:
+            df_hist = leer_archivo(file_autogestion)
+            st.session_state.df_historico = df_hist
+            st.success(f"Planilla Histórica cargada ({len(df_hist)} filas).")
+
+        # Lógica de Merge (Cruce)
+        if st.session_state.df_masivo is not None and st.session_state.df_historico is not None:
+            # Buscar la columna 'Material' en ambas bases
+            col_mat_base = next((c for c in st.session_state.df_masivo.columns if 'material' in str(c).lower()), None)
+            col_mat_hist = next((c for c in st.session_state.df_historico.columns if 'material' in str(c).lower()), None)
+            
+            if col_mat_base and col_mat_hist:
+                # Asegurar de que la columna material tenga el mismo formato (str)
+                st.session_state.df_masivo[col_mat_base] = st.session_state.df_masivo[col_mat_base].astype(str).str.strip()
+                st.session_state.df_historico[col_mat_hist] = st.session_state.df_historico[col_mat_hist].astype(str).str.strip()
+
+                # Desduplicar el histórico para no multiplicar los ítems de la SOLPED al cruzar
+                df_hist_unique = st.session_state.df_historico.drop_duplicates(subset=[col_mat_hist], keep='first')
+                
+                # Realizar Left Join
+                df_merged = pd.merge(st.session_state.df_masivo, df_hist_unique, left_on=col_mat_base, right_on=col_mat_hist, how='left', suffixes=('', '_Histórico'))
+                st.session_state.df_masivo = df_merged
+                st.success("✅ Archivos unidos y enriquecidos mediante la columna 'Material'.")
+            else:
+                st.warning("No se encontró la columna 'Material' en alguno de los archivos para realizar el cruce.")
 
 if st.session_state.df_masivo is not None:
-    with st.expander("👀 Vista Previa de la Planilla Base Cargada", expanded=False):
+    with st.expander("👀 Vista Previa de la Base de Datos Activa", expanded=False):
         st.dataframe(st.session_state.df_masivo, use_container_width=True)
 
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
@@ -492,7 +526,7 @@ with tabs[0]:
             else:
                 st.warning(f"No se encontraron registros para la SOLPED '{solped_id}'.")
         else:
-            st.info("Carga una planilla maestra en el menú lateral.")
+            st.info("Carga la planilla en el menú lateral y haz clic en Procesar.")
 
     key_lista = f"lista_solped_{solped_id}" if (solped_id and f"lista_solped_{solped_id}" in st.session_state) else "lista_solped_default"
 
@@ -514,7 +548,6 @@ with tabs[0]:
                 col_title, col_del = st.columns([8, 2])
                 with col_title:
                     st.markdown(f"### Pos {item['Pos']}: {item['Material']}")
-                    # Reemplazo con forzado de ajuste e impresión completa de texto sin puntos suspensivos
                     st.markdown(
                         f"<div style='color: #8C8C8C; font-size: 0.9em; white-space: normal; word-break: break-word; overflow-wrap: anywhere; padding-bottom: 10px;'>"
                         f"<b>Centro:</b> {item['Centro']} | <b>UM Original:</b> {item['UM']}</div>", 
@@ -524,7 +557,6 @@ with tabs[0]:
                     if st.button("🗑️ Eliminar", key=f"btn_del_t1_{idx}", type="primary", use_container_width=True):
                         idx_a_eliminar = idx
 
-                # 6 columnas para agregar la Fecha de Entrega
                 c1, c2, c3, c4, c5, c6 = st.columns([1, 1.5, 1, 1.5, 1.5, 1.5])
                 item["Cantidad"] = c1.number_input("Cantidad", value=float(item.get("Cantidad", 1.0)), key=f"cant_{key_lista}_{idx}")
                 item["Precio Unitario"] = c2.number_input("Precio Unitario", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"pu_{key_lista}_{idx}")
@@ -539,7 +571,6 @@ with tabs[0]:
                 t_idx = trans_opts.index(item.get("Transporte", "EXW")) if item.get("Transporte") in trans_opts else 4
                 item["Transporte"] = c5.selectbox("Transporte", trans_opts, index=t_idx, key=f"trans_{key_lista}_{idx}")
 
-                # Nuevo campo: Fecha de entrega
                 valor_fecha = item.get("Calendario de entrega", date.today())
                 if isinstance(valor_fecha, str):
                     try:
@@ -614,7 +645,6 @@ with tabs[1]:
                 if st.button("🗑️ Eliminar", key=f"btn_del_t2_{idx}", type="primary", use_container_width=True):
                     idx_del_manual = idx
 
-            # 6 columnas para agregar la Fecha de Entrega
             c1, c2, c3, c4, c5, c6 = st.columns([1, 1.5, 1, 1.5, 1.5, 1.5])
             item["Cantidad"] = c1.number_input("Cantidad", value=float(item.get("Cantidad", 1.0)), key=f"man_cant_{idx}")
             item["Precio Unitario"] = c2.number_input("Precio Unitario", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"man_pu_{idx}")
@@ -629,7 +659,6 @@ with tabs[1]:
             t_idx = trans_opts.index(item.get("Transporte", "EXW")) if item.get("Transporte") in trans_opts else 4
             item["Transporte"] = c5.selectbox("Transporte", trans_opts, index=t_idx, key=f"man_trans_{idx}")
 
-            # Nuevo campo: Fecha de entrega
             valor_fecha_man = item.get("Calendario de entrega", date.today())
             if isinstance(valor_fecha_man, str):
                 try:
