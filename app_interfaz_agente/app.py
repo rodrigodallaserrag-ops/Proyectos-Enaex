@@ -576,7 +576,7 @@ if st.session_state.df_masivo is not None:
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
 
 # =============================================================================
-# TAB 1: EVALUACIÓN POR SOLPED
+# TAB 1: EVALUACIÓN POR SOLPED (FLUIDA - SIN CONTENEDOR RÍGIDO DE ALTURA)
 # =============================================================================
 with tabs[0]:
     st.subheader("✏️ Evaluación por SOLPED")
@@ -630,45 +630,45 @@ with tabs[0]:
 
         idx_a_eliminar = None
         
-        with st.container(height=550):
-            for idx, item in enumerate(lista_materiales):
-                with st.container(border=True):
-                    col_title, col_del = st.columns([8, 2])
-                    with col_title:
-                        st.markdown(f"### SOLPED: {item.get('SOLPED', solped_id)} | Pos {item['Pos']}: {item['Material']}")
-                        st.markdown(
-                            f"<div style='color: #8C8C8C; font-size: 0.9em; padding-bottom: 10px;'>"
-                            f"<b>Centro:</b> {item['Centro']} | <b>UM Original:</b> {item['UM']}</div>", 
-                            unsafe_allow_html=True
-                        )
-                    with col_del:
-                        if st.button("🗑️ Eliminar", key=f"btn_del_t1_{idx}", type="primary", use_container_width=True):
-                            idx_a_eliminar = idx
+        # Flujo natural sin límite fijo de altura
+        for idx, item in enumerate(lista_materiales):
+            with st.container(border=True):
+                col_title, col_del = st.columns([8, 2])
+                with col_title:
+                    st.markdown(f"### SOLPED: {item.get('SOLPED', solped_id)} | Pos {item['Pos']}: {item['Material']}")
+                    st.markdown(
+                        f"<div style='color: #8C8C8C; font-size: 0.9em; padding-bottom: 10px;'>"
+                        f"<b>Centro:</b> {item['Centro']} | <b>UM Original:</b> {item['UM']}</div>", 
+                        unsafe_allow_html=True
+                    )
+                with col_del:
+                    if st.button("🗑️ Eliminar", key=f"btn_del_t1_{idx}", type="primary", use_container_width=True):
+                        idx_a_eliminar = idx
 
-                    c1, c2, c3, c4, c5, c6 = st.columns([1, 1.5, 1, 1.5, 1.5, 1.5])
-                    
-                    cant_val = float(item.get("Cantidad", 1.0))
-                    cant_val_clean = int(cant_val) if cant_val.is_integer() else cant_val
-                    item["Cantidad"] = c1.number_input("Cantidad", value=cant_val_clean, format="%g", key=f"cant_{key_lista}_{idx}")
-                    
-                    item["Precio Unitario"] = c2.number_input("Precio Unitario", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"pu_{key_lista}_{idx}")
-                    
-                    moneda_opts = ["CLP", "USD", "EUR"]
-                    m_idx = moneda_opts.index(item.get("Moneda", "CLP")) if item.get("Moneda") in moneda_opts else 0
-                    item["Moneda"] = c3.selectbox("Moneda", moneda_opts, index=m_idx, key=f"mon_{key_lista}_{idx}")
-                    
-                    item["Proveedor"] = c4.text_input("Proveedor", value=str(item.get("Proveedor", "")), key=f"prov_{key_lista}_{idx}")
-                    
-                    trans_opts = OPCIONES_TRANSPORTE
-                    t_idx = trans_opts.index(item.get("Transporte", "EXW")) if item.get("Transporte") in trans_opts else 4
-                    item["Transporte"] = c5.selectbox("Transporte", trans_opts, index=t_idx, key=f"trans_{key_lista}_{idx}")
+                c1, c2, c3, c4, c5, c6 = st.columns([1, 1.5, 1, 1.5, 1.5, 1.5])
+                
+                cant_val = float(item.get("Cantidad", 1.0))
+                cant_val_clean = int(cant_val) if cant_val.is_integer() else cant_val
+                item["Cantidad"] = c1.number_input("Cantidad", value=cant_val_clean, format="%g", key=f"cant_{key_lista}_{idx}")
+                
+                item["Precio Unitario"] = c2.number_input("Precio Unitario", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"pu_{key_lista}_{idx}")
+                
+                moneda_opts = ["CLP", "USD", "EUR"]
+                m_idx = moneda_opts.index(item.get("Moneda", "CLP")) if item.get("Moneda") in moneda_opts else 0
+                item["Moneda"] = c3.selectbox("Moneda", moneda_opts, index=m_idx, key=f"mon_{key_lista}_{idx}")
+                
+                item["Proveedor"] = c4.text_input("Proveedor", value=str(item.get("Proveedor", "")), key=f"prov_{key_lista}_{idx}")
+                
+                trans_opts = OPCIONES_TRANSPORTE
+                t_idx = trans_opts.index(item.get("Transporte", "EXW")) if item.get("Transporte") in trans_opts else 4
+                item["Transporte"] = c5.selectbox("Transporte", trans_opts, index=t_idx, key=f"trans_{key_lista}_{idx}")
 
-                    valor_fecha = item.get("Calendario de entrega", date.today())
-                    if isinstance(valor_fecha, str):
-                        try: valor_fecha = datetime.strptime(valor_fecha, "%Y-%m-%d").date()
-                        except: valor_fecha = date.today()
-                    
-                    item["Calendario de entrega"] = c6.date_input("Fecha Entrega", value=valor_fecha, key=f"date_{key_lista}_{idx}")
+                valor_fecha = item.get("Calendario de entrega", date.today())
+                if isinstance(valor_fecha, str):
+                    try: valor_fecha = datetime.strptime(valor_fecha, "%Y-%m-%d").date()
+                    except: valor_fecha = date.today()
+                
+                item["Calendario de entrega"] = c6.date_input("Fecha Entrega", value=valor_fecha, key=f"date_{key_lista}_{idx}")
 
         if idx_a_eliminar is not None:
             st.session_state[key_lista].pop(idx_a_eliminar)
@@ -688,7 +688,7 @@ with tabs[0]:
             st.success("¡Oferta guardada exitosamente en el Cuadro Comparativo!")
 
 # =============================================================================
-# TAB 2: CARGA MANUAL DIRECTA
+# TAB 2: CARGA MANUAL DIRECTA (FLUIDA - SIN CONTENEDOR RÍGIDO DE ALTURA)
 # =============================================================================
 with tabs[1]:
     st.subheader("➕ Carga Manual de Oferta Paso a Paso")
@@ -742,40 +742,40 @@ with tabs[1]:
             st.success("¡Cotización agregada al Cuadro Comparativo!")
 
     idx_del_manual = None
-    with st.container(height=550):
-        for idx, item in enumerate(lista_manual):
-            with st.container(border=True):
-                col_m_title, col_m_del = st.columns([8, 2])
-                with col_m_title:
-                    item["Material"] = st.text_input("Descripción / Material", value=item.get("Material", ""), key=f"man_mat_{idx}")
-                with col_m_del:
-                    if st.button("🗑️ Eliminar", key=f"btn_del_t2_{idx}", type="primary", use_container_width=True):
-                        idx_del_manual = idx
+    # Flujo natural sin límite fijo de altura
+    for idx, item in enumerate(lista_manual):
+        with st.container(border=True):
+            col_m_title, col_m_del = st.columns([8, 2])
+            with col_m_title:
+                item["Material"] = st.text_input("Descripción / Material", value=item.get("Material", ""), key=f"man_mat_{idx}")
+            with col_m_del:
+                if st.button("🗑️ Eliminar", key=f"btn_del_t2_{idx}", type="primary", use_container_width=True):
+                    idx_del_manual = idx
 
-                c1, c2, c3, c4, c5, c6 = st.columns([1, 1.5, 1, 1.5, 1.5, 1.5])
-                
-                man_cant_val = float(item.get("Cantidad", 1.0))
-                man_cant_clean = int(man_cant_val) if man_cant_val.is_integer() else man_cant_val
-                item["Cantidad"] = c1.number_input("Cantidad", value=man_cant_clean, format="%g", key=f"man_cant_{idx}")
-                
-                item["Precio Unitario"] = c2.number_input("Precio Unitario", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"man_pu_{idx}")
-                
-                moneda_opts = ["CLP", "USD", "EUR"]
-                m_idx = moneda_opts.index(item.get("Moneda", "CLP")) if item.get("Moneda") in moneda_opts else 0
-                item["Moneda"] = c3.selectbox("Moneda", moneda_opts, index=m_idx, key=f"man_mon_{idx}")
-                
-                item["Proveedor"] = c4.text_input("Proveedor", value=str(item.get("Proveedor", "")), key=f"man_prov_{idx}")
-                
-                trans_opts = OPCIONES_TRANSPORTE
-                t_idx = trans_opts.index(item.get("Transporte", "EXW")) if item.get("Transporte") in trans_opts else 4
-                item["Transporte"] = c5.selectbox("Transporte", trans_opts, index=t_idx, key=f"man_trans_{idx}")
+            c1, c2, c3, c4, c5, c6 = st.columns([1, 1.5, 1, 1.5, 1.5, 1.5])
+            
+            man_cant_val = float(item.get("Cantidad", 1.0))
+            man_cant_clean = int(man_cant_val) if man_cant_val.is_integer() else man_cant_val
+            item["Cantidad"] = c1.number_input("Cantidad", value=man_cant_clean, format="%g", key=f"man_cant_{idx}")
+            
+            item["Precio Unitario"] = c2.number_input("Precio Unitario", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"man_pu_{idx}")
+            
+            moneda_opts = ["CLP", "USD", "EUR"]
+            m_idx = moneda_opts.index(item.get("Moneda", "CLP")) if item.get("Moneda") in moneda_opts else 0
+            item["Moneda"] = c3.selectbox("Moneda", moneda_opts, index=m_idx, key=f"man_mon_{idx}")
+            
+            item["Proveedor"] = c4.text_input("Proveedor", value=str(item.get("Proveedor", "")), key=f"man_prov_{idx}")
+            
+            trans_opts = OPCIONES_TRANSPORTE
+            t_idx = trans_opts.index(item.get("Transporte", "EXW")) if item.get("Transporte") in trans_opts else 4
+            item["Transporte"] = c5.selectbox("Transporte", trans_opts, index=t_idx, key=f"man_trans_{idx}")
 
-                valor_fecha_man = item.get("Calendario de entrega", date.today())
-                if isinstance(valor_fecha_man, str):
-                    try: valor_fecha_man = datetime.strptime(valor_fecha_man, "%Y-%m-%d").date()
-                    except: valor_fecha_man = date.today()
-                
-                item["Calendario de entrega"] = c6.date_input("Fecha Entrega", value=valor_fecha_man, key=f"man_date_{idx}")
+            valor_fecha_man = item.get("Calendario de entrega", date.today())
+            if isinstance(valor_fecha_man, str):
+                try: valor_fecha_man = datetime.strptime(valor_fecha_man, "%Y-%m-%d").date()
+                except: valor_fecha_man = date.today()
+            
+            item["Calendario de entrega"] = c6.date_input("Fecha Entrega", value=valor_fecha_man, key=f"man_date_{idx}")
 
     if idx_del_manual is not None:
         st.session_state["manual_items_list"].pop(idx_del_manual)
@@ -794,7 +794,7 @@ with tabs[1]:
         st.success("¡Cotización agregada al Cuadro Comparativo!")
 
 # =============================================================================
-# TAB 3: CUADRO COMPARATIVO INTEGRADO & DESCARGAS (SIN CONTENEDOR RÍGIDO)
+# TAB 3: CUADRO COMPARATIVO INTEGRADO & DESCARGAS
 # =============================================================================
 with tabs[2]:
     st.subheader("📊 Cuadro Comparativo Integrado")
