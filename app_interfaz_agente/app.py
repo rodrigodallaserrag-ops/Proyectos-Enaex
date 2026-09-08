@@ -441,7 +441,8 @@ def extraer_materiales_de_masivo(df, id_solped):
             "Proveedor": str(get_val(['proveedor', 'vendor', 'prov', 'nam'], "")),
             "Transporte": "EXW",
             "Calendario de entrega": date.today(),
-            "Observaciones": str(get_val(['obs', 'observacion', 'comentario'], ""))
+            "Observaciones": str(get_val(['obs', 'observacion', 'comentario'], "")),
+            "🗑️": False # Agregado campo eliminar
         })
         
     return posiciones
@@ -568,13 +569,15 @@ with tabs[0]:
     df_inicial = st.session_state.get(key_editor, pd.DataFrame([{
         "Pos": 1, "Material": "(Material)", "Centro": "(Centro)", "Cantidad": 1.0, 
         "UM": "C/U", "Precio Unitario": 0.0, "Moneda": "CLP", 
-        "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": ""
+        "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": "", "🗑️": False
     }]))
 
     if not df_inicial.empty:
         df_inicial["Precio Unitario"] = pd.to_numeric(df_inicial["Precio Unitario"], errors='coerce').fillna(0.0)
         df_inicial["Cantidad"] = pd.to_numeric(df_inicial["Cantidad"], errors='coerce').fillna(1.0)
         df_inicial["Calendario de entrega"] = pd.to_datetime(df_inicial["Calendario de entrega"]).dt.date
+        if "🗑️" not in df_inicial.columns:
+            df_inicial["🗑️"] = False
 
     edited_df = st.data_editor(
         df_inicial,
@@ -585,20 +588,24 @@ with tabs[0]:
             "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
             "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
             "Transporte": st.column_config.SelectboxColumn("Transporte", options=OPCIONES_TRANSPORTE),
-            "Calendario de entrega": st.column_config.DateColumn("Fecha Entrega")
+            "Calendario de entrega": st.column_config.DateColumn("Fecha Entrega"),
+            "🗑️": st.column_config.CheckboxColumn("🗑️", help="Selecciona para ignorar este ítem", default=False)
         }
     )
 
     if st.button("💾 Guardar Oferta de SOLPED en Comparativo", type="primary"):
-        registros = edited_df.to_dict('records')
-        for r in registros:
+        # Solo guardamos los registros donde el basurero NO esté marcado
+        registros_filtrados = edited_df[edited_df["🗑️"] == False].to_dict('records')
+        for r in registros_filtrados:
+            if "🗑️" in r:
+                del r["🗑️"] # Limpiamos la columna antes de guardar
             clp, usd, eur = convertir_moneda(r["Precio Unitario"] * r["Cantidad"], r["Moneda"], tc_usd, tc_uf, tc_eur)
             r["SOLPED"] = solped_id if solped_id else "N/A"
             r["Total CLP"] = clp
             r["Total USD"] = usd
             r["Total EUR"] = eur
             st.session_state.ofertas_manuales.append(r)
-        st.success("¡Oferta guardada exitosamente en el Cuadro Comparativo!")
+        st.success(f"¡{len(registros_filtrados)} oferta(s) guardada(s) exitosamente en el Cuadro Comparativo!")
 
 # =============================================================================
 # TAB 2: CARGA MANUAL INTEGRA / EDICIÓN DIRECTA POR SOLPED
@@ -629,7 +636,7 @@ with tabs[1]:
         st.session_state["manual_grid_df"] = pd.DataFrame([{
             "Pos": 1, "Material": "Ítem Manual", "Cantidad": 1.0, "UM": "C/U",
             "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", "Transporte": "EXW",
-            "Calendario de entrega": date.today(), "Observaciones": ""
+            "Calendario de entrega": date.today(), "Observaciones": "", "🗑️": False
         }])
 
     df_manual = st.session_state["manual_grid_df"]
@@ -637,6 +644,8 @@ with tabs[1]:
         df_manual["Precio Unitario"] = pd.to_numeric(df_manual["Precio Unitario"], errors='coerce').fillna(0.0)
         df_manual["Cantidad"] = pd.to_numeric(df_manual["Cantidad"], errors='coerce').fillna(1.0)
         df_manual["Calendario de entrega"] = pd.to_datetime(df_manual["Calendario de entrega"]).dt.date
+        if "🗑️" not in df_manual.columns:
+            df_manual["🗑️"] = False
 
     st.write("### Tabla de Cotización de Proveedor")
     
@@ -649,20 +658,24 @@ with tabs[1]:
             "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
             "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
             "Transporte": st.column_config.SelectboxColumn("Transporte", options=OPCIONES_TRANSPORTE),
-            "Calendario de entrega": st.column_config.DateColumn("Calendario de entrega")
+            "Calendario de entrega": st.column_config.DateColumn("Calendario de entrega"),
+            "🗑️": st.column_config.CheckboxColumn("🗑️", help="Selecciona para ignorar este ítem", default=False)
         }
     )
 
     if st.button("💾 Guardar Cotización Manual Completa", type="primary"):
-        items = cotizacion_df.to_dict('records')
-        for item in items:
+        # Filtramos los ignorados
+        items_filtrados = cotizacion_df[cotizacion_df["🗑️"] == False].to_dict('records')
+        for item in items_filtrados:
+            if "🗑️" in item:
+                del item["🗑️"]
             clp, usd, eur = convertir_moneda(item["Precio Unitario"] * item["Cantidad"], item["Moneda"], tc_usd, tc_uf, tc_eur)
             item["SOLPED"] = manual_solped if manual_solped else "MANUAL"
             item["Total CLP"] = clp
             item["Total USD"] = usd
             item["Total EUR"] = eur
             st.session_state.ofertas_manuales.append(item)
-        st.success("¡Cotización agregada al Cuadro Comparativo!")
+        st.success(f"¡{len(items_filtrados)} Cotización(es) agregada(s) al Cuadro Comparativo!")
 
 # =============================================================================
 # TAB 3: CUADRO COMPARATIVO INTEGRADO & DESCARGAS
@@ -677,12 +690,13 @@ with tabs[2]:
         df_comp['SOLPED'] = df_comp['SOLPED'].replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
         df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str)
         df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace({'': 'Sin Especificar', 'none': 'Sin Especificar', 'None': 'Sin Especificar'})
+        df_comp['🗑️'] = False # Agregamos la columna de eliminación
 
-        # Orden de columnas
+        # Orden de columnas asegurando que el basurero quede al extremo derecho
         cols_orden = [
             'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
             'Precio Unitario', 'Moneda', 'Proveedor Visual', 'Transporte', 
-            'Calendario de entrega', 'Total CLP', 'Total USD', 'Total EUR', 'Observaciones'
+            'Calendario de entrega', 'Total CLP', 'Total USD', 'Total EUR', 'Observaciones', '🗑️'
         ]
         cols_orden = [c for c in cols_orden if c in df_comp.columns]
         df_comp = df_comp[cols_orden]
@@ -737,7 +751,21 @@ with tabs[2]:
                 "Total EUR": "$ {:,.2f}"
             })
 
-            st.dataframe(styled_df_comp, use_container_width=True)
+            # Cambiamos st.dataframe a st.data_editor para permitir la interacción con el checkbox
+            edited_df_comp = st.data_editor(
+                styled_df_comp, 
+                use_container_width=True,
+                column_config={
+                    "🗑️": st.column_config.CheckboxColumn("🗑️", help="Marca para eliminar del reporte y aplica abajo", default=False)
+                }
+            )
+            
+            # Lógica para eliminar los elementos marcados en el comparativo
+            if edited_df_comp["🗑️"].any():
+                if st.button("🚨 Confirmar Eliminación de Items Seleccionados", type="primary"):
+                    indices_a_mantener = edited_df_comp.index[edited_df_comp["🗑️"] == False].tolist()
+                    st.session_state.ofertas_manuales = [st.session_state.ofertas_manuales[i] for i in indices_a_mantener]
+                    st.rerun()
             
             col_c1, col_c2 = st.columns(2)
             with col_c1:
@@ -793,7 +821,7 @@ with tabs[2]:
                     )
 
         st.write("")
-        if st.button("🗑️ Limpiar Cuadro Comparativo", use_container_width=False):
+        if st.button("🗑️ Limpiar TODO el Cuadro Comparativo", use_container_width=False):
             st.session_state.ofertas_manuales = []
             st.rerun()
     else:
