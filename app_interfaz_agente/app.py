@@ -22,7 +22,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilos CSS personalizados
 st.markdown("""
 <style>
     .main-header { font-size: 1.8rem; font-weight: 700; color: #1E3A8A; margin-bottom: 0.5rem; }
@@ -368,8 +367,7 @@ def extraer_materiales_de_masivo(df, id_solped):
             "Proveedor": str(get_val(['proveedor', 'vendor', 'prov', 'nam'], "")),
             "Transporte": "EXW",
             "Calendario de entrega": date.today(),
-            "Observaciones": str(get_val(['obs', 'observacion', 'comentario'], "")),
-            "🗑️": False # Columna para el checkbox de eliminación
+            "Observaciones": str(get_val(['obs', 'observacion', 'comentario'], ""))
         })
     return posiciones
 
@@ -430,7 +428,7 @@ with st.sidebar:
             df_procesado = df_procesado.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
             
             st.session_state.df_masivo = df_procesado
-            st.success(f"Planilla cargada y limpiada correctamente ({len(st.session_state.df_masivo)} filas)")
+            st.success(f"Planilla cargada correctamente ({len(st.session_state.df_masivo)} filas)")
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
 
@@ -441,14 +439,14 @@ if st.session_state.df_masivo is not None:
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
 
 # =============================================================================
-# TAB 1: EVALUACIÓN POR SOLPED
+# TAB 1: EVALUACIÓN POR SOLPED (NUEVO DISEÑO CON TARJETAS Y BOTÓN ELIMINAR DIRECTO)
 # =============================================================================
 with tabs[0]:
     st.subheader("✏️ Evaluación por SOLPED")
     
     col_input, col_btn = st.columns([3, 1])
     with col_input:
-        solped_id = st.text_input("Buscar ID SOLPED en la planilla:", placeholder="Ej: PR175798 o 175798")
+        solped_id = st.text_input("Buscar ID SOLPED en la planilla:", placeholder="Ej: PR151762")
     with col_btn:
         st.write("")
         st.write("")
@@ -456,73 +454,74 @@ with tabs[0]:
 
     if btn_extraer and solped_id.strip():
         if st.session_state.df_masivo is not None:
-            materiales = extraer_materiales_de_masivo(st.session_state.df_masivo, solped_id)
-            if materiales:
-                st.session_state[f"editor_{solped_id}"] = pd.DataFrame(materiales)
-                st.success(f"Se encontraron {len(materiales)} posiciones para la SOLPED **{solped_id}**")
+            mats = extraer_materiales_de_masivo(st.session_state.df_masivo, solped_id)
+            if mats:
+                st.session_state[f"lista_solped_{solped_id}"] = mats
+                st.success(f"Se encontraron {len(mats)} posiciones para la SOLPED **{solped_id}**")
             else:
                 st.warning(f"No se encontraron registros para la SOLPED '{solped_id}'.")
         else:
             st.info("Carga una planilla maestra en el menú lateral.")
 
-    key_editor = f"editor_{solped_id}" if (solped_id and f"editor_{solped_id}" in st.session_state) else "editor_default"
-    
-    if key_editor not in st.session_state:
-        st.session_state[key_editor] = pd.DataFrame([{
-            "Pos": 1, "Material": "(Material)", "Centro": "(Centro)", "Cantidad": 1.0, 
-            "UM": "C/U", "Precio Unitario": 0.0, "Moneda": "CLP", 
-            "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": "", "🗑️": False
-        }])
-        
-    df_inicial = st.session_state[key_editor]
+    key_lista = f"lista_solped_{solped_id}" if (solped_id and f"lista_solped_{solped_id}" in st.session_state) else "lista_solped_default"
 
-    if not df_inicial.empty:
-        df_inicial["Precio Unitario"] = pd.to_numeric(df_inicial["Precio Unitario"], errors='coerce').fillna(0.0)
-        df_inicial["Cantidad"] = pd.to_numeric(df_inicial["Cantidad"], errors='coerce').fillna(1.0)
-        df_inicial["Calendario de entrega"] = pd.to_datetime(df_inicial["Calendario de entrega"]).dt.date
-        if "🗑️" not in df_inicial.columns: df_inicial["🗑️"] = False
+    if key_lista not in st.session_state:
+        st.session_state[key_lista] = [{
+            "Pos": 1, "Material": "PROYECTOR LED 50W DS1", "Centro": "E024", "Cantidad": 10.0, 
+            "UM": "CADA UNO", "Precio Unitario": 8190.0, "Moneda": "CLP", 
+            "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": ""
+        }]
 
-    # Layout de 2 columnas: Tabla a la izquierda, Botón ROJO EXTERIOR a la derecha
-    col_t1, col_t2 = st.columns([10, 2])
-    with col_t1:
-        edited_df = st.data_editor(
-            df_inicial,
-            num_rows="dynamic",
-            use_container_width=True,
-            column_config={
-                "Pos": st.column_config.NumberColumn("Pos", disabled=True),
-                "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
-                "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
-                "Transporte": st.column_config.SelectboxColumn("Transporte", options=OPCIONES_TRANSPORTE),
-                "Calendario de entrega": st.column_config.DateColumn("Fecha Entrega"),
-                "🗑️": st.column_config.CheckboxColumn("🗑️", help="Marca y presiona el botón derecho para borrar")
-            }
-        )
+    lista_materiales = st.session_state[key_lista]
+
+    if lista_materiales:
+        st.write(f"**Materiales extraídos ({len(lista_materiales)} ítems):**")
         
-    with col_t2:
-        st.write("") 
-        st.write("")
-        # Botón exterior rojo a la derecha de la tabla
-        if st.button("🗑️ Eliminar Marcados", key="del_tab1", type="primary", use_container_width=True):
-            df_limpio = edited_df[edited_df["🗑️"] == False].copy()
-            df_limpio["🗑️"] = False # Resetear la columna de seguridad
-            st.session_state[key_editor] = df_limpio
+        idx_a_eliminar = None
+        for idx, item in enumerate(lista_materiales):
+            with st.container(border=True):
+                col_title, col_del = st.columns([8, 2])
+                with col_title:
+                    st.markdown(f"### Pos {item['Pos']}: {item['Material']}")
+                    st.caption(f"**Centro:** {item['Centro']} | **UM Original:** {item['UM']}")
+                with col_del:
+                    # BOTÓN ROJO DIRECTO AL LADO DEL MATERIAL
+                    if st.button("🗑️ Eliminar", key=f"btn_del_t1_{idx}", type="primary", use_container_width=True):
+                        idx_a_eliminar = idx
+
+                # Campos editables en columnas limpias sin scroll
+                c1, c2, c3, c4, c5 = st.columns([1.5, 2, 1.5, 2, 2])
+                item["Cantidad"] = c1.number_input("Cantidad", value=float(item.get("Cantidad", 1.0)), key=f"cant_{key_lista}_{idx}")
+                item["Precio Unitario"] = c2.number_input("Precio Unitario", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"pu_{key_lista}_{idx}")
+                
+                moneda_opts = ["CLP", "USD", "EUR"]
+                m_idx = moneda_opts.index(item.get("Moneda", "CLP")) if item.get("Moneda") in moneda_opts else 0
+                item["Moneda"] = c3.selectbox("Moneda", moneda_opts, index=m_idx, key=f"mon_{key_lista}_{idx}")
+                
+                item["Proveedor"] = c4.text_input("Proveedor", value=str(item.get("Proveedor", "")), key=f"prov_{key_lista}_{idx}")
+                
+                trans_opts = OPCIONES_TRANSPORTE
+                t_idx = trans_opts.index(item.get("Transporte", "EXW")) if item.get("Transporte") in trans_opts else 4
+                item["Transporte"] = c5.selectbox("Transporte", trans_opts, index=t_idx, key=f"trans_{key_lista}_{idx}")
+
+        if idx_a_eliminar is not None:
+            st.session_state[key_lista].pop(idx_a_eliminar)
             st.rerun()
 
-    if st.button("💾 Guardar Oferta de SOLPED en Comparativo", type="primary"):
-        registros_filtrados = edited_df[edited_df["🗑️"] == False].to_dict('records')
-        for r in registros_filtrados:
-            if "🗑️" in r: del r["🗑️"]
-            clp, usd, eur = convertir_moneda(r["Precio Unitario"] * r["Cantidad"], r["Moneda"], tc_usd, tc_uf, tc_eur)
-            r["SOLPED"] = solped_id if solped_id else "N/A"
-            r["Total CLP"] = clp
-            r["Total USD"] = usd
-            r["Total EUR"] = eur
-            st.session_state.ofertas_manuales.append(r)
-        st.success(f"¡{len(registros_filtrados)} oferta(s) guardada(s) exitosamente en el Cuadro Comparativo!")
+        st.divider()
+        if st.button("💾 Guardar Oferta en Cuadro Comparativo", type="primary"):
+            for r in st.session_state[key_lista]:
+                clp, usd, eur = convertir_moneda(r["Precio Unitario"] * r["Cantidad"], r["Moneda"], tc_usd, tc_uf, tc_eur)
+                item_guardar = r.copy()
+                item_guardar["SOLPED"] = solped_id if solped_id else "N/A"
+                item_guardar["Total CLP"] = clp
+                item_guardar["Total USD"] = usd
+                item_guardar["Total EUR"] = eur
+                st.session_state.ofertas_manuales.append(item_guardar)
+            st.success("¡Oferta guardada exitosamente en el Cuadro Comparativo!")
 
 # =============================================================================
-# TAB 2: CARGA MANUAL INTEGRA
+# TAB 2: CARGA MANUAL DIRECTA
 # =============================================================================
 with tabs[1]:
     st.subheader("➕ Carga Manual de Oferta Paso a Paso")
@@ -538,62 +537,66 @@ with tabs[1]:
         if st.session_state.df_masivo is not None:
             mats = extraer_materiales_de_masivo(st.session_state.df_masivo, manual_solped)
             if mats:
-                st.session_state["manual_grid_df"] = pd.DataFrame(mats)
+                st.session_state["manual_items_list"] = mats
                 st.success(f"Materiales cargados automáticamente desde la SOLPED {manual_solped}")
             else: st.warning(f"No se encontró la SOLPED {manual_solped}.")
         else: st.info("Sube una planilla en la barra lateral.")
 
-    if "manual_grid_df" not in st.session_state:
-        st.session_state["manual_grid_df"] = pd.DataFrame([{
-            "Pos": 1, "Material": "Ítem Manual", "Cantidad": 1.0, "UM": "C/U",
+    if "manual_items_list" not in st.session_state:
+        st.session_state["manual_items_list"] = [{
+            "Pos": 1, "Material": "Ítem Manual 1", "Centro": "E001", "Cantidad": 1.0, "UM": "C/U",
             "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", "Transporte": "EXW",
-            "Calendario de entrega": date.today(), "Observaciones": "", "🗑️": False
-        }])
+            "Calendario de entrega": date.today(), "Observaciones": ""
+        }]
 
-    df_manual = st.session_state["manual_grid_df"]
-    if not df_manual.empty:
-        df_manual["Precio Unitario"] = pd.to_numeric(df_manual["Precio Unitario"], errors='coerce').fillna(0.0)
-        df_manual["Cantidad"] = pd.to_numeric(df_manual["Cantidad"], errors='coerce').fillna(1.0)
-        df_manual["Calendario de entrega"] = pd.to_datetime(df_manual["Calendario de entrega"]).dt.date
-        if "🗑️" not in df_manual.columns: df_manual["🗑️"] = False
-
-    st.write("### Tabla de Cotización de Proveedor")
+    lista_manual = st.session_state["manual_items_list"]
     
-    col_tm1, col_tm2 = st.columns([10, 2])
-    with col_tm1:
-        cotizacion_df = st.data_editor(
-            df_manual,
-            num_rows="dynamic",
-            use_container_width=True,
-            key="cotizacion_manual_editor",
-            column_config={
-                "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
-                "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
-                "Transporte": st.column_config.SelectboxColumn("Transporte", options=OPCIONES_TRANSPORTE),
-                "Calendario de entrega": st.column_config.DateColumn("Calendario de entrega"),
-                "🗑️": st.column_config.CheckboxColumn("🗑️", help="Marca y presiona eliminar a la derecha")
-            }
-        )
-    with col_tm2:
-        st.write("")
-        st.write("")
-        if st.button("🗑️ Eliminar Marcados", key="del_tab2", type="primary", use_container_width=True):
-            df_limpio = cotizacion_df[cotizacion_df["🗑️"] == False].copy()
-            df_limpio["🗑️"] = False
-            st.session_state["manual_grid_df"] = df_limpio
-            st.rerun()
+    if st.button("➕ Agregar Nuevo Material a la Lista"):
+        lista_manual.append({
+            "Pos": len(lista_manual) + 1, "Material": "Nuevo Material", "Centro": "E001", "Cantidad": 1.0, "UM": "C/U",
+            "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", "Transporte": "EXW",
+            "Calendario de entrega": date.today(), "Observaciones": ""
+        })
+        st.rerun()
+
+    idx_del_manual = None
+    for idx, item in enumerate(lista_manual):
+        with st.container(border=True):
+            col_m_title, col_m_del = st.columns([8, 2])
+            with col_m_title:
+                item["Material"] = st.text_input("Descripción / Material", value=item.get("Material", ""), key=f"man_mat_{idx}")
+            with col_m_del:
+                if st.button("🗑️ Eliminar", key=f"btn_del_t2_{idx}", type="primary", use_container_width=True):
+                    idx_del_manual = idx
+
+            c1, c2, c3, c4, c5 = st.columns([1.5, 2, 1.5, 2, 2])
+            item["Cantidad"] = c1.number_input("Cantidad", value=float(item.get("Cantidad", 1.0)), key=f"man_cant_{idx}")
+            item["Precio Unitario"] = c2.number_input("Precio Unitario", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"man_pu_{idx}")
+            
+            moneda_opts = ["CLP", "USD", "EUR"]
+            m_idx = moneda_opts.index(item.get("Moneda", "CLP")) if item.get("Moneda") in moneda_opts else 0
+            item["Moneda"] = c3.selectbox("Moneda", moneda_opts, index=m_idx, key=f"man_mon_{idx}")
+            
+            item["Proveedor"] = c4.text_input("Proveedor", value=str(item.get("Proveedor", "")), key=f"man_prov_{idx}")
+            
+            trans_opts = OPCIONES_TRANSPORTE
+            t_idx = trans_opts.index(item.get("Transporte", "EXW")) if item.get("Transporte") in trans_opts else 4
+            item["Transporte"] = c5.selectbox("Transporte", trans_opts, index=t_idx, key=f"man_trans_{idx}")
+
+    if idx_del_manual is not None:
+        st.session_state["manual_items_list"].pop(idx_del_manual)
+        st.rerun()
 
     if st.button("💾 Guardar Cotización Manual Completa", type="primary"):
-        items_filtrados = cotizacion_df[cotizacion_df["🗑️"] == False].to_dict('records')
-        for item in items_filtrados:
-            if "🗑️" in item: del item["🗑️"]
+        for item in st.session_state["manual_items_list"]:
             clp, usd, eur = convertir_moneda(item["Precio Unitario"] * item["Cantidad"], item["Moneda"], tc_usd, tc_uf, tc_eur)
-            item["SOLPED"] = manual_solped if manual_solped else "MANUAL"
-            item["Total CLP"] = clp
-            item["Total USD"] = usd
-            item["Total EUR"] = eur
-            st.session_state.ofertas_manuales.append(item)
-        st.success(f"¡{len(items_filtrados)} Cotización(es) agregada(s) al Cuadro Comparativo!")
+            item_guardar = item.copy()
+            item_guardar["SOLPED"] = manual_solped if manual_solped else "MANUAL"
+            item_guardar["Total CLP"] = clp
+            item_guardar["Total USD"] = usd
+            item_guardar["Total EUR"] = eur
+            st.session_state.ofertas_manuales.append(item_guardar)
+        st.success("¡Cotización agregada al Cuadro Comparativo!")
 
 # =============================================================================
 # TAB 3: CUADRO COMPARATIVO INTEGRADO & DESCARGAS
@@ -606,12 +609,11 @@ with tabs[2]:
         df_comp['SOLPED'] = df_comp['SOLPED'].fillna('N/A').astype(str).replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
         df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str)
         df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace({'': 'Sin Especificar', 'none': 'Sin Especificar', 'None': 'Sin Especificar'})
-        if '🗑️' not in df_comp.columns: df_comp['🗑️'] = False 
 
         cols_orden = [
             'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
             'Precio Unitario', 'Moneda', 'Proveedor Visual', 'Transporte', 
-            'Calendario de entrega', 'Total CLP', 'Total USD', 'Total EUR', 'Observaciones', '🗑️'
+            'Calendario de entrega', 'Total CLP', 'Total USD', 'Total EUR', 'Observaciones'
         ]
         df_comp = df_comp[[c for c in cols_orden if c in df_comp.columns]]
 
@@ -643,22 +645,8 @@ with tabs[2]:
                 "Total CLP": "$ {:,.2f}", "Total USD": "$ {:,.2f}", "Total EUR": "$ {:,.2f}"
             })
 
-            col_tc1, col_tc2 = st.columns([10, 2])
-            with col_tc1:
-                edited_df_comp = st.data_editor(
-                    styled_df_comp, 
-                    use_container_width=True,
-                    column_config={"🗑️": st.column_config.CheckboxColumn("🗑️", help="Marca y presiona eliminar a la derecha")}
-                )
-            
-            with col_tc2:
-                st.write("")
-                st.write("")
-                if st.button("🗑️ Eliminar Marcados", key="del_tab3", type="primary", use_container_width=True):
-                    indices_a_mantener = edited_df_comp.index[edited_df_comp["🗑️"] == False].tolist()
-                    st.session_state.ofertas_manuales = [st.session_state.ofertas_manuales[i] for i in indices_a_mantener]
-                    st.rerun()
-            
+            st.dataframe(styled_df_comp, use_container_width=True)
+
             col_c1, col_c2 = st.columns(2)
             with col_c1: st.metric("Total Ofertas Registradas", len(df_comp))
             with col_c2: st.metric(f"Monto Total Acumulado ({moneda_vista})", f"$ {df_comp['Monto Total Visualizado'].sum():,.2f}")
@@ -689,7 +677,7 @@ with tabs[2]:
                     st.download_button(label="📄 Descargar Reporte PDF", data=bytes_pdf, file_name=f"Reporte_Comparativo_{date.today()}.pdf", mime="application/pdf", use_container_width=True)
 
         st.write("")
-        if st.button("🗑️ Limpiar TODO el Cuadro Comparativo", use_container_width=False):
+        if st.button("🗑️ Limpiar TODO el Cuadro Comparativo"):
             st.session_state.ofertas_manuales = []
             st.rerun()
     else:
