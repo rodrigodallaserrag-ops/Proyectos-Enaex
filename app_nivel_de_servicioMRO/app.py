@@ -236,7 +236,6 @@ if "app_password" in st.secrets:
         if st.button("Ingresar"):
             if clave_ingresada == st.secrets["app_password"]:
                 st.session_state["_autenticado"] = True
-                loaders._descargar_onedrive.clear()
                 st.session_state.pop("_clave_pipeline", None)
                 st.rerun()
             else:
@@ -257,27 +256,30 @@ with tab_dx:
         st.header("Datos de entrada")
         modo = st.radio(
             "Origen de datos",
-            ["OneDrive (automático)", "Subir archivos", "Archivos locales (data/)"],
+            ["Carpeta Compartida", "Subir archivos"],
             index=0,
         )
 
         archivo_data = archivo_resp_grupo = archivo_centro = archivo_mrp = None
-        if modo == "OneDrive (automático)":
-            archivo_data = "onedrive:me5a_parquet"
-            archivo_resp_grupo = "onedrive:responsable_grupo_compras"
-            archivo_centro = "onedrive:centro_sociedad_mro"
-            archivo_mrp = "onedrive:responsable_mrp"
+        
+        if modo == "Carpeta Compartida":
+            ruta_base = r"\\besback\Informacion Compartida Abastecimiento\4. MRO\Control de Gestión\Dashboard seguimiento MRO 2026 - Capacitación"
+            
+            archivo_parquet_local = buscar_archivo_mas_reciente(os.path.join(ruta_base, "MESA con ariba*.parquet"))
+            archivo_excel_local = buscar_archivo_mas_reciente(os.path.join(ruta_base, "MESA con ariba*.xlsx"))
 
-            if st.button("🔄 Forzar recarga desde OneDrive ahora"):
-                loaders._descargar_onedrive.clear()
-                st.session_state.pop("_clave_pipeline", None)
-                st.rerun()
+            if isinstance(archivo_parquet_local, str) and os.path.exists(archivo_parquet_local):
+                archivo_data = archivo_parquet_local
+            else:
+                archivo_data = archivo_excel_local
 
-            if "onedrive" not in st.secrets:
-                st.error(
-                    "Falta configurar los Secrets de OneDrive (Settings → Secrets). "
-                    "Mientras tanto, usa 'Subir archivos'."
-                )
+            archivo_resp_grupo = buscar_archivo_mas_reciente(os.path.join(ruta_base, "Responsable_Grupo_Compras*.xlsx"))
+            archivo_centro = buscar_archivo_mas_reciente(os.path.join(ruta_base, "CENTRO_SOCIEDAD Compras MRO*.xlsx"))
+            archivo_mrp = buscar_archivo_mas_reciente(os.path.join(ruta_base, "Responsable de MRP*.xlsx"))
+            
+            archivos_requeridos = [archivo_data, archivo_resp_grupo, archivo_centro, archivo_mrp]
+            if not all(isinstance(a, str) and os.path.exists(a) for a in archivos_requeridos):
+                st.warning(f"No se encontraron todos los archivos en la ruta: {ruta_base}. Verifica la conexión a la red o los nombres de archivo.")
                 st.stop()
 
         elif modo == "Subir archivos":
@@ -299,18 +301,6 @@ with tab_dx:
             if not all([archivo_data, archivo_resp_grupo, archivo_centro, archivo_mrp]):
                 st.info("Sube los 4 archivos para generar el reporte.")
                 st.stop()
-        else:
-            archivo_parquet_local = buscar_archivo_mas_reciente("data/ME5A_con_Ariba.parquet")
-            archivo_excel_local = buscar_archivo_mas_reciente("data/ME5A_con_Ariba.xlsx")
-
-            if os.path.exists(archivo_parquet_local):
-                archivo_data = archivo_parquet_local
-            else:
-                archivo_data = archivo_excel_local
-
-            archivo_resp_grupo = buscar_archivo_mas_reciente("data/Responsable_Grupo_Compras.xlsx")
-            archivo_centro = buscar_archivo_mas_reciente("data/Centro_Sociedad_MRO.xlsx")
-            archivo_mrp = buscar_archivo_mas_reciente("data/Responsable_MRP.xlsx")
 
         st.header("Parámetros")
         fecha_corte = st.date_input("Fecha de corte del reporte (FechaCorteReporte)", value=pd.Timestamp.today())
