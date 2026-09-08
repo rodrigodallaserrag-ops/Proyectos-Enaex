@@ -387,11 +387,14 @@ def extraer_materiales_de_masivo(df, id_solped):
 
         proveedor_sugerido = str(get_val(['proveedor', 'vendor', 'prov', 'nam', 'razon social'], ""))
 
+        cant_raw = clean_num(get_val(['cant', 'cantidad', 'ctd'], 1.0), 1.0)
+        cant_clean = int(cant_raw) if float(cant_raw).is_integer() else cant_raw
+
         posiciones.append({
             "Pos": int(idx + 1),
             "Material": str(mat_desc),
             "Centro": str(centro_desc),
-            "Cantidad": clean_num(get_val(['cant', 'cantidad', 'ctd'], 1.0), 1.0),
+            "Cantidad": cant_clean,
             "UM": str(get_val(['um', 'unidad', 'unid', 'medida'], "C/U")).upper(),
             "Precio Unitario": clean_num(get_val(['precio', 'monto', 'val', 'costo', 'p.u', 'neto'], 0.0), 0.0),
             "Moneda": str(get_val(['moneda', 'curr', 'mon'], "CLP")).upper(),
@@ -529,7 +532,7 @@ with tabs[0]:
 
     if key_lista not in st.session_state:
         st.session_state[key_lista] = [{
-            "Pos": 1, "Material": "PROYECTOR LED 50W DS1", "Centro": "E024", "Cantidad": 10.0, 
+            "Pos": 1, "Material": "PROYECTOR LED 50W DS1", "Centro": "E024", "Cantidad": 10, 
             "UM": "CADA UNO", "Precio Unitario": 8190.0, "Moneda": "CLP", 
             "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": ""
         }]
@@ -555,7 +558,11 @@ with tabs[0]:
                         idx_a_eliminar = idx
 
                 c1, c2, c3, c4, c5, c6 = st.columns([1, 1.5, 1, 1.5, 1.5, 1.5])
-                item["Cantidad"] = c1.number_input("Cantidad", value=float(item.get("Cantidad", 1.0)), key=f"cant_{key_lista}_{idx}")
+                
+                cant_val = float(item.get("Cantidad", 1.0))
+                cant_val_clean = int(cant_val) if cant_val.is_integer() else cant_val
+                item["Cantidad"] = c1.number_input("Cantidad", value=cant_val_clean, format="%g", key=f"cant_{key_lista}_{idx}")
+                
                 item["Precio Unitario"] = c2.number_input("Precio Unitario", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"pu_{key_lista}_{idx}")
                 
                 moneda_opts = ["CLP", "USD", "EUR"]
@@ -584,7 +591,7 @@ with tabs[0]:
         st.divider()
         if st.button("💾 Guardar Oferta en Cuadro Comparativo", type="primary"):
             for r in st.session_state[key_lista]:
-                clp, usd, eur = convertir_moneda(r["Precio Unitario"] * r["Cantidad"], r["Moneda"], tc_usd, tc_uf, tc_eur)
+                clp, usd, eur = convertir_moneda(float(r["Precio Unitario"]) * float(r["Cantidad"]), r["Moneda"], tc_usd, tc_uf, tc_eur)
                 item_guardar = r.copy()
                 item_guardar["SOLPED"] = solped_id if solped_id else "N/A"
                 item_guardar["Total CLP"] = clp
@@ -617,7 +624,7 @@ with tabs[1]:
 
     if "manual_items_list" not in st.session_state:
         st.session_state["manual_items_list"] = [{
-            "Pos": 1, "Material": "Ítem Manual 1", "Centro": "E001", "Cantidad": 1.0, "UM": "C/U",
+            "Pos": 1, "Material": "Ítem Manual 1", "Centro": "E001", "Cantidad": 1, "UM": "C/U",
             "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", "Transporte": "EXW",
             "Calendario de entrega": date.today(), "Observaciones": ""
         }]
@@ -626,7 +633,7 @@ with tabs[1]:
     
     if st.button("➕ Agregar Nuevo Material a la Lista"):
         lista_manual.append({
-            "Pos": len(lista_manual) + 1, "Material": "Nuevo Material", "Centro": "E001", "Cantidad": 1.0, "UM": "C/U",
+            "Pos": len(lista_manual) + 1, "Material": "Nuevo Material", "Centro": "E001", "Cantidad": 1, "UM": "C/U",
             "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", "Transporte": "EXW",
             "Calendario de entrega": date.today(), "Observaciones": ""
         })
@@ -643,7 +650,11 @@ with tabs[1]:
                     idx_del_manual = idx
 
             c1, c2, c3, c4, c5, c6 = st.columns([1, 1.5, 1, 1.5, 1.5, 1.5])
-            item["Cantidad"] = c1.number_input("Cantidad", value=float(item.get("Cantidad", 1.0)), key=f"man_cant_{idx}")
+            
+            man_cant_val = float(item.get("Cantidad", 1.0))
+            man_cant_clean = int(man_cant_val) if man_cant_val.is_integer() else man_cant_val
+            item["Cantidad"] = c1.number_input("Cantidad", value=man_cant_clean, format="%g", key=f"man_cant_{idx}")
+            
             item["Precio Unitario"] = c2.number_input("Precio Unitario", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"man_pu_{idx}")
             
             moneda_opts = ["CLP", "USD", "EUR"]
@@ -671,7 +682,7 @@ with tabs[1]:
 
     if st.button("💾 Guardar Cotización Manual Completa", type="primary"):
         for item in st.session_state["manual_items_list"]:
-            clp, usd, eur = convertir_moneda(item["Precio Unitario"] * item["Cantidad"], item["Moneda"], tc_usd, tc_uf, tc_eur)
+            clp, usd, eur = convertir_moneda(float(item["Precio Unitario"]) * float(item["Cantidad"]), item["Moneda"], tc_usd, tc_uf, tc_eur)
             item_guardar = item.copy()
             item_guardar["SOLPED"] = manual_solped if manual_solped else "MANUAL"
             item_guardar["Total CLP"] = clp
@@ -724,8 +735,12 @@ with tabs[2]:
 
         if not df_comp.empty:
             styled_df_comp = df_comp.style.apply(highlight_best, axis=None).format({
-                "Monto Total Visualizado": "$ {:,.2f}", "Precio Unitario": "$ {:,.2f}",
-                "Total CLP": "$ {:,.2f}", "Total USD": "$ {:,.2f}", "Total EUR": "$ {:,.2f}"
+                "Cantidad": lambda x: f"{int(x)}" if pd.notna(x) and float(x).is_integer() else (f"{x:,.2f}" if pd.notna(x) else ""),
+                "Monto Total Visualizado": "$ {:,.2f}", 
+                "Precio Unitario": "$ {:,.2f}",
+                "Total CLP": "$ {:,.2f}", 
+                "Total USD": "$ {:,.2f}", 
+                "Total EUR": "$ {:,.2f}"
             })
 
             st.dataframe(styled_df_comp, use_container_width=True)
