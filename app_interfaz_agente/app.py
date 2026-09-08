@@ -264,6 +264,273 @@ def deduplicar_columnas(columnas):
     vistos = {}
     columnas_unicas = []
     for c in columnas:
+```python
+import streamlit as st
+import pandas as pd
+import numpy as np
+import re
+import requests
+from datetime import datetime, date
+import io
+
+# Librerías para diseño de Excel
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+# Librería para generación de PDF
+from fpdf import FPDF
+
+# =============================================================================
+# CONFIGURACIÓN DE PÁGINA
+# =============================================================================
+st.set_page_config(
+    page_title="Sistema Integrado de Evaluación de Ofertas - Enaex",
+    page_icon="⚡",
+    layout="wide"
+)
+
+st.markdown("""
+<style>
+    .main-header { font-size: 1.8rem; font-weight: 700; color: #1E3A8A; margin-bottom: 0.5rem; }
+    .sub-header { font-size: 1rem; color: #4B5563; margin-bottom: 1.5rem; }
+    .stTable { font-size: 0.85rem; }
+    .metric-card { background-color: #F3F4F6; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #1E3A8A; }
+</style>
+""", unsafe_allow_html=True)
+
+# =============================================================================
+# OBTENCIÓN DE INDICADORES FINANCIEROS EN TIEMPO REAL 
+# =============================================================================
+@st.cache_data(ttl=3600)
+def obtener_indicadores_tiempo_real():
+    valores_defecto = {"USD": 950.0, "EUR": 1020.0, "UF": 38000.0, "estado": False}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+
+    try:
+        response = requests.get("[https://mindicador.cl/api](https://mindicador.cl/api)", headers=headers, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "USD": float(data.get("dolar", {}).get("valor", 950.0)),
+                "EUR": float(data.get("euro", {}).get("valor", 1020.0)),
+                "UF": float(data.get("uf", {}).get("valor", 38000.0)),
+                "estado": True
+            }
+    except Exception:
+        pass
+
+    try:
+        response_alt = requests.get("[https://open.er-api.com/v6/latest/USD](https://open.er-api.com/v6/latest/USD)", timeout=5)
+        if response_alt.status_code == 200:
+            data_alt = response_alt.json()
+            rates = data_alt.get("rates", {})
+            if "CLP" in rates:
+                usd_clp = float(rates["CLP"])
+                eur_rate = float(rates.get("EUR", 0.92))
+                eur_clp = usd_clp / eur_rate if eur_rate > 0 else 1020.0
+                
+                return {
+                    "USD": round(usd_clp, 2),
+                    "EUR": round(eur_clp, 2),
+                    "UF": 38300.0,
+                    "estado": True
+                }
+    except Exception:
+        pass
+
+    return valores_defecto
+
+# =============================================================================
+# FUNCIONES DE EXPORTACIÓN Y FORMATO (EXCEL Y PDF)
+# =============================================================================
+def generar_excel_estilizado(df, moneda_vista, transporte_reporte="No Especificado"):
+    buffer_excel = io.BytesIO()
+    cols_export = [
+        'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
+        'Precio Unitario', 'Moneda', 'Proveedor Visual', 'Transporte',
+        'Calendario de entrega', 'Días para Entrega', 'Monto Total Visualizado'
+    ]
+    df_export = df[[c for c in cols_export if c in df.columns]].copy()
+    df_export.rename(columns={
+        'Proveedor Visual': 'Proveedor', 
+        'Monto Total Visualizado': f'Total ({moneda_vista})'
+    }, inplace=True)
+    
+    with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+        df_export.to_excel(writer, index=False, sheet_name='Cuadro Comparativo', startrow=3)
+        workbook = writer.book
+        worksheet = writer.sheets['Cuadro Comparativo']
+        
+        HEADER_FILL = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+        ZEBRA_FILL = PatternFill(start_color="F9FAFB", end_color="F9FAFB", fill_type="solid")
+        TITLE_FONT = Font(name="Calibri", size=15, bold=True, color="1E3A8A")
+        SUBTITLE_FONT = Font(name="Calibri", size=10, italic=True, color="6B7280")
+        HEADER_FONT = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        DATA_FONT = Font(name="Calibri", size=10)
+        
+        THIN_BORDER = Border(
+            left=Side(style='thin', color='E5E7EB'), right=Side(style='thin', color='E5E7EB'),
+            top=Side(style='thin', color='E5E7EB'), bottom=Side(style='thin', color='E5E7EB')
+        )
+        
+        worksheet['A1'] = "ENAEX - CUADRO COMPARATIVO DE OFERTAS"
+        worksheet['A1'].font = TITLE_FONT
+        
+        subtitulo = f"Fecha de informe: {date.today().strftime('%d/%m/%Y')} | Moneda base: {moneda_vista}"
+        if transporte_reporte and transporte_reporte != "No Especificado":
+            subtitulo += f" | Transporte General: {transporte_reporte}"
+            
+        worksheet['A2'] = subtitulo
+        worksheet['A2'].font = SUBTITLE_FONT
+        
+        for col_num in range(1, len(df_export.columns) + 1):
+            cell = worksheet.cell(row=4, column=col_num)
+            cell.fill = HEADER_FILL
+            cell.font = HEADER_FONT
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = THIN_BORDER
+        
+        for row_idx, row in enumerate(worksheet.iter_rows(min_row=5, max_row=4 + len(df_export), min_col=1, max_col=len(df_export.columns)), start=5):
+            use_zebra = (row_idx % 2 == 0)
+            for cell in row:
+                cell.font = DATA_FONT
+                cell.border = THIN_BORDER
+                if use_zebra:
+                    cell.fill = ZEBRA_FILL
+                
+                col_header = worksheet.cell(row=4, column=cell.column).value
+                if col_header in ['Precio Unitario', f'Total ({moneda_vista})']:
+                    cell.number_format = '$#,##0.00'
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                elif col_header in ['Cantidad', 'Pos', 'Días para Entrega']:
+                    cell.number_format = '#,##0'
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                elif col_header in ['SOLPED', 'Moneda', 'UM', 'Centro', 'Transporte', 'Calendario de entrega']:
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                else:
+                    cell.alignment = Alignment(horizontal='left', vertical='center')
+
+        for col in worksheet.columns:
+            max_len = 0
+            col_letter = get_column_letter(col[0].column)
+            for cell in col:
+                if cell.row < 4: continue
+                if cell.value: max_len = max(max_len, len(str(cell.value)))
+            worksheet.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    return buffer_excel.getvalue()
+
+def clean_str_pdf(txt):
+    s = str(txt or '')
+    reemplazos = {'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','á':'a','é':'e','í':'i','ó':'o','ú':'u','Ñ':'N','ñ':'n','°':''}
+    for k, v in reemplazos.items(): s = s.replace(k, v)
+    return s.encode('latin-1', 'ignore').decode('latin-1')
+
+class PDFReport(FPDF):
+    def header(self):
+        self.set_font('Helvetica', 'B', 14)
+        self.set_text_color(30, 58, 138)
+        self.cell(0, 8, 'ENAEX - EVALUACION COMPARATIVA DE OFERTAS', ln=True, align='C')
+        self.set_font('Helvetica', 'I', 9)
+        self.set_text_color(100, 100, 100)
+        self.cell(0, 5, f'Fecha de Emision: {date.today().strftime("%d/%m/%Y")}', ln=True, align='C')
+        self.ln(4)
+    def footer(self):
+        self.set_y(-12)
+        self.set_font('Helvetica', 'I', 8)
+        self.set_text_color(128, 128, 128)
+        self.cell(0, 10, f'Pagina {self.page_no()}/{{nb}} - Documento Generado Automaticamente', align='C')
+
+def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
+    try:
+        pdf = PDFReport(orientation='L', unit='mm', format='A4')
+        pdf.alias_nb_pages()
+        pdf.add_page()
+        
+        monto_total = df["Monto Total Visualizado"].sum() if "Monto Total Visualizado" in df.columns else 0.0
+        pdf.set_fill_color(243, 244, 246)
+        pdf.rect(10, pdf.get_y(), 277, 10, style='F')
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_text_color(30, 58, 138)
+        
+        resumen_txt = f'  RESUMEN GENERAL: Total Ofertas Evaluadas: {len(df)}    |    Monto Acumulado ({moneda_vista}): ${monto_total:,.2f}'
+        if transporte_reporte and transporte_reporte != "No Especificado":
+            resumen_txt += f'    |    Transporte General: {transporte_reporte}'
+            
+        pdf.cell(0, 8, resumen_txt, ln=True)
+        pdf.ln(4)
+
+        cols = [("SOLPED", 20), ("Material", 72), ("Proveedor", 42), ("Transporte", 20),
+                ("Cant.", 15), ("Mon", 15), (f"Total ({moneda_vista})", 35), ("Entrega", 30)]
+
+        pdf.set_font('Helvetica', 'B', 8)
+        pdf.set_fill_color(30, 58, 138)
+        pdf.set_text_color(255, 255, 255)
+
+        for name, width in cols: pdf.cell(width, 7, name, border=1, align='C', fill=True)
+        pdf.ln()
+
+        pdf.set_font('Helvetica', '', 8)
+        pdf.set_text_color(0, 0, 0)
+        
+        fill = False
+        for _, row in df.iterrows():
+            if pdf.get_y() > 180:
+                pdf.add_page()
+                pdf.set_font('Helvetica', 'B', 8)
+                pdf.set_fill_color(30, 58, 138)
+                pdf.set_text_color(255, 255, 255)
+                for name, width in cols: pdf.cell(width, 7, name, border=1, align='C', fill=True)
+                pdf.ln()
+                pdf.set_font('Helvetica', '', 8)
+                pdf.set_text_color(0, 0, 0)
+
+            if fill: pdf.set_fill_color(249, 250, 251)
+            else: pdf.set_fill_color(255, 255, 255)
+
+            solped = clean_str_pdf(row.get('SOLPED', ''))[:15]
+            material = clean_str_pdf(row.get('Material', ''))[:45]
+            proveedor = clean_str_pdf(row.get('Proveedor Visual', ''))[:28]
+            transporte = clean_str_pdf(row.get('Transporte', ''))[:12]
+            cant = f"{row.get('Cantidad', 0):,.0f}"
+            mon = clean_str_pdf(row.get('Moneda', 'CLP'))
+            monto = f"${row.get('Monto Total Visualizado', 0):,.2f}"
+            
+            if pd.notna(row.get('Calendario de entrega')):
+                try:
+                    fecha_str = pd.to_datetime(row['Calendario de entrega']).strftime('%d/%m/%Y')
+                except:
+                    dias_val = row.get('Días para Entrega', 0)
+                    fecha_str = f"{0 if pd.isna(dias_val) else int(dias_val)} dias"
+            else:
+                dias_val = row.get('Días para Entrega', 0)
+                fecha_str = f"{0 if pd.isna(dias_val) else int(dias_val)} dias"
+
+            pdf.cell(cols[0][1], 6, solped, border=1, align='C', fill=True)
+            pdf.cell(cols[1][1], 6, material, border=1, align='L', fill=True)
+            pdf.cell(cols[2][1], 6, proveedor, border=1, align='L', fill=True)
+            pdf.cell(cols[3][1], 6, transporte, border=1, align='C', fill=True)
+            pdf.cell(cols[4][1], 6, cant, border=1, align='C', fill=True)
+            pdf.cell(cols[5][1], 6, mon, border=1, align='C', fill=True)
+            pdf.cell(cols[6][1], 6, monto, border=1, align='R', fill=True)
+            pdf.cell(cols[7][1], 6, fecha_str, border=1, align='C', fill=True)
+            pdf.ln()
+            fill = not fill
+
+        out = pdf.output(dest='S') if hasattr(pdf, 'output') else b""
+        if isinstance(out, str): return out.encode('latin-1')
+        return bytes(out)
+    except Exception: return b""
+
+# =============================================================================
+# FUNCIONES AUXILIARES Y LECTURA DE PLANILLAS (OPTIMIZADAS)
+# =============================================================================
+def deduplicar_columnas(columnas):
+    vistos = {}
+    columnas_unicas = []
+    for c in columnas:
         c_str = str(c).strip()
         if c_str in vistos:
             vistos[c_str] += 1
@@ -278,31 +545,41 @@ def procesar_y_reparar_planilla(df):
 
     df.columns = deduplicar_columnas(df.columns)
 
-    palabras_clave = ['sp', 'solped', 'material', 'pos', 'texto breve', 'centro', 'cantidad', 'proveedor', 'acreedor', 'vendor', 'documento']
-    header_idx = -1
+    # Se eliminó 'sp' de las palabras clave. 'sp' hace match falso con palabras como 'reSPuesto'.
+    palabras_clave = ['solped', 'material', 'pos', 'texto', 'centro', 'cant', 'proveedor', 'acreedor', 'vendor', 'documento', 'precio', 'moneda']
     
-    for idx in range(min(20, len(df))):
-        row_values = [str(val).lower() for val in df.iloc[idx]]
-        matches = sum(1 for val in row_values for kw in palabras_clave if kw in val)
-        if matches >= 2:
-            header_idx = idx
-            break
+    # Evaluar si las columnas actuales ya son un buen encabezado
+    current_cols_lower = " ".join([str(c).lower() for c in df.columns])
+    current_matches = sum(1 for kw in palabras_clave if kw in current_cols_lower)
+    
+    header_idx = -1
+    best_matches = current_matches
+    
+    # Solo buscar en las filas de datos si el encabezado actual tiene menos de 3 coincidencias clave
+    if current_matches < 3:
+        for idx in range(min(20, len(df))):
+            row_str = " ".join([str(val).lower() for val in df.iloc[idx]])
+            matches = sum(1 for kw in palabras_clave if kw in row_str)
+            # Exigir un mínimo de 3 coincidencias para evitar tomar filas de datos descriptivos como encabezado
+            if matches > best_matches and matches >= 3:
+                header_idx = idx
+                best_matches = matches
 
-    if header_idx != -1:
-        nuevas_columnas = []
-        for i, val in enumerate(df.iloc[header_idx]):
-            val_str = str(val).strip()
-            if val_str.lower() in ['nan', 'none', '']:
-                col_orig = str(df.columns[i])
-                nuevas_columnas.append(col_orig if not col_orig.startswith("Unnamed") else f"Col_Vacia_{i}")
-            else: nuevas_columnas.append(val_str)
-        
-        df.columns = deduplicar_columnas(nuevas_columnas)
-        df = df.iloc[header_idx + 1:].reset_index(drop=True)
-        if not df.empty:
-            col_0_series = df.iloc[:, 0].astype(str).str.strip()
-            col_0_nombre = str(df.columns[0]).strip()
-            df = df[col_0_series != col_0_nombre].reset_index(drop=True)
+        if header_idx != -1:
+            nuevas_columnas = []
+            for i, val in enumerate(df.iloc[header_idx]):
+                val_str = str(val).strip()
+                if val_str.lower() in ['nan', 'none', '']:
+                    col_orig = str(df.columns[i])
+                    nuevas_columnas.append(col_orig if not col_orig.startswith("Unnamed") else f"Col_Vacia_{i}")
+                else: nuevas_columnas.append(val_str)
+            
+            df.columns = deduplicar_columnas(nuevas_columnas)
+            df = df.iloc[header_idx + 1:].reset_index(drop=True)
+            if not df.empty:
+                col_0_series = df.iloc[:, 0].astype(str).str.strip()
+                col_0_nombre = str(df.columns[0]).strip()
+                df = df[col_0_series != col_0_nombre].reset_index(drop=True)
 
     nuevos_nombres = {}
     for idx, col in enumerate(df.columns):
@@ -318,6 +595,7 @@ def procesar_y_reparar_planilla(df):
 
     df.columns = deduplicar_columnas(df.columns)
 
+    # Identificar la columna de SOLPED, RENOMBRARLA EXPRESAMENTE a 'SOLPED' y moverla al inicio
     cols = list(df.columns)
     id_col = next((c for c in cols if str(c).lower() in ['sp', 'solped', 'solicitud']), None)
             
@@ -325,8 +603,10 @@ def procesar_y_reparar_planilla(df):
         id_col = next((c for c in cols if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'pedido'])), None)
                 
     if id_col and id_col in cols:
-        cols.remove(id_col)
-        cols.insert(0, id_col)
+        df = df.rename(columns={id_col: 'SOLPED'}) # Forzar el nombre visual para que sea fácil de copiar
+        cols = list(df.columns)
+        cols.remove('SOLPED')
+        cols.insert(0, 'SOLPED')
         df = df[cols]
 
     return df.dropna(how='all')
