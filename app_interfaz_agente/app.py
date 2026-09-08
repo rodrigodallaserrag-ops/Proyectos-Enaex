@@ -349,11 +349,20 @@ def extraer_materiales_de_masivo(df, id_solped):
     posiciones = []
     for idx, row in enumerate(df_filtrado.to_dict('records')):
         def get_val(keys, default):
+            candidates = []
             for k in keys:
                 for col in row.keys():
-                    if k in str(col).lower() and pd.notna(row[col]) and str(row[col]).strip() != "":
-                        return row[col]
-            return default
+                    if k in str(col).lower() and pd.notna(row[col]):
+                        val_str = str(row[col]).strip()
+                        if val_str != "" and val_str.lower() not in ["nan", "none"]:
+                            candidates.append(val_str)
+            if not candidates:
+                return default
+            # Filtrar candidatos que no tengan puntos suspensivos (...) para evitar textos cortados
+            sin_truncar = [c for c in candidates if '...' not in c and '…' not in c]
+            if sin_truncar:
+                return max(sin_truncar, key=len)
+            return max(candidates, key=len)
 
         def clean_num(val, default=0.0):
             try:
@@ -365,10 +374,23 @@ def extraer_materiales_de_masivo(df, id_solped):
                 return float(s)
             except: return default
 
+        mat_desc = get_val(
+            ['texto breve de material', 'texto breve', 'denominación del material', 'denominacion del material', 
+             'descripción del material', 'descripcion del material', 'descripción', 'descripcion', 
+             'denominacion', 'denominación', 'material', 'texto', 'item', 'artículo', 'articulo', 'breve'],
+            f"Material {idx+1}"
+        )
+
+        centro_desc = get_val(
+            ['nombre centro', 'nombre del centro', 'denominación centro', 'denominacion centro', 
+             'descripción centro', 'descripcion centro', 'texto centro', 'centro', 'plant', 'almacen', 'alm'],
+            "E001"
+        )
+
         posiciones.append({
             "Pos": int(idx + 1),
-            "Material": str(get_val(['texto', 'desc', 'material', 'denominacion', 'item', 'artículo', 'articulo', 'breve'], f"Material {idx+1}")),
-            "Centro": str(get_val(['centro', 'plant', 'almacen', 'alm'], "E001")),
+            "Material": str(mat_desc),
+            "Centro": str(centro_desc),
             "Cantidad": clean_num(get_val(['cant', 'cantidad', 'ctd'], 1.0), 1.0),
             "UM": str(get_val(['um', 'unidad', 'unid', 'medida'], "C/U")).upper(),
             "Precio Unitario": clean_num(get_val(['precio', 'monto', 'val', 'costo', 'p.u', 'neto'], 0.0), 0.0),
@@ -492,9 +514,9 @@ with tabs[0]:
                 col_title, col_del = st.columns([8, 2])
                 with col_title:
                     st.markdown(f"### Pos {item['Pos']}: {item['Material']}")
-                    # Reemplazo de st.caption por markdown con forzado de no-truncamiento
+                    # Reemplazo con forzado de ajuste e impresión completa de texto sin puntos suspensivos
                     st.markdown(
-                        f"<div style='color: #8C8C8C; font-size: 0.9em; white-space: pre-wrap; word-break: break-word; padding-bottom: 10px;'>"
+                        f"<div style='color: #8C8C8C; font-size: 0.9em; white-space: normal; word-break: break-word; overflow-wrap: anywhere; padding-bottom: 10px;'>"
                         f"<b>Centro:</b> {item['Centro']} | <b>UM Original:</b> {item['UM']}</div>", 
                         unsafe_allow_html=True
                     )
