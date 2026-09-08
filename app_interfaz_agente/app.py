@@ -263,6 +263,22 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
 def procesar_y_reparar_planilla(df):
     if df is None or df.empty: return df
 
+    # --- NUEVO: Función para asegurar nombres de columnas únicos ---
+    def desduplicar_columnas(columnas):
+        vistos = {}
+        nuevas = []
+        for c in columnas:
+            c_str = str(c).strip()
+            if c_str in vistos:
+                vistos[c_str] += 1
+                nuevas.append(f"{c_str}_{vistos[c_str]}")
+            else:
+                vistos[c_str] = 0
+                nuevas.append(c_str)
+        return nuevas
+
+    df.columns = desduplicar_columnas(df.columns)
+
     palabras_clave = ['sp', 'solped', 'material', 'pos', 'texto breve', 'centro', 'cantidad', 'proveedor', 'acreedor', 'vendor', 'documento']
     header_idx = -1
     
@@ -282,7 +298,7 @@ def procesar_y_reparar_planilla(df):
                 nuevas_columnas.append(col_orig if not col_orig.startswith("Unnamed") else f"Col_Vacia_{i}")
             else: nuevas_columnas.append(val_str)
         
-        df.columns = nuevas_columnas
+        df.columns = desduplicar_columnas(nuevas_columnas)
         df = df.iloc[header_idx + 1:].reset_index(drop=True)
         if not df.empty:
             primer_col = df.columns[0]
@@ -297,19 +313,10 @@ def procesar_y_reparar_planilla(df):
             if not series_clean.empty:
                 nuevos_nombres[col] = series_clean.iloc[0]
 
-    if nuevos_nombres: df = df.rename(columns=nuevos_nombres)
-
-    vistos = {}
-    columnas_deduplicadas = []
-    for c in df.columns:
-        c_str = str(c).strip()
-        if c_str in vistos:
-            vistos[c_str] += 1
-            columnas_deduplicadas.append(f"{c_str}_{vistos[c_str]}")
-        else:
-            vistos[c_str] = 0
-            columnas_deduplicadas.append(c_str)
-    df.columns = columnas_deduplicadas
+    if nuevos_nombres: 
+        df = df.rename(columns=nuevos_nombres)
+        
+    df.columns = desduplicar_columnas(df.columns)
 
     cols = list(df.columns)
     id_col = next((c for c in cols if str(c).lower() in ['sp', 'solped', 'solicitud']), None)
