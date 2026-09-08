@@ -612,7 +612,6 @@ with tabs[0]:
     lista_materiales = st.session_state[key_lista]
 
     if lista_materiales:
-        # Cabecera con botón de guardado accesible superior
         col_m_head, col_m_save = st.columns([2, 1])
         with col_m_head:
             st.write(f"**Materiales extraídos ({len(lista_materiales)} ítems):**")
@@ -631,7 +630,6 @@ with tabs[0]:
 
         idx_a_eliminar = None
         
-        # Contenedor con altura fija y scroll propio para prevenir desbordes de pantalla
         with st.container(height=550):
             for idx, item in enumerate(lista_materiales):
                 with st.container(border=True):
@@ -796,7 +794,7 @@ with tabs[1]:
         st.success("¡Cotización agregada al Cuadro Comparativo!")
 
 # =============================================================================
-# TAB 3: CUADRO COMPARATIVO INTEGRADO & DESCARGAS
+# TAB 3: CUADRO COMPARATIVO INTEGRADO & DESCARGAS (CON SCROLL Y CONTENEDOR)
 # =============================================================================
 with tabs[2]:
     st.subheader("📊 Cuadro Comparativo Integrado")
@@ -823,8 +821,11 @@ with tabs[2]:
         other_cols = [c for c in df_comp.columns if c not in cols_orden and c not in ['Total CLP', 'Total USD', 'Total EUR']]
         df_comp = df_comp[existing_cols + other_cols]
 
-        moneda_vista = st.radio("💱 Seleccionar Moneda de Visualización:", options=["CLP", "USD", "EUR"], horizontal=True)
-        transporte_reporte = st.selectbox("🚚 Transporte General (Cabecera reporte):", options=["No Especificado"] + OPCIONES_TRANSPORTE, index=0)
+        col_opt1, col_opt2 = st.columns([1, 1])
+        with col_opt1:
+            moneda_vista = st.radio("💱 Seleccionar Moneda de Visualización:", options=["CLP", "USD", "EUR"], horizontal=True)
+        with col_opt2:
+            transporte_reporte = st.selectbox("🚚 Transporte General (Cabecera reporte):", options=["No Especificado"] + OPCIONES_TRANSPORTE, index=0)
 
         if moneda_vista == "CLP": df_comp["Monto Total Visualizado"] = df_comp["Total CLP"]
         elif moneda_vista == "USD": df_comp["Monto Total Visualizado"] = df_comp["Total USD"]
@@ -837,64 +838,82 @@ with tabs[2]:
         df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: int(x) if pd.notna(x) and x > 0 else 0)
         df_comp['Calendario de entrega'] = df_comp['Calendario de entrega'].dt.strftime('%d/%m/%Y').fillna('N/A')
 
-        st.markdown("### 🏆 Motor de Recomendación")
+        # BARRA SUPERIOR DE ACCIONES DIRECTAS (PREVIENE REQUERIR SCROLL HASTA EL FINAL)
+        bytes_excel = generar_excel_estilizado(df_comp, moneda_vista, transporte_reporte)
+        bytes_pdf = generar_pdf(df_comp, moneda_vista, transporte_reporte)
         
-        def highlight_best(df):
-            styles = pd.DataFrame('', index=df.index, columns=df.columns)
-            group_cols = [c for c in ['SOLPED', 'Material'] if c in df.columns]
-            if group_cols:
-                for name, group in df.groupby(group_cols):
-                    if len(group) > 1:
-                        if 'Monto Total Visualizado' in df.columns:
-                            styles.loc[group['Monto Total Visualizado'].idxmin(), 'Monto Total Visualizado'] = 'background-color: #D1FAE5; color: #065F46; font-weight: bold;'
-                        if 'Días para Entrega' in df.columns:
-                            styles.loc[group['Días para Entrega'].idxmin(), 'Días para Entrega'] = 'background-color: #DBEAFE; color: #1E3A8A; font-weight: bold;'
-            return styles
+        col_top_d1, col_top_d2, col_top_d3 = st.columns([1, 1, 1])
+        with col_top_d1:
+            if bytes_excel:
+                st.download_button(label="📊 Reporte Excel", data=bytes_excel, file_name=f"Reporte_Comparativo_{date.today()}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, type="primary", key="dl_excel_top")
+        with col_top_d2:
+            if bytes_pdf:
+                st.download_button(label="📄 Reporte PDF", data=bytes_pdf, file_name=f"Reporte_Comparativo_{date.today()}.pdf", mime="application/pdf", use_container_width=True, key="dl_pdf_top")
+        with col_top_d3:
+            if st.button("🗑️ Limpiar Todo", use_container_width=True, key="btn_clear_top"):
+                st.session_state.ofertas_manuales = []
+                st.rerun()
 
-        if not df_comp.empty:
-            styled_df_comp = df_comp.style.apply(highlight_best, axis=None).format({
-                "Cantidad": lambda x: f"{int(x)}" if pd.notna(x) and float(x).is_integer() else (f"{x:,.2f}" if pd.notna(x) else ""),
-                "Monto Total Visualizado": "$ {:,.2f}", 
-                "Precio Unitario": "$ {:,.2f}",
-                "Total CLP": "$ {:,.2f}", 
-                "Total USD": "$ {:,.2f}", 
-                "Total EUR": "$ {:,.2f}"
-            })
+        st.divider()
 
-            st.dataframe(styled_df_comp, use_container_width=True)
-
-            col_c1, col_c2 = st.columns(2)
-            with col_c1: st.metric("Total Ofertas Registradas", len(df_comp))
-            with col_c2: st.metric(f"Monto Total Acumulado ({moneda_vista})", f"$ {df_comp['Monto Total Visualizado'].sum():,.2f}")
-                
-            st.divider()
-            st.subheader("📈 Gráficos Comparativos por SOLPED")
-            col_graf1, col_graf2 = st.columns(2)
+        # CONTENEDOR CON SCROLL INTERNO
+        with st.container(height=600):
+            st.markdown("### 🏆 Motor de Recomendación")
             
-            with col_graf1:
-                st.markdown(f"**💰 Comparativa de Monto Total por SOLPED ({moneda_vista})**")
-                st.bar_chart(df_comp.groupby("SOLPED")["Monto Total Visualizado"].sum().reset_index(), x="SOLPED", y="Monto Total Visualizado", height=350)
+            def highlight_best(df):
+                styles = pd.DataFrame('', index=df.index, columns=df.columns)
+                group_cols = [c for c in ['SOLPED', 'Material'] if c in df.columns]
+                if group_cols:
+                    for name, group in df.groupby(group_cols):
+                        if len(group) > 1:
+                            if 'Monto Total Visualizado' in df.columns:
+                                styles.loc[group['Monto Total Visualizado'].idxmin(), 'Monto Total Visualizado'] = 'background-color: #D1FAE5; color: #065F46; font-weight: bold;'
+                            if 'Días para Entrega' in df.columns:
+                                styles.loc[group['Días para Entrega'].idxmin(), 'Días para Entrega'] = 'background-color: #DBEAFE; color: #1E3A8A; font-weight: bold;'
+                return styles
+
+            if not df_comp.empty:
+                styled_df_comp = df_comp.style.apply(highlight_best, axis=None).format({
+                    "Cantidad": lambda x: f"{int(x)}" if pd.notna(x) and float(x).is_integer() else (f"{x:,.2f}" if pd.notna(x) else ""),
+                    "Monto Total Visualizado": "$ {:,.2f}", 
+                    "Precio Unitario": "$ {:,.2f}",
+                    "Total CLP": "$ {:,.2f}", 
+                    "Total USD": "$ {:,.2f}", 
+                    "Total EUR": "$ {:,.2f}"
+                })
+
+                st.dataframe(styled_df_comp, height=350, use_container_width=True)
+
+                col_c1, col_c2 = st.columns(2)
+                with col_c1: st.metric("Total Ofertas Registradas", len(df_comp))
+                with col_c2: st.metric(f"Monto Total Acumulado ({moneda_vista})", f"$ {df_comp['Monto Total Visualizado'].sum():,.2f}")
+                    
+                st.divider()
+                st.subheader("📈 Gráficos Comparativos por SOLPED")
+                col_graf1, col_graf2 = st.columns(2)
                 
-            with col_graf2:
-                st.markdown("**⏳ Promedio Días de Entrega por SOLPED**")
-                st.bar_chart(df_comp.groupby("SOLPED")["Días para Entrega"].mean().reset_index(), x="SOLPED", y="Días para Entrega", height=350)
+                with col_graf1:
+                    st.markdown(f"**💰 Comparativa de Monto Total por SOLPED ({moneda_vista})**")
+                    st.bar_chart(df_comp.groupby("SOLPED")["Monto Total Visualizado"].sum().reset_index(), x="SOLPED", y="Monto Total Visualizado", height=300)
+                    
+                with col_graf2:
+                    st.markdown("**⏳ Promedio Días de Entrega por SOLPED**")
+                    st.bar_chart(df_comp.groupby("SOLPED")["Días para Entrega"].mean().reset_index(), x="SOLPED", y="Días para Entrega", height=300)
 
-            st.divider()
-            st.subheader("📥 Exportar Reportes")
-            bytes_excel = generar_excel_estilizado(df_comp, moneda_vista, transporte_reporte)
-            bytes_pdf = generar_pdf(df_comp, moneda_vista, transporte_reporte)
-            
-            col_down1, col_down2, _ = st.columns([1, 1, 2])
-            with col_down1:
-                if bytes_excel:
-                    st.download_button(label="📊 Reporte Excel", data=bytes_excel, file_name=f"Reporte_Comparativo_{date.today()}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, type="primary")
-            with col_down2:
-                if bytes_pdf:
-                    st.download_button(label="📄 Descargar Reporte PDF", data=bytes_pdf, file_name=f"Reporte_Comparativo_{date.today()}.pdf", mime="application/pdf", use_container_width=True)
+                st.divider()
+                st.subheader("📥 Exportar Reportes")
+                
+                col_down1, col_down2, _ = st.columns([1, 1, 2])
+                with col_down1:
+                    if bytes_excel:
+                        st.download_button(label="📊 Reporte Excel", data=bytes_excel, file_name=f"Reporte_Comparativo_{date.today()}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, type="primary", key="dl_excel_bot")
+                with col_down2:
+                    if bytes_pdf:
+                        st.download_button(label="📄 Descargar Reporte PDF", data=bytes_pdf, file_name=f"Reporte_Comparativo_{date.today()}.pdf", mime="application/pdf", use_container_width=True, key="dl_pdf_bot")
 
-        st.write("")
-        if st.button("🗑️ Limpiar TODO el Cuadro Comparativo"):
-            st.session_state.ofertas_manuales = []
-            st.rerun()
+            st.write("")
+            if st.button("🗑️ Limpiar TODO el Cuadro Comparativo", key="btn_clear_bot"):
+                st.session_state.ofertas_manuales = []
+                st.rerun()
     else:
         st.info("Aún no hay ofertas registradas en el Cuadro Comparativo.")
