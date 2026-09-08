@@ -258,7 +258,7 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
     except Exception: return b""
 
 # =============================================================================
-# FUNCIONES AUXILIARES Y LECTURA DE PLANILLAS
+# FUNCIONES AUXILIARES Y LECTURA DE PLANILLAS (OPTIMIZADAS)
 # =============================================================================
 def procesar_y_reparar_planilla(df):
     if df is None or df.empty: return df
@@ -288,12 +288,15 @@ def procesar_y_reparar_planilla(df):
             primer_col = df.columns[0]
             df = df[df[primer_col].astype(str).str.strip() != str(primer_col).strip()].reset_index(drop=True)
 
+    # Optimización vectorizada de nombres de columnas sin bucles pesados
     nuevos_nombres = {}
     for col in df.columns:
         col_str = str(col).strip()
         if col_str.startswith("Col_Vacia_") or col_str.startswith("Unnamed:"):
-            valores_validos = [str(val).strip() for val in df[col].dropna() if str(val).strip().lower() not in ['nan', 'none', '']]
-            if valores_validos: nuevos_nombres[col] = valores_validos[0]
+            series_clean = df[col].dropna().astype(str).str.strip()
+            series_clean = series_clean[~series_clean.str.lower().isin(['nan', 'none', ''])]
+            if not series_clean.empty:
+                nuevos_nombres[col] = series_clean.iloc[0]
 
     if nuevos_nombres: df = df.rename(columns=nuevos_nombres)
 
@@ -326,7 +329,7 @@ def extraer_materiales_de_masivo(df, id_solped):
     if df is None or df.empty: return []
         
     raw_search = str(id_solped).strip()
-    if not raw_search or raw_search.lower() in ["(id solped)", "none", "nan"]: return []
+    if not raw_search or raw_search.lower() in ["(id solped)", "none", "nan", ""]: return []
         
     digits_search = re.sub(r'\D', '', raw_search)
     sp_cols = [c for c in df.columns if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'doc', 'pedido', 'compra'])]
@@ -337,7 +340,8 @@ def extraer_materiales_de_masivo(df, id_solped):
         col_str = df[col].astype(str).str.strip()
         mask = col_str.str.lower() == raw_search.lower()
         if not mask.any() and digits_search:
-            mask = col_str.apply(lambda x: re.sub(r'\D', '', str(x))) == digits_search
+            digits_col = col_str.str.replace(r'\D', '', regex=True)
+            mask = digits_col == digits_search
         if not mask.any(): mask = col_str.str.lower().str.contains(raw_search.lower(), regex=False)
         if mask.any():
             df_filtrado = df[mask]
@@ -350,9 +354,9 @@ def extraer_materiales_de_masivo(df, id_solped):
         def get_val(keys, default):
             candidates = []
             for k in keys:
-                for col in row.keys():
-                    if k in str(col).lower() and pd.notna(row[col]):
-                        val_str = str(row[col]).strip()
+                for col, val in row.items():
+                    if k in str(col).lower() and pd.notna(val):
+                        val_str = str(val).strip()
                         if val_str != "" and val_str.lower() not in ["nan", "none", "null"]:
                             candidates.append(val_str)
             if not candidates:
@@ -385,7 +389,6 @@ def extraer_materiales_de_masivo(df, id_solped):
             "E001"
         )
 
-        # Búsqueda ampliada de proveedores para abarcar campos históricos y de compras
         proveedor_sugerido = str(get_val([
             'proveedor', 'vendor', 'prov', 'nam', 'razon social', 'acreedor',
             'nombre proveedor', 'nombre_proveedor', 'nom_prov', 'lifnr',
@@ -395,7 +398,6 @@ def extraer_materiales_de_masivo(df, id_solped):
         cant_raw = clean_num(get_val(['cant', 'cantidad', 'ctd'], 1.0), 1.0)
         cant_clean = int(cant_raw) if float(cant_raw).is_integer() else cant_raw
 
-        # Extracción de fecha de entrega o fecha histórica
         fecha_hist = get_val(['fecha', 'date', 'entrega', 'creacion', 'f.pedido'], None)
         fecha_parsed = date.today()
         if fecha_hist and fecha_hist != "":
@@ -430,21 +432,32 @@ def convertir_moneda(monto, moneda_origen, tc_usd, tc_uf, tc_eur):
     eur = clp / tc_eur if tc_eur > 0 else 0.0
     return clp, usd, eur
 
-def leer_archivo(file_uploader):
+@st.cache_data(show_spinner="Procesando planilla Excel en segundo plano...")
+def leer_archivo_cached(file_bytes, file_name):
     try:
-        if file_uploader.name.endswith(".csv"): df_raw = pd.read_csv(file_uploader)
+        if file_name.endswith(".csv"): 
+            df_raw = pd.read_csv(io.BytesIO(file_bytes))
         else:
-            dict_dfs = pd.read_excel(file_uploader, sheet_name=None, engine='openpyxl')
-            df_raw = pd.concat(dict_dfs.values(), ignore_index=True)
+            # Carga optimizada: lee únicamente la primera hoja activa para evitar bloqueos con archivos >20MB
+            try:
+                df_raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name=0, engine='openpyxl')
+            except Exception:
+                dict_dfs = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None, engine='openpyxl')
+                df_raw = pd.concat(dict_dfs.values(), ignore_index=True)
             
         df_clean = df_raw.dropna(axis=1, how='all').dropna(axis=0, how='all')
         df_procesado = procesar_y_reparar_planilla(df_clean)
-        df_procesado['cantidad_nulos'] = df_procesado.isnull().sum(axis=1)
-        df_procesado = df_procesado.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
+        if df_procesado is not None and not df_procesado.empty:
+            df_procesado['cantidad_nulos'] = df_procesado.isnull().sum(axis=1)
+            df_procesado = df_procesado.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
         return df_procesado
     except Exception as e:
-        st.error(f"Error al leer el archivo {file_uploader.name}: {e}")
+        st.error(f"Error al leer el archivo {file_name}: {e}")
         return None
+
+def leer_archivo(file_uploader):
+    if file_uploader is None: return None
+    return leer_archivo_cached(file_uploader.getvalue(), file_uploader.name)
 
 # =============================================================================
 # INICIALIZACIÓN DE ESTADO
@@ -485,14 +498,16 @@ with st.sidebar:
         if file_autogestion:
             df_base = leer_archivo(file_autogestion)
             st.session_state.df_masivo = df_base
-            st.success(f"Plantilla Base (Autogestión) cargada ({len(df_base)} filas).")
+            if df_base is not None:
+                st.success(f"Plantilla Base (Autogestión) cargada ({len(df_base)} filas).")
             
         if file_cuadro:
             df_raw_hist = leer_archivo(file_cuadro)
             st.session_state.df_historico = df_raw_hist
-            st.success(f"Cuadro Comparativo Bruto / Histórico cargado ({len(df_raw_hist)} filas).")
+            if df_raw_hist is not None:
+                st.success(f"Cuadro Comparativo Bruto / Histórico cargado ({len(df_raw_hist)} filas).")
 
-        # Cruce de información: Enriquecer Autogestión con Cuadro Comparativo e Histórico sin filtrar por fechas
+        # Cruce de información
         if st.session_state.df_masivo is not None and st.session_state.df_historico is not None:
             col_mat_base = next((c for c in st.session_state.df_masivo.columns if 'material' in str(c).lower()), None)
             col_mat_hist = next((c for c in st.session_state.df_historico.columns if 'material' in str(c).lower()), None)
@@ -501,7 +516,6 @@ with st.sidebar:
                 st.session_state.df_masivo[col_mat_base] = st.session_state.df_masivo[col_mat_base].astype(str).str.strip()
                 st.session_state.df_historico[col_mat_hist] = st.session_state.df_historico[col_mat_hist].astype(str).str.strip()
 
-                # Ordenar por fecha si existe para tomar el registro más relevante pero preservando todos los anteriores (incluyendo pre-2019)
                 col_fecha_hist = next((c for c in st.session_state.df_historico.columns if any(k in str(c).lower() for k in ['fecha', 'date', 'ano', 'año', 'creacion'])), None)
                 if col_fecha_hist:
                     st.session_state.df_historico['_fecha_tmp'] = pd.to_datetime(st.session_state.df_historico[col_fecha_hist], errors='coerce')
@@ -511,10 +525,9 @@ with st.sidebar:
                 if '_fecha_tmp' in df_hist_unique.columns:
                     df_hist_unique = df_hist_unique.drop(columns=['_fecha_tmp'])
 
-                # Unir datos brutos de proveedores e histórico
                 df_merged = pd.merge(st.session_state.df_masivo, df_hist_unique, left_on=col_mat_base, right_on=col_mat_hist, how='left', suffixes=('', '_Bruto'))
                 st.session_state.df_masivo = df_merged
-                st.success("✅ Datos brutos de proveedores e histórico (de todas las fechas) integrados.")
+                st.success("✅ Datos brutos de proveedores e histórico integrados.")
             else:
                 st.warning("No se encontró la columna 'Material' en ambas planillas para realizar el cruce.")
 
@@ -722,7 +735,6 @@ with tabs[2]:
         df_comp = pd.DataFrame(st.session_state.ofertas_manuales)
         df_comp['SOLPED'] = df_comp['SOLPED'].fillna('N/A').astype(str).replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
         
-        # Mapeo limpio y robusto del campo Proveedor
         df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str).str.strip()
         df_comp['Proveedor Visual'] = df_comp['Proveedor'].apply(
             lambda x: 'Sin Especificar' if x in ['', 'none', 'None', 'nan', 'NULL', 'null'] else x
@@ -745,7 +757,6 @@ with tabs[2]:
         df_comp['Calendario de entrega'] = pd.to_datetime(df_comp['Calendario de entrega'], errors='coerce')
         hoy = pd.Timestamp(date.today())
         
-        # Cálculo seguro de Días para Entrega sin descartar fechas históricas antiguas
         df_comp['Días para Entrega'] = (df_comp['Calendario de entrega'] - hoy).dt.days
         df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: int(x) if pd.notna(x) and x > 0 else 0)
         df_comp['Calendario de entrega'] = df_comp['Calendario de entrega'].dt.strftime('%d/%m/%Y').fillna('N/A')
