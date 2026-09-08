@@ -14,7 +14,7 @@ from openpyxl.utils import get_column_letter
 from fpdf import FPDF
 
 # =============================================================================
-# CONFIGURACIÓN DE PÁGINA
+# CONFIGURACIÓN DE PÁGINA Y ESTILOS CSS CON SCROLL HABILITADO
 # =============================================================================
 st.set_page_config(
     page_title="Sistema Integrado de Evaluación de Ofertas - Enaex",
@@ -24,6 +24,17 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+    /* Forzar scroll vertical completo en la ventana y contenedores */
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+        overflow-y: auto !important;
+        height: auto !important;
+    }
+    
+    /* Espacio inferior para evitar que el contenido final quede tapado por la barra del sistema */
+    [data-testid="stMainBlockContainer"] {
+        padding-bottom: 10rem !important;
+    }
+
     .main-header { font-size: 1.8rem; font-weight: 700; color: #1E3A8A; margin-bottom: 0.5rem; }
     .sub-header { font-size: 1rem; color: #4B5563; margin-bottom: 1.5rem; }
     .stTable { font-size: 0.85rem; }
@@ -576,7 +587,7 @@ if st.session_state.df_masivo is not None:
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
 
 # =============================================================================
-# TAB 1: EVALUACIÓN POR SOLPED (FLUIDA - SIN CONTENEDOR RÍGIDO DE ALTURA)
+# TAB 1: EVALUACIÓN POR SOLPED
 # =============================================================================
 with tabs[0]:
     st.subheader("✏️ Evaluación por SOLPED")
@@ -630,7 +641,6 @@ with tabs[0]:
 
         idx_a_eliminar = None
         
-        # Flujo natural sin límite fijo de altura
         for idx, item in enumerate(lista_materiales):
             with st.container(border=True):
                 col_title, col_del = st.columns([8, 2])
@@ -688,7 +698,7 @@ with tabs[0]:
             st.success("¡Oferta guardada exitosamente en el Cuadro Comparativo!")
 
 # =============================================================================
-# TAB 2: CARGA MANUAL DIRECTA (FLUIDA - SIN CONTENEDOR RÍGIDO DE ALTURA)
+# TAB 2: CARGA MANUAL DIRECTA
 # =============================================================================
 with tabs[1]:
     st.subheader("➕ Carga Manual de Oferta Paso a Paso")
@@ -742,7 +752,6 @@ with tabs[1]:
             st.success("¡Cotización agregada al Cuadro Comparativo!")
 
     idx_del_manual = None
-    # Flujo natural sin límite fijo de altura
     for idx, item in enumerate(lista_manual):
         with st.container(border=True):
             col_m_title, col_m_del = st.columns([8, 2])
@@ -838,7 +847,6 @@ with tabs[2]:
         df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: int(x) if pd.notna(x) and x > 0 else 0)
         df_comp['Calendario de entrega'] = df_comp['Calendario de entrega'].dt.strftime('%d/%m/%Y').fillna('N/A')
 
-        # BARRA SUPERIOR DE ACCIONES DIRECTAS
         bytes_excel = generar_excel_estilizado(df_comp, moneda_vista, transporte_reporte)
         bytes_pdf = generar_pdf(df_comp, moneda_vista, transporte_reporte)
         
@@ -856,7 +864,6 @@ with tabs[2]:
 
         st.divider()
 
-        # CONTENIDO DIRECTO EN LA PESTAÑA
         st.markdown("### 🏆 Motor de Recomendación")
         
         def highlight_best(df):
