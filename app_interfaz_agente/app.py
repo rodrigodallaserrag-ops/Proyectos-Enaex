@@ -260,24 +260,23 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
 # =============================================================================
 # FUNCIONES AUXILIARES Y LECTURA DE PLANILLAS (OPTIMIZADAS)
 # =============================================================================
+def deduplicar_columnas(columnas):
+    vistos = {}
+    columnas_unicas = []
+    for c in columnas:
+        c_str = str(c).strip()
+        if c_str in vistos:
+            vistos[c_str] += 1
+            columnas_unicas.append(f"{c_str}_{vistos[c_str]}")
+        else:
+            vistos[c_str] = 0
+            columnas_unicas.append(c_str)
+    return columnas_unicas
+
 def procesar_y_reparar_planilla(df):
     if df is None or df.empty: return df
 
-    # --- NUEVO: Función para asegurar nombres de columnas únicos ---
-    def desduplicar_columnas(columnas):
-        vistos = {}
-        nuevas = []
-        for c in columnas:
-            c_str = str(c).strip()
-            if c_str in vistos:
-                vistos[c_str] += 1
-                nuevas.append(f"{c_str}_{vistos[c_str]}")
-            else:
-                vistos[c_str] = 0
-                nuevas.append(c_str)
-        return nuevas
-
-    df.columns = desduplicar_columnas(df.columns)
+    df.columns = deduplicar_columnas(df.columns)
 
     palabras_clave = ['sp', 'solped', 'material', 'pos', 'texto breve', 'centro', 'cantidad', 'proveedor', 'acreedor', 'vendor', 'documento']
     header_idx = -1
@@ -298,25 +297,26 @@ def procesar_y_reparar_planilla(df):
                 nuevas_columnas.append(col_orig if not col_orig.startswith("Unnamed") else f"Col_Vacia_{i}")
             else: nuevas_columnas.append(val_str)
         
-        df.columns = desduplicar_columnas(nuevas_columnas)
+        df.columns = deduplicar_columnas(nuevas_columnas)
         df = df.iloc[header_idx + 1:].reset_index(drop=True)
         if not df.empty:
-            primer_col = df.columns[0]
-            df = df[df[primer_col].astype(str).str.strip() != str(primer_col).strip()].reset_index(drop=True)
+            col_0_series = df.iloc[:, 0].astype(str).str.strip()
+            col_0_nombre = str(df.columns[0]).strip()
+            df = df[col_0_series != col_0_nombre].reset_index(drop=True)
 
     nuevos_nombres = {}
-    for col in df.columns:
+    for idx, col in enumerate(df.columns):
         col_str = str(col).strip()
         if col_str.startswith("Col_Vacia_") or col_str.startswith("Unnamed:"):
-            series_clean = df[col].dropna().astype(str).str.strip()
+            series_clean = df.iloc[:, idx].dropna().astype(str).str.strip()
             series_clean = series_clean[~series_clean.str.lower().isin(['nan', 'none', ''])]
             if not series_clean.empty:
                 nuevos_nombres[col] = series_clean.iloc[0]
 
     if nuevos_nombres: 
         df = df.rename(columns=nuevos_nombres)
-        
-    df.columns = desduplicar_columnas(df.columns)
+
+    df.columns = deduplicar_columnas(df.columns)
 
     cols = list(df.columns)
     id_col = next((c for c in cols if str(c).lower() in ['sp', 'solped', 'solicitud']), None)
@@ -343,12 +343,17 @@ def extraer_materiales_de_masivo(df, id_solped):
 
     df_filtrado = pd.DataFrame()
     for col in sp_cols:
-        col_str = df[col].astype(str).str.strip()
-        mask = col_str.str.lower() == raw_search.lower()
+        col_idx = df.columns.get_loc(col)
+        if isinstance(col_idx, (slice, list, np.ndarray)):
+            col_series = df.iloc[:, col_idx[0]].astype(str).str.strip()
+        else:
+            col_series = df.iloc[:, col_idx].astype(str).str.strip()
+
+        mask = col_series.str.lower() == raw_search.lower()
         if not mask.any() and digits_search:
-            digits_col = col_str.str.replace(r'\D', '', regex=True)
+            digits_col = col_series.str.replace(r'\D', '', regex=True)
             mask = digits_col == digits_search
-        if not mask.any(): mask = col_str.str.lower().str.contains(raw_search.lower(), regex=False)
+        if not mask.any(): mask = col_series.str.lower().str.contains(raw_search.lower(), regex=False)
         if mask.any():
             df_filtrado = df[mask]
             break
@@ -429,13 +434,12 @@ def leer_archivo_cached(file_bytes, file_name):
             xls = pd.ExcelFile(io.BytesIO(file_bytes), engine='openpyxl')
             df_raw = pd.DataFrame()
             
-            # Motor de búsqueda inteligente para saltar hojas dinámicas o dashboards
             nombres_relevantes = [s for s in xls.sheet_names if any(k in s.lower() for k in ['base', 'dato', 'detalle', 'solped', 'cuadro', 'mat', 'reporte'])]
             orden_busqueda = nombres_relevantes + [s for s in xls.sheet_names if s not in nombres_relevantes]
             
             for sheet in orden_busqueda:
                 df_tmp = pd.read_excel(xls, sheet_name=sheet)
-                if len(df_tmp.dropna(how='all')) > 10:  # Si la hoja tiene más de 10 datos reales, se asume que es la correcta
+                if len(df_tmp.dropna(how='all')) > 10:
                     df_raw = df_tmp
                     break
                     
@@ -443,9 +447,11 @@ def leer_archivo_cached(file_bytes, file_name):
                 df_raw = pd.read_excel(xls, sheet_name=xls.sheet_names[0])
             
         df_clean = df_raw.dropna(axis=1, how='all').dropna(axis=0, how='all')
+        df_clean.columns = deduplicar_columnas(df_clean.columns)
         df_procesado = procesar_y_reparar_planilla(df_clean)
         
         if df_procesado is not None and not df_procesado.empty:
+            df_procesado.columns = deduplicar_columnas(df_procesado.columns)
             df_procesado['cantidad_nulos'] = df_procesado.isnull().sum(axis=1)
             df_procesado = df_procesado.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
             
