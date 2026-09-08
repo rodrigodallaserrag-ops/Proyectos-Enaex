@@ -33,17 +33,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =============================================================================
-# OBTENCIÓN DE INDICADORES FINANCIEROS EN TIEMPO REAL (API CON FALLBACK CORREGIDO)
+# OBTENCIÓN DE INDICADORES FINANCIEROS EN TIEMPO REAL 
 # =============================================================================
 @st.cache_data(ttl=3600)
 def obtener_indicadores_tiempo_real():
-    """Consulta APIs de indicadores con User-Agent personalizado y respaldo robusto en caso de fallo"""
     valores_defecto = {"USD": 950.0, "EUR": 1020.0, "UF": 38000.0, "estado": False}
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
 
-    # Intento 1: mindicador.cl (Principal para Chile)
     try:
         response = requests.get("https://mindicador.cl/api", headers=headers, timeout=5)
         if response.status_code == 200:
@@ -57,7 +55,6 @@ def obtener_indicadores_tiempo_real():
     except Exception:
         pass
 
-    # Intento 2: ExchangeRate-API (Respaldo de alta disponibilidad para monedas)
     try:
         response_alt = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5)
         if response_alt.status_code == 200:
@@ -65,14 +62,13 @@ def obtener_indicadores_tiempo_real():
             rates = data_alt.get("rates", {})
             if "CLP" in rates:
                 usd_clp = float(rates["CLP"])
-                # Calcular EUR/CLP usando la tasa cruzada USD/EUR
                 eur_rate = float(rates.get("EUR", 0.92))
                 eur_clp = usd_clp / eur_rate if eur_rate > 0 else 1020.0
                 
                 return {
                     "USD": round(usd_clp, 2),
                     "EUR": round(eur_clp, 2),
-                    "UF": 38300.0, # Valor referencial actualizado de UF (solo si falla el principal)
+                    "UF": 38300.0,
                     "estado": True
                 }
     except Exception:
@@ -84,15 +80,12 @@ def obtener_indicadores_tiempo_real():
 # FUNCIONES DE EXPORTACIÓN Y FORMATO (EXCEL Y PDF)
 # =============================================================================
 def generar_excel_estilizado(df, moneda_vista, transporte_reporte="No Especificado"):
-    """Genera un archivo Excel con diseño corporativo elegante, bordes, formatos numéricos y anchos ajustados."""
     buffer_excel = io.BytesIO()
-    
     cols_export = [
         'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
         'Precio Unitario', 'Moneda', 'Proveedor Visual', 'Transporte',
         'Calendario de entrega', 'Días para Entrega', 'Monto Total Visualizado'
     ]
-    
     df_export = df[[c for c in cols_export if c in df.columns]].copy()
     df_export.rename(columns={
         'Proveedor Visual': 'Proveedor', 
@@ -101,29 +94,24 @@ def generar_excel_estilizado(df, moneda_vista, transporte_reporte="No Especifica
     
     with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
         df_export.to_excel(writer, index=False, sheet_name='Cuadro Comparativo', startrow=3)
-        
         workbook = writer.book
         worksheet = writer.sheets['Cuadro Comparativo']
         
         HEADER_FILL = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
         ZEBRA_FILL = PatternFill(start_color="F9FAFB", end_color="F9FAFB", fill_type="solid")
-        
         TITLE_FONT = Font(name="Calibri", size=15, bold=True, color="1E3A8A")
         SUBTITLE_FONT = Font(name="Calibri", size=10, italic=True, color="6B7280")
         HEADER_FONT = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
         DATA_FONT = Font(name="Calibri", size=10)
         
         THIN_BORDER = Border(
-            left=Side(style='thin', color='E5E7EB'),
-            right=Side(style='thin', color='E5E7EB'),
-            top=Side(style='thin', color='E5E7EB'),
-            bottom=Side(style='thin', color='E5E7EB')
+            left=Side(style='thin', color='E5E7EB'), right=Side(style='thin', color='E5E7EB'),
+            top=Side(style='thin', color='E5E7EB'), bottom=Side(style='thin', color='E5E7EB')
         )
         
         worksheet['A1'] = "ENAEX - CUADRO COMPARATIVO DE OFERTAS"
         worksheet['A1'].font = TITLE_FONT
         
-        # Se agrega el Transporte a la cabecera si fue seleccionado
         subtitulo = f"Fecha de informe: {date.today().strftime('%d/%m/%Y')} | Moneda base: {moneda_vista}"
         if transporte_reporte and transporte_reporte != "No Especificado":
             subtitulo += f" | Transporte General: {transporte_reporte}"
@@ -162,20 +150,16 @@ def generar_excel_estilizado(df, moneda_vista, transporte_reporte="No Especifica
             max_len = 0
             col_letter = get_column_letter(col[0].column)
             for cell in col:
-                if cell.row < 4:
-                    continue
-                if cell.value:
-                    max_len = max(max_len, len(str(cell.value)))
+                if cell.row < 4: continue
+                if cell.value: max_len = max(max_len, len(str(cell.value)))
             worksheet.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
     return buffer_excel.getvalue()
 
 def clean_str_pdf(txt):
-    """Limpia caracteres especiales para evitar errores de codificación en PDF"""
     s = str(txt or '')
     reemplazos = {'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','á':'a','é':'e','í':'i','ó':'o','ú':'u','Ñ':'N','ñ':'n','°':''}
-    for k, v in reemplazos.items():
-        s = s.replace(k, v)
+    for k, v in reemplazos.items(): s = s.replace(k, v)
     return s.encode('latin-1', 'ignore').decode('latin-1')
 
 class PDFReport(FPDF):
@@ -187,7 +171,6 @@ class PDFReport(FPDF):
         self.set_text_color(100, 100, 100)
         self.cell(0, 5, f'Fecha de Emision: {date.today().strftime("%d/%m/%Y")}', ln=True, align='C')
         self.ln(4)
-
     def footer(self):
         self.set_y(-12)
         self.set_font('Helvetica', 'I', 8)
@@ -195,7 +178,6 @@ class PDFReport(FPDF):
         self.cell(0, 10, f'Pagina {self.page_no()}/{{nb}} - Documento Generado Automaticamente', align='C')
 
 def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
-    """Genera un archivo PDF ejecutivo en formato horizontal (A4)"""
     try:
         pdf = PDFReport(orientation='L', unit='mm', format='A4')
         pdf.alias_nb_pages()
@@ -207,7 +189,6 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
         pdf.set_font('Helvetica', 'B', 9)
         pdf.set_text_color(30, 58, 138)
         
-        # Se agrega el Transporte a la cabecera si fue seleccionado
         resumen_txt = f'  RESUMEN GENERAL: Total Ofertas Evaluadas: {len(df)}    |    Monto Acumulado ({moneda_vista}): ${monto_total:,.2f}'
         if transporte_reporte and transporte_reporte != "No Especificado":
             resumen_txt += f'    |    Transporte General: {transporte_reporte}'
@@ -215,23 +196,14 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
         pdf.cell(0, 8, resumen_txt, ln=True)
         pdf.ln(4)
 
-        cols = [
-            ("SOLPED", 20),
-            ("Material", 72),
-            ("Proveedor", 42),
-            ("Transporte", 20),
-            ("Cant.", 15),
-            ("Mon", 15),
-            (f"Total ({moneda_vista})", 35),
-            ("Entrega", 30)
-        ]
+        cols = [("SOLPED", 20), ("Material", 72), ("Proveedor", 42), ("Transporte", 20),
+                ("Cant.", 15), ("Mon", 15), (f"Total ({moneda_vista})", 35), ("Entrega", 30)]
 
         pdf.set_font('Helvetica', 'B', 8)
         pdf.set_fill_color(30, 58, 138)
         pdf.set_text_color(255, 255, 255)
 
-        for name, width in cols:
-            pdf.cell(width, 7, name, border=1, align='C', fill=True)
+        for name, width in cols: pdf.cell(width, 7, name, border=1, align='C', fill=True)
         pdf.ln()
 
         pdf.set_font('Helvetica', '', 8)
@@ -244,16 +216,13 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
                 pdf.set_font('Helvetica', 'B', 8)
                 pdf.set_fill_color(30, 58, 138)
                 pdf.set_text_color(255, 255, 255)
-                for name, width in cols:
-                    pdf.cell(width, 7, name, border=1, align='C', fill=True)
+                for name, width in cols: pdf.cell(width, 7, name, border=1, align='C', fill=True)
                 pdf.ln()
                 pdf.set_font('Helvetica', '', 8)
                 pdf.set_text_color(0, 0, 0)
 
-            if fill:
-                pdf.set_fill_color(249, 250, 251)
-            else:
-                pdf.set_fill_color(255, 255, 255)
+            if fill: pdf.set_fill_color(249, 250, 251)
+            else: pdf.set_fill_color(255, 255, 255)
 
             solped = clean_str_pdf(row.get('SOLPED', ''))[:15]
             material = clean_str_pdf(row.get('Material', ''))[:45]
@@ -262,10 +231,8 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
             cant = f"{row.get('Cantidad', 0):,.0f}"
             mon = clean_str_pdf(row.get('Moneda', 'CLP'))
             monto = f"${row.get('Monto Total Visualizado', 0):,.2f}"
-            
             dias_val = row.get('Días para Entrega', 0)
-            dias_val = 0 if pd.isna(dias_val) else int(dias_val)
-            dias = f"{dias_val} dias"
+            dias = f"{0 if pd.isna(dias_val) else int(dias_val)} dias"
 
             pdf.cell(cols[0][1], 6, solped, border=1, align='C', fill=True)
             pdf.cell(cols[1][1], 6, material, border=1, align='L', fill=True)
@@ -279,18 +246,15 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
             fill = not fill
 
         out = pdf.output(dest='S') if hasattr(pdf, 'output') else b""
-        if isinstance(out, str):
-            return out.encode('latin-1')
+        if isinstance(out, str): return out.encode('latin-1')
         return bytes(out)
-    except Exception:
-        return b""
+    except Exception: return b""
 
 # =============================================================================
 # FUNCIONES AUXILIARES Y BÚSQUEDA ROBUSTA
 # =============================================================================
 def procesar_y_reparar_planilla(df):
-    if df is None or df.empty:
-        return df
+    if df is None or df.empty: return df
 
     palabras_clave = ['sp', 'solped', 'material', 'pos', 'texto breve', 'centro', 'cantidad']
     header_idx = -1
@@ -308,34 +272,23 @@ def procesar_y_reparar_planilla(df):
             val_str = str(val).strip()
             if val_str.lower() in ['nan', 'none', '']:
                 col_orig = str(df.columns[i])
-                if not col_orig.startswith("Unnamed"):
-                    nuevas_columnas.append(col_orig)
-                else:
-                    nuevas_columnas.append(f"Col_Vacia_{i}")
-            else:
-                nuevas_columnas.append(val_str)
+                nuevas_columnas.append(col_orig if not col_orig.startswith("Unnamed") else f"Col_Vacia_{i}")
+            else: nuevas_columnas.append(val_str)
         
         df.columns = nuevas_columnas
         df = df.iloc[header_idx + 1:].reset_index(drop=True)
-        
         if not df.empty:
             primer_col = df.columns[0]
             df = df[df[primer_col].astype(str).str.strip() != str(primer_col).strip()].reset_index(drop=True)
 
-    # Inspection dinámica
     nuevos_nombres = {}
     for col in df.columns:
         col_str = str(col).strip()
         if col_str.startswith("Col_Vacia_") or col_str.startswith("Unnamed:"):
-            valores_validos = [
-                str(val).strip() for val in df[col].dropna() 
-                if str(val).strip().lower() not in ['nan', 'none', '']
-            ]
-            if valores_validos:
-                nuevos_nombres[col] = valores_validos[0]
+            valores_validos = [str(val).strip() for val in df[col].dropna() if str(val).strip().lower() not in ['nan', 'none', '']]
+            if valores_validos: nuevos_nombres[col] = valores_validos[0]
 
-    if nuevos_nombres:
-        df = df.rename(columns=nuevos_nombres)
+    if nuevos_nombres: df = df.rename(columns=nuevos_nombres)
 
     vistos = {}
     columnas_deduplicadas = []
@@ -350,60 +303,40 @@ def procesar_y_reparar_planilla(df):
     df.columns = columnas_deduplicadas
 
     cols = list(df.columns)
-    id_col = None
-    
-    for c in cols:
-        if str(c).lower() in ['sp', 'solped', 'solicitud']:
-            id_col = c
-            break
+    id_col = next((c for c in cols if str(c).lower() in ['sp', 'solped', 'solicitud']), None)
             
     if not id_col:
-        for c in cols:
-            if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'pedido']):
-                id_col = c
-                break
+        id_col = next((c for c in cols if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'pedido'])), None)
                 
     if id_col and id_col in cols:
         cols.remove(id_col)
         cols.insert(0, id_col)
         df = df[cols]
 
-    df = df.dropna(how='all')
-    return df
+    return df.dropna(how='all')
 
 def extraer_materiales_de_masivo(df, id_solped):
-    if df is None or df.empty:
-        return []
+    if df is None or df.empty: return []
         
     raw_search = str(id_solped).strip()
-    if not raw_search or raw_search.lower() in ["(id solped)", "none", "nan"]:
-        return []
+    if not raw_search or raw_search.lower() in ["(id solped)", "none", "nan"]: return []
         
     digits_search = re.sub(r'\D', '', raw_search)
-    
     sp_cols = [c for c in df.columns if any(kw in str(c).lower() for kw in ['sp', 'solped', 'solicitud', 'pr', 'requerimiento', 'doc', 'pedido', 'compra'])]
-    if not sp_cols:
-        sp_cols = list(df.columns)
+    if not sp_cols: sp_cols = list(df.columns)
 
     df_filtrado = pd.DataFrame()
-    
     for col in sp_cols:
         col_str = df[col].astype(str).str.strip()
         mask = col_str.str.lower() == raw_search.lower()
-        
         if not mask.any() and digits_search:
-            col_digits = col_str.apply(lambda x: re.sub(r'\D', '', str(x)))
-            mask = col_digits == digits_search
-            
-        if not mask.any():
-            mask = col_str.str.lower().str.contains(raw_search.lower(), regex=False)
-
+            mask = col_str.apply(lambda x: re.sub(r'\D', '', str(x))) == digits_search
+        if not mask.any(): mask = col_str.str.lower().str.contains(raw_search.lower(), regex=False)
         if mask.any():
             df_filtrado = df[mask]
             break
 
-    if df_filtrado.empty:
-        return []
+    if df_filtrado.empty: return []
 
     posiciones = []
     for idx, row in enumerate(df_filtrado.to_dict('records')):
@@ -416,19 +349,13 @@ def extraer_materiales_de_masivo(df, id_solped):
 
         def clean_num(val, default=0.0):
             try:
-                if isinstance(val, (int, float)): 
-                    return float(val)
-                s = str(val).strip()
-                s = re.sub(r'[^\d.,-]', '', s)
-                if '.' in s and ',' in s:
-                    s = s.replace('.', '').replace(',', '.')
-                elif '.' in s and len(s.split('.')[-1]) == 3:
-                    s = s.replace('.', '')
-                elif ',' in s:
-                    s = s.replace(',', '.')
+                if isinstance(val, (int, float)): return float(val)
+                s = re.sub(r'[^\d.,-]', '', str(val).strip())
+                if '.' in s and ',' in s: s = s.replace('.', '').replace(',', '.')
+                elif '.' in s and len(s.split('.')[-1]) == 3: s = s.replace('.', '')
+                elif ',' in s: s = s.replace(',', '.')
                 return float(s)
-            except Exception:
-                return default
+            except: return default
 
         posiciones.append({
             "Pos": int(idx + 1),
@@ -442,27 +369,17 @@ def extraer_materiales_de_masivo(df, id_solped):
             "Transporte": "EXW",
             "Calendario de entrega": date.today(),
             "Observaciones": str(get_val(['obs', 'observacion', 'comentario'], "")),
-            "🗑️": False # Agregado campo eliminar
+            "🗑️": False # Columna para el checkbox de eliminación
         })
-        
     return posiciones
 
 def convertir_moneda(monto, moneda_origen, tc_usd, tc_uf, tc_eur):
-    """Calcula importes equivalentes en CLP, USD y EUR"""
-    monto = float(monto or 0.0)
-    moneda_origen = str(moneda_origen).upper()
-    
-    if moneda_origen == "CLP":
-        clp = monto
-    elif moneda_origen == "USD":
-        clp = monto * tc_usd
-    elif moneda_origen == "UF":
-        clp = monto * tc_uf
-    elif moneda_origen == "EUR":
-        clp = monto * tc_eur
-    else:
-        clp = monto
-        
+    monto, moneda_origen = float(monto or 0.0), str(moneda_origen).upper()
+    if moneda_origen == "CLP": clp = monto
+    elif moneda_origen == "USD": clp = monto * tc_usd
+    elif moneda_origen == "UF": clp = monto * tc_uf
+    elif moneda_origen == "EUR": clp = monto * tc_eur
+    else: clp = monto
     usd = clp / tc_usd if tc_usd > 0 else 0.0
     eur = clp / tc_eur if tc_eur > 0 else 0.0
     return clp, usd, eur
@@ -470,16 +387,10 @@ def convertir_moneda(monto, moneda_origen, tc_usd, tc_uf, tc_eur):
 # =============================================================================
 # INICIALIZACIÓN DE ESTADO
 # =============================================================================
-if "df_masivo" not in st.session_state:
-    st.session_state.df_masivo = None
-if "ofertas_manuales" not in st.session_state:
-    st.session_state.ofertas_manuales = []
+if "df_masivo" not in st.session_state: st.session_state.df_masivo = None
+if "ofertas_manuales" not in st.session_state: st.session_state.ofertas_manuales = []
 
-# Opciones estándar de Transporte
-OPCIONES_TRANSPORTE = [
-    "T. Gil", "T. Bello", "Pullman", "Retiramos", 
-    "EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAT", "DDP"
-]
+OPCIONES_TRANSPORTE = ["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAT", "DDP"]
 
 # =============================================================================
 # ENCABEZADO Y PARÁMETROS GLOBALES
@@ -488,39 +399,33 @@ st.markdown("<div class='main-header'>⚡ Sistema Integrado de Evaluación de Of
 
 with st.sidebar:
     st.header("⚙️ Parámetros de Cambio")
-    
     indicadores = obtener_indicadores_tiempo_real()
     
-    if indicadores["estado"]:
-        st.success("🟢 Indicadores actualizados en tiempo real")
-    else:
-        st.warning("⚠️ Sin conexión a API. Usando valores por defecto.")
+    if indicadores["estado"]: st.success("🟢 Indicadores actualizados")
+    else: st.warning("⚠️ Sin conexión a API. Valores por defecto.")
         
     if st.button("🔄 Actualizar Tasas API", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
     st.divider()
-
     tc_usd = st.number_input("Tipo de Cambio USD / CLP", value=indicadores["USD"], step=1.0, format="%.2f")
     tc_uf = st.number_input("Tipo de Cambio UF / CLP", value=indicadores["UF"], step=100.0, format="%.2f")
     tc_eur = st.number_input("Tipo de Cambio EUR / CLP", value=indicadores["EUR"], step=1.0, format="%.2f")
     st.divider()
     
     st.header("📂 Carga de Archivo Base")
-    file_masivo = st.file_uploader("Cargar Planilla Maestro/SOLPEDs (Excel/CSV)", type=["xlsx", "xls", "csv", "xlsm"])
+    file_masivo = st.file_uploader("Cargar Planilla Maestro/SOLPEDs", type=["xlsx", "xls", "csv", "xlsm"])
     
     if file_masivo:
         try:
-            if file_masivo.name.endswith(".csv"):
-                df_raw = pd.read_csv(file_masivo)
+            if file_masivo.name.endswith(".csv"): df_raw = pd.read_csv(file_masivo)
             else:
                 dict_dfs = pd.read_excel(file_masivo, sheet_name=None, engine='openpyxl')
                 df_raw = pd.concat(dict_dfs.values(), ignore_index=True)
                 
             df_clean = df_raw.dropna(axis=1, how='all').dropna(axis=0, how='all')
             df_procesado = procesar_y_reparar_planilla(df_clean)
-            
             df_procesado['cantidad_nulos'] = df_procesado.isnull().sum(axis=1)
             df_procesado = df_procesado.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
             
@@ -529,18 +434,14 @@ with st.sidebar:
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
 
-# =============================================================================
-# VISTA PREVIA DE DATOS CARGADOS
-# =============================================================================
 if st.session_state.df_masivo is not None:
     with st.expander("👀 Vista Previa de la Planilla Base Cargada", expanded=False):
-        st.write("Mostrando los datos procesados con los encabezados detectados e identificados automáticamente.")
         st.dataframe(st.session_state.df_masivo, use_container_width=True)
 
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
 
 # =============================================================================
-# TAB 1: EVALUACIÓN POR SOLPED (AUTOGESTIÓN)
+# TAB 1: EVALUACIÓN POR SOLPED
 # =============================================================================
 with tabs[0]:
     st.subheader("✏️ Evaluación por SOLPED")
@@ -553,52 +454,65 @@ with tabs[0]:
         st.write("")
         btn_extraer = st.button("📤 Extraer Materiales", type="primary", use_container_width=True)
 
-    if (btn_extraer or solped_id) and solped_id.strip():
+    if btn_extraer and solped_id.strip():
         if st.session_state.df_masivo is not None:
             materiales = extraer_materiales_de_masivo(st.session_state.df_masivo, solped_id)
             if materiales:
                 st.session_state[f"editor_{solped_id}"] = pd.DataFrame(materiales)
                 st.success(f"Se encontraron {len(materiales)} posiciones para la SOLPED **{solped_id}**")
             else:
-                st.warning(f"No se encontraron registros para la SOLPED '{solped_id}'. Verifica si fue cargada en el panel lateral.")
+                st.warning(f"No se encontraron registros para la SOLPED '{solped_id}'.")
         else:
-            st.info("Carga una planilla maestra en el menú lateral para realizar la búsqueda automática por SOLPED.")
+            st.info("Carga una planilla maestra en el menú lateral.")
 
     key_editor = f"editor_{solped_id}" if (solped_id and f"editor_{solped_id}" in st.session_state) else "editor_default"
     
-    df_inicial = st.session_state.get(key_editor, pd.DataFrame([{
-        "Pos": 1, "Material": "(Material)", "Centro": "(Centro)", "Cantidad": 1.0, 
-        "UM": "C/U", "Precio Unitario": 0.0, "Moneda": "CLP", 
-        "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": "", "🗑️": False
-    }]))
+    if key_editor not in st.session_state:
+        st.session_state[key_editor] = pd.DataFrame([{
+            "Pos": 1, "Material": "(Material)", "Centro": "(Centro)", "Cantidad": 1.0, 
+            "UM": "C/U", "Precio Unitario": 0.0, "Moneda": "CLP", 
+            "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": "", "🗑️": False
+        }])
+        
+    df_inicial = st.session_state[key_editor]
 
     if not df_inicial.empty:
         df_inicial["Precio Unitario"] = pd.to_numeric(df_inicial["Precio Unitario"], errors='coerce').fillna(0.0)
         df_inicial["Cantidad"] = pd.to_numeric(df_inicial["Cantidad"], errors='coerce').fillna(1.0)
         df_inicial["Calendario de entrega"] = pd.to_datetime(df_inicial["Calendario de entrega"]).dt.date
-        if "🗑️" not in df_inicial.columns:
-            df_inicial["🗑️"] = False
+        if "🗑️" not in df_inicial.columns: df_inicial["🗑️"] = False
 
-    edited_df = st.data_editor(
-        df_inicial,
-        num_rows="dynamic",
-        use_container_width=True,
-        column_config={
-            "Pos": st.column_config.NumberColumn("Pos", disabled=True),
-            "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
-            "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
-            "Transporte": st.column_config.SelectboxColumn("Transporte", options=OPCIONES_TRANSPORTE),
-            "Calendario de entrega": st.column_config.DateColumn("Fecha Entrega"),
-            "🗑️": st.column_config.CheckboxColumn("🗑️", help="Selecciona para ignorar este ítem", default=False)
-        }
-    )
+    # Layout de 2 columnas: Tabla a la izquierda, Botón ROJO EXTERIOR a la derecha
+    col_t1, col_t2 = st.columns([10, 2])
+    with col_t1:
+        edited_df = st.data_editor(
+            df_inicial,
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                "Pos": st.column_config.NumberColumn("Pos", disabled=True),
+                "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
+                "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
+                "Transporte": st.column_config.SelectboxColumn("Transporte", options=OPCIONES_TRANSPORTE),
+                "Calendario de entrega": st.column_config.DateColumn("Fecha Entrega"),
+                "🗑️": st.column_config.CheckboxColumn("🗑️", help="Marca y presiona el botón derecho para borrar")
+            }
+        )
+        
+    with col_t2:
+        st.write("") 
+        st.write("")
+        # Botón exterior rojo a la derecha de la tabla
+        if st.button("🗑️ Eliminar Marcados", key="del_tab1", type="primary", use_container_width=True):
+            df_limpio = edited_df[edited_df["🗑️"] == False].copy()
+            df_limpio["🗑️"] = False # Resetear la columna de seguridad
+            st.session_state[key_editor] = df_limpio
+            st.rerun()
 
     if st.button("💾 Guardar Oferta de SOLPED en Comparativo", type="primary"):
-        # Solo guardamos los registros donde el basurero NO esté marcado
         registros_filtrados = edited_df[edited_df["🗑️"] == False].to_dict('records')
         for r in registros_filtrados:
-            if "🗑️" in r:
-                del r["🗑️"] # Limpiamos la columna antes de guardar
+            if "🗑️" in r: del r["🗑️"]
             clp, usd, eur = convertir_moneda(r["Precio Unitario"] * r["Cantidad"], r["Moneda"], tc_usd, tc_uf, tc_eur)
             r["SOLPED"] = solped_id if solped_id else "N/A"
             r["Total CLP"] = clp
@@ -608,14 +522,13 @@ with tabs[0]:
         st.success(f"¡{len(registros_filtrados)} oferta(s) guardada(s) exitosamente en el Cuadro Comparativo!")
 
 # =============================================================================
-# TAB 2: CARGA MANUAL INTEGRA / EDICIÓN DIRECTA POR SOLPED
+# TAB 2: CARGA MANUAL INTEGRA
 # =============================================================================
 with tabs[1]:
     st.subheader("➕ Carga Manual de Oferta Paso a Paso")
     
     col_s1, col_s2 = st.columns([3, 1])
-    with col_s1:
-        manual_solped = st.text_input("Ingresar N° SOLPED para Autocompletar:", placeholder="Ej: PR175798")
+    with col_s1: manual_solped = st.text_input("Ingresar N° SOLPED para Autocompletar:", placeholder="Ej: PR175798")
     with col_s2:
         st.write("")
         st.write("")
@@ -627,10 +540,8 @@ with tabs[1]:
             if mats:
                 st.session_state["manual_grid_df"] = pd.DataFrame(mats)
                 st.success(f"Materiales cargados automáticamente desde la SOLPED {manual_solped}")
-            else:
-                st.warning(f"No se encontró la SOLPED {manual_solped} en el archivo base.")
-        else:
-            st.info("Sube una planilla en la barra lateral para autocompletar posiciones por SOLPED.")
+            else: st.warning(f"No se encontró la SOLPED {manual_solped}.")
+        else: st.info("Sube una planilla en la barra lateral.")
 
     if "manual_grid_df" not in st.session_state:
         st.session_state["manual_grid_df"] = pd.DataFrame([{
@@ -644,31 +555,38 @@ with tabs[1]:
         df_manual["Precio Unitario"] = pd.to_numeric(df_manual["Precio Unitario"], errors='coerce').fillna(0.0)
         df_manual["Cantidad"] = pd.to_numeric(df_manual["Cantidad"], errors='coerce').fillna(1.0)
         df_manual["Calendario de entrega"] = pd.to_datetime(df_manual["Calendario de entrega"]).dt.date
-        if "🗑️" not in df_manual.columns:
-            df_manual["🗑️"] = False
+        if "🗑️" not in df_manual.columns: df_manual["🗑️"] = False
 
     st.write("### Tabla de Cotización de Proveedor")
     
-    cotizacion_df = st.data_editor(
-        df_manual,
-        num_rows="dynamic",
-        use_container_width=True,
-        key="cotizacion_manual_editor",
-        column_config={
-            "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
-            "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
-            "Transporte": st.column_config.SelectboxColumn("Transporte", options=OPCIONES_TRANSPORTE),
-            "Calendario de entrega": st.column_config.DateColumn("Calendario de entrega"),
-            "🗑️": st.column_config.CheckboxColumn("🗑️", help="Selecciona para ignorar este ítem", default=False)
-        }
-    )
+    col_tm1, col_tm2 = st.columns([10, 2])
+    with col_tm1:
+        cotizacion_df = st.data_editor(
+            df_manual,
+            num_rows="dynamic",
+            use_container_width=True,
+            key="cotizacion_manual_editor",
+            column_config={
+                "Precio Unitario": st.column_config.NumberColumn("Precio Unitario", format="$ %.2f"),
+                "Moneda": st.column_config.SelectboxColumn("Moneda", options=["CLP", "USD", "EUR"]),
+                "Transporte": st.column_config.SelectboxColumn("Transporte", options=OPCIONES_TRANSPORTE),
+                "Calendario de entrega": st.column_config.DateColumn("Calendario de entrega"),
+                "🗑️": st.column_config.CheckboxColumn("🗑️", help="Marca y presiona eliminar a la derecha")
+            }
+        )
+    with col_tm2:
+        st.write("")
+        st.write("")
+        if st.button("🗑️ Eliminar Marcados", key="del_tab2", type="primary", use_container_width=True):
+            df_limpio = cotizacion_df[cotizacion_df["🗑️"] == False].copy()
+            df_limpio["🗑️"] = False
+            st.session_state["manual_grid_df"] = df_limpio
+            st.rerun()
 
     if st.button("💾 Guardar Cotización Manual Completa", type="primary"):
-        # Filtramos los ignorados
         items_filtrados = cotizacion_df[cotizacion_df["🗑️"] == False].to_dict('records')
         for item in items_filtrados:
-            if "🗑️" in item:
-                del item["🗑️"]
+            if "🗑️" in item: del item["🗑️"]
             clp, usd, eur = convertir_moneda(item["Precio Unitario"] * item["Cantidad"], item["Moneda"], tc_usd, tc_uf, tc_eur)
             item["SOLPED"] = manual_solped if manual_solped else "MANUAL"
             item["Total CLP"] = clp
@@ -685,44 +603,24 @@ with tabs[2]:
     
     if st.session_state.ofertas_manuales:
         df_comp = pd.DataFrame(st.session_state.ofertas_manuales)
-        
-        df_comp['SOLPED'] = df_comp['SOLPED'].fillna('N/A').astype(str)
-        df_comp['SOLPED'] = df_comp['SOLPED'].replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
+        df_comp['SOLPED'] = df_comp['SOLPED'].fillna('N/A').astype(str).replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
         df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str)
         df_comp['Proveedor Visual'] = df_comp['Proveedor'].replace({'': 'Sin Especificar', 'none': 'Sin Especificar', 'None': 'Sin Especificar'})
-        df_comp['🗑️'] = False # Agregamos la columna de eliminación
+        if '🗑️' not in df_comp.columns: df_comp['🗑️'] = False 
 
-        # Orden de columnas asegurando que el basurero quede al extremo derecho
         cols_orden = [
             'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
             'Precio Unitario', 'Moneda', 'Proveedor Visual', 'Transporte', 
             'Calendario de entrega', 'Total CLP', 'Total USD', 'Total EUR', 'Observaciones', '🗑️'
         ]
-        cols_orden = [c for c in cols_orden if c in df_comp.columns]
-        df_comp = df_comp[cols_orden]
+        df_comp = df_comp[[c for c in cols_orden if c in df_comp.columns]]
 
-        # ---------------------------------------------------------------------
-        # CONTROLES Y PARÁMETROS PARA REPORTE
-        # ---------------------------------------------------------------------
-        moneda_vista = st.radio(
-            "💱 Seleccionar Moneda de Visualización:", 
-            options=["CLP", "USD", "EUR"], 
-            horizontal=True
-        )
+        moneda_vista = st.radio("💱 Seleccionar Moneda de Visualización:", options=["CLP", "USD", "EUR"], horizontal=True)
+        transporte_reporte = st.selectbox("🚚 Transporte General (Cabecera reporte):", options=["No Especificado"] + OPCIONES_TRANSPORTE, index=0)
 
-        # Dropdown para añadir el transporte general a las cabeceras de Excel y PDF (NO FILTRA)
-        transporte_reporte = st.selectbox(
-            "🚚 Transporte General (Se incluirá en la cabecera del reporte exportado):",
-            options=["No Especificado"] + OPCIONES_TRANSPORTE,
-            index=0
-        )
-
-        if moneda_vista == "CLP":
-            df_comp["Monto Total Visualizado"] = df_comp["Total CLP"]
-        elif moneda_vista == "USD":
-            df_comp["Monto Total Visualizado"] = df_comp["Total USD"]
-        elif moneda_vista == "EUR":
-            df_comp["Monto Total Visualizado"] = df_comp["Total EUR"]
+        if moneda_vista == "CLP": df_comp["Monto Total Visualizado"] = df_comp["Total CLP"]
+        elif moneda_vista == "USD": df_comp["Monto Total Visualizado"] = df_comp["Total USD"]
+        elif moneda_vista == "EUR": df_comp["Monto Total Visualizado"] = df_comp["Total EUR"]
 
         df_comp['Calendario de entrega'] = pd.to_datetime(df_comp['Calendario de entrega'])
         hoy = pd.Timestamp(date.today())
@@ -730,95 +628,65 @@ with tabs[2]:
         df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: x if pd.notna(x) and x > 0 else 0)
 
         st.markdown("### 🏆 Motor de Recomendación")
-        st.info("💡 **Guía de colores:** Se resalta en **verde** la opción más económica y en **azul** la entrega más rápida para cada material.")
         
         def highlight_best(df):
             styles = pd.DataFrame('', index=df.index, columns=df.columns)
             for name, group in df.groupby(['SOLPED', 'Material']):
                 if len(group) > 1:
-                    min_monto_idx = group['Monto Total Visualizado'].idxmin()
-                    min_dias_idx = group['Días para Entrega'].idxmin()
-                    styles.loc[min_monto_idx, 'Monto Total Visualizado'] = 'background-color: #D1FAE5; color: #065F46; font-weight: bold;'
-                    styles.loc[min_dias_idx, 'Días para Entrega'] = 'background-color: #DBEAFE; color: #1E3A8A; font-weight: bold;'
+                    styles.loc[group['Monto Total Visualizado'].idxmin(), 'Monto Total Visualizado'] = 'background-color: #D1FAE5; color: #065F46; font-weight: bold;'
+                    styles.loc[group['Días para Entrega'].idxmin(), 'Días para Entrega'] = 'background-color: #DBEAFE; color: #1E3A8A; font-weight: bold;'
             return styles
 
         if not df_comp.empty:
             styled_df_comp = df_comp.style.apply(highlight_best, axis=None).format({
-                "Monto Total Visualizado": "$ {:,.2f}",
-                "Precio Unitario": "$ {:,.2f}",
-                "Total CLP": "$ {:,.2f}",
-                "Total USD": "$ {:,.2f}",
-                "Total EUR": "$ {:,.2f}"
+                "Monto Total Visualizado": "$ {:,.2f}", "Precio Unitario": "$ {:,.2f}",
+                "Total CLP": "$ {:,.2f}", "Total USD": "$ {:,.2f}", "Total EUR": "$ {:,.2f}"
             })
 
-            # Cambiamos st.dataframe a st.data_editor para permitir la interacción con el checkbox
-            edited_df_comp = st.data_editor(
-                styled_df_comp, 
-                use_container_width=True,
-                column_config={
-                    "🗑️": st.column_config.CheckboxColumn("🗑️", help="Marca para eliminar del reporte y aplica abajo", default=False)
-                }
-            )
+            col_tc1, col_tc2 = st.columns([10, 2])
+            with col_tc1:
+                edited_df_comp = st.data_editor(
+                    styled_df_comp, 
+                    use_container_width=True,
+                    column_config={"🗑️": st.column_config.CheckboxColumn("🗑️", help="Marca y presiona eliminar a la derecha")}
+                )
             
-            # Lógica para eliminar los elementos marcados en el comparativo
-            if edited_df_comp["🗑️"].any():
-                if st.button("🚨 Confirmar Eliminación de Items Seleccionados", type="primary"):
+            with col_tc2:
+                st.write("")
+                st.write("")
+                if st.button("🗑️ Eliminar Marcados", key="del_tab3", type="primary", use_container_width=True):
                     indices_a_mantener = edited_df_comp.index[edited_df_comp["🗑️"] == False].tolist()
                     st.session_state.ofertas_manuales = [st.session_state.ofertas_manuales[i] for i in indices_a_mantener]
                     st.rerun()
             
             col_c1, col_c2 = st.columns(2)
-            with col_c1:
-                st.metric("Total Ofertas Registradas", len(df_comp))
-            with col_c2:
-                monto_acumulado = df_comp["Monto Total Visualizado"].sum()
-                st.metric(f"Monto Total Acumulado ({moneda_vista})", f"$ {monto_acumulado:,.2f}")
+            with col_c1: st.metric("Total Ofertas Registradas", len(df_comp))
+            with col_c2: st.metric(f"Monto Total Acumulado ({moneda_vista})", f"$ {df_comp['Monto Total Visualizado'].sum():,.2f}")
                 
             st.divider()
             st.subheader("📈 Gráficos Comparativos por SOLPED")
-            
             col_graf1, col_graf2 = st.columns(2)
             
             with col_graf1:
                 st.markdown(f"**💰 Comparativa de Monto Total por SOLPED ({moneda_vista})**")
-                df_monto_solped = df_comp.groupby("SOLPED")["Monto Total Visualizado"].sum().reset_index()
-                st.bar_chart(df_monto_solped, x="SOLPED", y="Monto Total Visualizado", height=350)
+                st.bar_chart(df_comp.groupby("SOLPED")["Monto Total Visualizado"].sum().reset_index(), x="SOLPED", y="Monto Total Visualizado", height=350)
                 
             with col_graf2:
                 st.markdown("**⏳ Promedio Días de Entrega por SOLPED**")
-                df_dias_solped = df_comp.groupby("SOLPED")["Días para Entrega"].mean().reset_index()
-                st.bar_chart(df_dias_solped, x="SOLPED", y="Días para Entrega", height=350)
+                st.bar_chart(df_comp.groupby("SOLPED")["Días para Entrega"].mean().reset_index(), x="SOLPED", y="Días para Entrega", height=350)
 
             st.divider()
             st.subheader("📥 Exportar Reportes")
-            st.write("Genera y descarga el informe en tu formato de preferencia:")
-            
-            # Se inyecta la variable de transporte seleccionado al momento de generar archivos
             bytes_excel = generar_excel_estilizado(df_comp, moneda_vista, transporte_reporte)
             bytes_pdf = generar_pdf(df_comp, moneda_vista, transporte_reporte)
             
             col_down1, col_down2, _ = st.columns([1, 1, 2])
-            
             with col_down1:
                 if bytes_excel:
-                    st.download_button(
-                        label="📊 Reporte Excel",
-                        data=bytes_excel,
-                        file_name=f"Reporte_Comparativo_{date.today()}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
-                        type="primary"
-                    )
-                
+                    st.download_button(label="📊 Reporte Excel", data=bytes_excel, file_name=f"Reporte_Comparativo_{date.today()}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, type="primary")
             with col_down2:
                 if bytes_pdf:
-                    st.download_button(
-                        label="📄 Descargar Reporte PDF",
-                        data=bytes_pdf,
-                        file_name=f"Reporte_Comparativo_{date.today()}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
+                    st.download_button(label="📄 Descargar Reporte PDF", data=bytes_pdf, file_name=f"Reporte_Comparativo_{date.today()}.pdf", mime="application/pdf", use_container_width=True)
 
         st.write("")
         if st.button("🗑️ Limpiar TODO el Cuadro Comparativo", use_container_width=False):
