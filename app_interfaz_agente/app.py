@@ -385,8 +385,7 @@ def extraer_materiales_de_masivo(df, id_solped):
             "E001"
         )
 
-        # Si el Dataframe fue cruzado con el histórico, extraerá de las columnas con proveedor histórico
-        proveedor_sugerido = str(get_val(['proveedor', 'vendor', 'prov', 'nam'], ""))
+        proveedor_sugerido = str(get_val(['proveedor', 'vendor', 'prov', 'nam', 'razon social'], ""))
 
         posiciones.append({
             "Pos": int(idx + 1),
@@ -462,43 +461,41 @@ with st.sidebar:
     st.divider()
     
     st.header("📂 Carga de Archivos Base")
-    file_masivo = st.file_uploader("1. Planilla Cuadro Comparativo (SOLPEDs)", type=["xlsx", "xls", "csv", "xlsm"])
-    file_autogestion = st.file_uploader("2. Planilla Autogestión / Históricos (Opcional)", type=["xlsx", "xls", "csv", "xlsm"])
+    file_autogestion = st.file_uploader("1. Plantilla Autogestión (Estructura Ordenada Base)", type=["xlsx", "xls", "csv", "xlsm"])
+    file_cuadro = st.file_uploader("2. Cuadro Comparativo (Datos Brutos / Proveedores e Histórico)", type=["xlsx", "xls", "csv", "xlsm"])
     
     if st.button("Procesar y Unir Archivos", type="primary", use_container_width=True):
-        if file_masivo:
-            df_base = leer_archivo(file_masivo)
-            st.session_state.df_masivo = df_base
-            st.success(f"Planilla Base cargada ({len(df_base)} filas).")
-            
         if file_autogestion:
-            df_hist = leer_archivo(file_autogestion)
-            st.session_state.df_historico = df_hist
-            st.success(f"Planilla Histórica cargada ({len(df_hist)} filas).")
+            df_base = leer_archivo(file_autogestion)
+            st.session_state.df_masivo = df_base
+            st.success(f"Plantilla Base (Autogestión) cargada ({len(df_base)} filas).")
+            
+        if file_cuadro:
+            df_raw_hist = leer_archivo(file_cuadro)
+            st.session_state.df_historico = df_raw_hist
+            st.success(f"Cuadro Comparativo Bruto cargado ({len(df_raw_hist)} filas).")
 
-        # Lógica de Merge (Cruce)
+        # Cruce de información: Enriquecer Autogestión con Cuadro Comparativo
         if st.session_state.df_masivo is not None and st.session_state.df_historico is not None:
-            # Buscar la columna 'Material' en ambas bases
             col_mat_base = next((c for c in st.session_state.df_masivo.columns if 'material' in str(c).lower()), None)
             col_mat_hist = next((c for c in st.session_state.df_historico.columns if 'material' in str(c).lower()), None)
             
             if col_mat_base and col_mat_hist:
-                # Asegurar de que la columna material tenga el mismo formato (str)
                 st.session_state.df_masivo[col_mat_base] = st.session_state.df_masivo[col_mat_base].astype(str).str.strip()
                 st.session_state.df_historico[col_mat_hist] = st.session_state.df_historico[col_mat_hist].astype(str).str.strip()
 
-                # Desduplicar el histórico para no multiplicar los ítems de la SOLPED al cruzar
+                # Desduplicar el histórico para evitar repeticiones accidentales al hacer el Join
                 df_hist_unique = st.session_state.df_historico.drop_duplicates(subset=[col_mat_hist], keep='first')
                 
-                # Realizar Left Join
-                df_merged = pd.merge(st.session_state.df_masivo, df_hist_unique, left_on=col_mat_base, right_on=col_mat_hist, how='left', suffixes=('', '_Histórico'))
+                # Unir datos brutos de proveedores e histórico a la plantilla estructurada
+                df_merged = pd.merge(st.session_state.df_masivo, df_hist_unique, left_on=col_mat_base, right_on=col_mat_hist, how='left', suffixes=('', '_Bruto'))
                 st.session_state.df_masivo = df_merged
-                st.success("✅ Archivos unidos y enriquecidos mediante la columna 'Material'.")
+                st.success("✅ Datos brutos de proveedores e histórico integrados en la estructura ordenada.")
             else:
-                st.warning("No se encontró la columna 'Material' en alguno de los archivos para realizar el cruce.")
+                st.warning("No se encontró la columna 'Material' en ambas planillas para realizar el cruce.")
 
 if st.session_state.df_masivo is not None:
-    with st.expander("👀 Vista Previa de la Base de Datos Activa", expanded=False):
+    with st.expander("👀 Vista Previa de la Base Integrada", expanded=False):
         st.dataframe(st.session_state.df_masivo, use_container_width=True)
 
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
@@ -511,7 +508,7 @@ with tabs[0]:
     
     col_input, col_btn = st.columns([3, 1])
     with col_input:
-        solped_id = st.text_input("Buscar ID SOLPED en la planilla:", placeholder="Ej: PR151762")
+        solped_id = st.text_input("Buscar ID SOLPED en la plantilla:", placeholder="Ej: PR151762")
     with col_btn:
         st.write("")
         st.write("")
@@ -526,7 +523,7 @@ with tabs[0]:
             else:
                 st.warning(f"No se encontraron registros para la SOLPED '{solped_id}'.")
         else:
-            st.info("Carga la planilla en el menú lateral y haz clic en Procesar.")
+            st.info("Carga las planillas en el menú lateral y haz clic en Procesar.")
 
     key_lista = f"lista_solped_{solped_id}" if (solped_id and f"lista_solped_{solped_id}" in st.session_state) else "lista_solped_default"
 
@@ -616,7 +613,7 @@ with tabs[1]:
                 st.session_state["manual_items_list"] = mats
                 st.success(f"Materiales cargados automáticamente desde la SOLPED {manual_solped}")
             else: st.warning(f"No se encontró la SOLPED {manual_solped}.")
-        else: st.info("Sube una planilla en la barra lateral.")
+        else: st.info("Sube las planillas en la barra lateral.")
 
     if "manual_items_list" not in st.session_state:
         st.session_state["manual_items_list"] = [{
