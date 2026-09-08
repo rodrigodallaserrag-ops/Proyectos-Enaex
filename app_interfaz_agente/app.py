@@ -492,7 +492,12 @@ with tabs[0]:
                 col_title, col_del = st.columns([8, 2])
                 with col_title:
                     st.markdown(f"### Pos {item['Pos']}: {item['Material']}")
-                    st.caption(f"**Centro:** {item['Centro']} | **UM Original:** {item['UM']}")
+                    # Reemplazo de st.caption por markdown con forzado de no-truncamiento
+                    st.markdown(
+                        f"<div style='color: #8C8C8C; font-size: 0.9em; white-space: pre-wrap; word-break: break-word; padding-bottom: 10px;'>"
+                        f"<b>Centro:</b> {item['Centro']} | <b>UM Original:</b> {item['UM']}</div>", 
+                        unsafe_allow_html=True
+                    )
                 with col_del:
                     if st.button("🗑️ Eliminar", key=f"btn_del_t1_{idx}", type="primary", use_container_width=True):
                         idx_a_eliminar = idx
