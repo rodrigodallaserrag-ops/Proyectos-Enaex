@@ -38,7 +38,7 @@ st.markdown("""
 def obtener_indicadores_tiempo_real():
     valores_defecto = {"USD": 950.0, "EUR": 1020.0, "UF": 38000.0, "estado": False}
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
 
     try:
@@ -288,7 +288,6 @@ def procesar_y_reparar_planilla(df):
             primer_col = df.columns[0]
             df = df[df[primer_col].astype(str).str.strip() != str(primer_col).strip()].reset_index(drop=True)
 
-    # Optimización vectorizada de nombres de columnas sin bucles pesados
     nuevos_nombres = {}
     for col in df.columns:
         col_str = str(col).strip()
@@ -359,11 +358,9 @@ def extraer_materiales_de_masivo(df, id_solped):
                         val_str = str(val).strip()
                         if val_str != "" and val_str.lower() not in ["nan", "none", "null"]:
                             candidates.append(val_str)
-            if not candidates:
-                return default
+            if not candidates: return default
             sin_truncar = [c for c in candidates if '...' not in c and '…' not in c]
-            if sin_truncar:
-                return max(sin_truncar, key=len)
+            if sin_truncar: return max(sin_truncar, key=len)
             return max(candidates, key=len)
 
         def clean_num(val, default=0.0):
@@ -376,25 +373,9 @@ def extraer_materiales_de_masivo(df, id_solped):
                 return float(s)
             except: return default
 
-        mat_desc = get_val(
-            ['texto breve de material', 'texto breve', 'denominación del material', 'denominacion del material', 
-             'descripción del material', 'descripcion del material', 'descripción', 'descripcion', 
-             'denominacion', 'denominación', 'material', 'texto', 'item', 'artículo', 'articulo', 'breve'],
-            f"Material {idx+1}"
-        )
-
-        centro_desc = get_val(
-            ['nombre centro', 'nombre del centro', 'denominación centro', 'denominacion centro', 
-             'descripción centro', 'descripcion centro', 'texto centro', 'centro', 'plant', 'almacen', 'alm'],
-            "E001"
-        )
-
-        proveedor_sugerido = str(get_val([
-            'proveedor', 'vendor', 'prov', 'nam', 'razon social', 'acreedor',
-            'nombre proveedor', 'nombre_proveedor', 'nom_prov', 'lifnr',
-            'nombre del proveedor', 'supplier', 'nombre', 'distribuidor'
-        ], ""))
-
+        mat_desc = get_val(['texto breve de material', 'texto breve', 'denominación del material', 'denominacion del material', 'descripción del material', 'descripcion del material', 'descripción', 'descripcion', 'denominacion', 'denominación', 'material', 'texto', 'item', 'artículo', 'articulo', 'breve'], f"Material {idx+1}")
+        centro_desc = get_val(['nombre centro', 'nombre del centro', 'denominación centro', 'denominacion centro', 'descripción centro', 'descripcion centro', 'texto centro', 'centro', 'plant', 'almacen', 'alm'], "E001")
+        proveedor_sugerido = str(get_val(['proveedor', 'vendor', 'prov', 'nam', 'razon social', 'acreedor', 'nombre proveedor', 'nombre_proveedor', 'nom_prov', 'lifnr', 'nombre del proveedor', 'supplier', 'nombre', 'distribuidor'], ""))
         cant_raw = clean_num(get_val(['cant', 'cantidad', 'ctd'], 1.0), 1.0)
         cant_clean = int(cant_raw) if float(cant_raw).is_integer() else cant_raw
 
@@ -432,24 +413,35 @@ def convertir_moneda(monto, moneda_origen, tc_usd, tc_uf, tc_eur):
     eur = clp / tc_eur if tc_eur > 0 else 0.0
     return clp, usd, eur
 
-@st.cache_data(show_spinner="Procesando planilla Excel en segundo plano...")
+@st.cache_data(show_spinner="Procesando archivo inteligentemente...")
 def leer_archivo_cached(file_bytes, file_name):
     try:
         if file_name.endswith(".csv"): 
             df_raw = pd.read_csv(io.BytesIO(file_bytes))
         else:
-            # Carga optimizada: lee únicamente la primera hoja activa para evitar bloqueos con archivos >20MB
-            try:
-                df_raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name=0, engine='openpyxl')
-            except Exception:
-                dict_dfs = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None, engine='openpyxl')
-                df_raw = pd.concat(dict_dfs.values(), ignore_index=True)
+            xls = pd.ExcelFile(io.BytesIO(file_bytes), engine='openpyxl')
+            df_raw = pd.DataFrame()
+            
+            # Motor de búsqueda inteligente para saltar hojas dinámicas o dashboards
+            nombres_relevantes = [s for s in xls.sheet_names if any(k in s.lower() for k in ['base', 'dato', 'detalle', 'solped', 'cuadro', 'mat', 'reporte'])]
+            orden_busqueda = nombres_relevantes + [s for s in xls.sheet_names if s not in nombres_relevantes]
+            
+            for sheet in orden_busqueda:
+                df_tmp = pd.read_excel(xls, sheet_name=sheet)
+                if len(df_tmp.dropna(how='all')) > 10:  # Si la hoja tiene más de 10 datos reales, se asume que es la correcta
+                    df_raw = df_tmp
+                    break
+                    
+            if df_raw.empty:
+                df_raw = pd.read_excel(xls, sheet_name=xls.sheet_names[0])
             
         df_clean = df_raw.dropna(axis=1, how='all').dropna(axis=0, how='all')
         df_procesado = procesar_y_reparar_planilla(df_clean)
+        
         if df_procesado is not None and not df_procesado.empty:
             df_procesado['cantidad_nulos'] = df_procesado.isnull().sum(axis=1)
             df_procesado = df_procesado.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
+            
         return df_procesado
     except Exception as e:
         st.error(f"Error al leer el archivo {file_name}: {e}")
@@ -507,7 +499,6 @@ with st.sidebar:
             if df_raw_hist is not None:
                 st.success(f"Cuadro Comparativo Bruto / Histórico cargado ({len(df_raw_hist)} filas).")
 
-        # Cruce de información
         if st.session_state.df_masivo is not None and st.session_state.df_historico is not None:
             col_mat_base = next((c for c in st.session_state.df_masivo.columns if 'material' in str(c).lower()), None)
             col_mat_hist = next((c for c in st.session_state.df_historico.columns if 'material' in str(c).lower()), None)
