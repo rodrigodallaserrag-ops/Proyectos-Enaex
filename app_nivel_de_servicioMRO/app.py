@@ -1,8 +1,6 @@
 """
 Streamlit - Cuadro Comparativo y Planilla de Gestión
 Gestión multimoneda (Material + Transporte) y tarjetas de evaluación SOLPED.
-
-Correr local: streamlit run app.py
 """
 import pandas as pd
 import numpy as np
@@ -224,15 +222,16 @@ with tab_planilla:
     if archivo_ofertas and 'df_procesado' in locals():
         df_gestion = df_procesado.copy()
         
-        # Búsqueda inteligente de columnas del Excel inyectado
+        # Búsqueda inteligente de columnas
         col_desc = encontrar_columna(df_gestion, ["Descripción", "Material", "Texto breve", "Texto de material", "Detalle"])
         col_cant = encontrar_columna(df_gestion, ["Cantidad", "Cant", "CANTIDAD", "Cant."])
         col_prov = encontrar_columna(df_gestion, ["Proveedor", "Licitante", "Nombre Proveedor"])
         col_precio_mat = encontrar_columna(df_gestion, ["Valor neto de pedido", "Valor unitario", "Precio Material", "Precio Unitario", "Precio Neto"])
         col_moneda_mat = encontrar_columna(df_gestion, ["Moneda", "Moneda Material", "CM"])
         col_precio_trans = encontrar_columna(df_gestion, ["Precio Transporte", "Valor Flete", "Flete", "Transporte", "Envio", "Costo Envio", "Costo Transporte"])
-
-        st.caption("Ajusta los valores inyectados o modifica manualmente el **Costo Transporte**. El Total se actualizará en tiempo real.")
+        
+        # Nueva búsqueda para el centro
+        col_centro = encontrar_columna(df_gestion, ["Centro", "Planta", "Ubicación"])
 
         for idx, row in df_gestion.iterrows():
             pos_num = (idx + 1) * 10
@@ -242,19 +241,23 @@ with tab_planilla:
             moneda_val = str(row[col_moneda_mat]) if col_moneda_mat and pd.notna(row[col_moneda_mat]) else "CLP"
             prov_val = str(row[col_prov]) if col_prov and pd.notna(row[col_prov]) else "Proveedor Desconocido"
             costo_transporte_inyectado = float(row[col_precio_trans]) if col_precio_trans and pd.notna(row[col_precio_trans]) else 0.0
+            
+            # Formateo completo del Centro
+            centro_val = str(row[col_centro]) if col_centro and pd.notna(row[col_centro]) else "E024 (Planta Rinconada)"
 
             # Tarjeta de Evaluación SOLPED
             with st.container(border=True):
-                # Encabezado idéntico a la imagen subida
-                col_header, col_del = st.columns([5, 1])
+                # Encabezado (ahora con la descripción del centro completa)
+                col_header, col_del = st.columns([6, 1])
                 with col_header:
                     st.markdown(f"### SOLPED: 2026-02-20 10:08:00 | Pos {pos_num}: {desc_val}")
-                    st.caption("Centro: E024 (Planta Ri... | UM Original: 2023-02-13 00:00:00")
+                    st.caption(f"Centro: {centro_val} | UM Original: 2023-02-13 00:00:00")
                 with col_del:
                     st.button("🗑️ Eliminar", key=f"del_{idx}")
 
-                # Fila 1: Cantidad, Precio Unitario, Moneda, Proveedor, Incoterm, Fecha Entrega
-                c1, c2, c3, c4, c5, c6 = st.columns([1.2, 1.8, 1.2, 2.5, 1.5, 1.8])
+                # 7 Columnas: Añadido explicitamente Costo Transp. en la misma fila para visualización directa
+                c1, c2, c3, c4, c5, c6, c7 = st.columns([1.0, 1.8, 1.2, 2.2, 1.2, 1.6, 1.5])
+                
                 with c1:
                     cant = st.number_input("Cantidad", value=cant_val, min_value=0.0, step=1.0, key=f"cant_{idx}")
                 with c2:
@@ -266,25 +269,14 @@ with tab_planilla:
                 with c5:
                     incoterm = st.selectbox("Transporte", ["EXW", "DDP", "FOB", "CIF", "CPT"], key=f"inco_{idx}")
                 with c6:
+                    # NUEVA COLUMNA VISIBLE PARA COSTO TRANSPORTE
+                    costo_transporte = st.number_input("Costo Transp.", value=costo_transporte_inyectado, step=1000.0, key=f"ct_{idx}")
+                with c7:
                     fecha = st.date_input("Fecha Entrega", key=f"fecha_{idx}")
 
-                # Fila 2: IMPLEMENTACIÓN DE COSTO TRANSPORTE Y TOTAL
-                c_trans, c_tot = st.columns([3, 3])
-                with c_trans:
-                    # NUEVO CAMPO SOLICITADO: Costo de Transporte editable
-                    costo_transporte = st.number_input(
-                        "Costo Transporte ($)",
-                        value=costo_transporte_inyectado,
-                        min_value=0.0,
-                        step=1000.0,
-                        help="Ingresa o modifica el costo de envío/flete para esta posición.",
-                        key=f"costo_transporte_{idx}"
-                    )
-                with c_tot:
-                    # Cálculo automático del Total Final
-                    monto_total_pos = (cant * pu) + costo_transporte
-                    st.markdown(f"**Total Posición ({moneda})**")
-                    st.subheader(f"{monto_total_pos:,.2f}")
+                # Sección Inferior: Cálculo de Totales actualizado en vivo
+                monto_total_pos = (cant * pu) + costo_transporte
+                st.info(f"**Total Calculado ({moneda}):** {monto_total_pos:,.2f} *(Subtotal: {(cant*pu):,.2f} + Transporte: {costo_transporte:,.2f})*")
 
     else:
         st.info("Carga la planilla de ofertas (.xlsx) en la barra lateral para visualizar las tarjetas de evaluación SOLPED.")
