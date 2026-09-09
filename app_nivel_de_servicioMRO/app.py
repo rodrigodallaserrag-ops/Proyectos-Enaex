@@ -1,6 +1,6 @@
 """
 Streamlit - Cuadro Comparativo y Planilla de Gestión
-Gestión multimoneda (Material + Coste de Envío/Transporte) y análisis comparativo.
+Gestión multimoneda (Material + Transporte) y análisis comparativo.
 
 Correr local: streamlit run app.py
 """
@@ -15,8 +15,8 @@ st.set_page_config(page_title="Cuadro Comparativo y Planilla de Gestión", layou
 # ==============================================================================
 def convertir_a_moneda_base(monto, moneda_origen, moneda_destino="USD", usd_clp=950.0, eur_clp=1020.0):
     """
-    Convierte un monto desde su moneda de origen a una moneda de destino unificada
-    utilizando CLP como divisa puente. Soporta CLP, USD y EUR.
+    Convierte un monto desde su moneda de origen a una moneda de destino unificada.
+    Soporta CLP, USD y EUR.
     """
     if pd.isna(monto) or monto == 0:
         return 0.0
@@ -44,36 +44,39 @@ def convertir_a_moneda_base(monto, moneda_origen, moneda_destino="USD", usd_clp=
     
     return monto_clp
 
+def encontrar_columna(df, posibles_nombres):
+    """Busca coincidencias de nombres de columnas ignorando mayúsculas/minúsculas."""
+    for col in df.columns:
+        if str(col).strip().lower() in [n.lower() for n in posibles_nombres]:
+            return col
+    return None
+
 def aplicar_conversion_multimoneda(df, moneda_base, tasa_usd_clp, tasa_eur_clp):
     """
-    Detecta automáticamente montos y monedas de Material y Transporte/Coste de Envío
-    de forma independiente y calcula sus equivalentes en la Moneda Base seleccionada.
+    Detecta automáticamente montos y monedas de Material y Transporte de forma independiente
+    y calcula sus equivalentes en la Moneda Base seleccionada.
     """
     df = df.copy()
     
-    # 1. Detección flexible de columnas de Material
-    col_precio_mat = next((c for c in [
-        "Valor neto de pedido", "Valor unitario", "Precio Material", 
-        "Precio Unitario", "Precio Neto", "Valor Material", "Precio"
-    ] if c in df.columns), None)
+    # 1. Identificación de columnas de Material
+    nombres_precio_mat = ["Valor neto de pedido", "Valor unitario", "Precio Material", "Precio Unitario", "Precio Neto", "Valor Material"]
+    col_precio_mat = encontrar_columna(df, nombres_precio_mat)
     
-    col_moneda_mat = next((c for c in [
-        "Moneda", "Moneda Material", "Moneda Mat", "Moneda Materiales"
-    ] if c in df.columns), None)
+    nombres_moneda_mat = ["Moneda", "Moneda Material", "Moneda Mat", "CM"]
+    col_moneda_mat = encontrar_columna(df, nombres_moneda_mat)
     
-    # 2. Detección flexible de columnas de Transporte / Coste de Envío
-    col_precio_trans = next((c for c in [
-        "Coste de Envio", "Coste de Envío", "Costo Envio", "Costo Envío", 
-        "Precio Transporte", "Valor Flete", "Flete", "Transporte", "Precio Flete", 
-        "Costo Transporte", "Coste Transporte", "Envio", "Envío"
-    ] if c in df.columns), None)
+    # 2. Identificación de columnas de Transporte / Flete / Envío
+    nombres_precio_trans = [
+        "Precio Transporte", "Precio de Transporte", "Valor Flete", "Flete", 
+        "Transporte", "Precio Flete", "Envio", "Envío", "Costo Envio", 
+        "Coste de Envio", "Transporte Costo", "Costo Transporte"
+    ]
+    col_precio_trans = encontrar_columna(df, nombres_precio_trans)
     
-    col_moneda_trans = next((c for c in [
-        "Moneda Transporte", "Moneda Flete", "Moneda Trans", 
-        "Moneda Envio", "Moneda Envío", "Moneda Costo Envio"
-    ] if c in df.columns), None)
+    nombres_moneda_trans = ["Moneda Transporte", "Moneda Flete", "Moneda Trans", "Moneda Envio"]
+    col_moneda_trans = encontrar_columna(df, nombres_moneda_trans)
     
-    # --- Conversión de Materiales ---
+    # --- Conversión Material ---
     if col_precio_mat:
         monedas_mat = df[col_moneda_mat] if col_moneda_mat else "CLP"
         df["Monto Material (Base)"] = [
@@ -83,21 +86,20 @@ def aplicar_conversion_multimoneda(df, moneda_base, tasa_usd_clp, tasa_eur_clp):
     else:
         df["Monto Material (Base)"] = 0.0
 
-    # --- Conversión de Transporte / Coste de Envío ---
+    # --- Conversión Transporte ---
     if col_precio_trans:
-        # Si no existe columna específica de moneda de transporte, intenta usar la general o CLP por defecto
+        # Si no hay columna de moneda específica para transporte, hereda la del material o asume CLP
         monedas_trans = df[col_moneda_trans] if col_moneda_trans else (df[col_moneda_mat] if col_moneda_mat else "CLP")
-        df["Coste de Envío (Base)"] = [
+        df["Monto Transporte (Base)"] = [
             convertir_a_moneda_base(p, m, moneda_base, tasa_usd_clp, tasa_eur_clp)
             for p, m in zip(df[col_precio_trans].fillna(0), monedas_trans)
         ]
     else:
-        df["Coste de Envío (Base)"] = 0.0
+        df["Monto Transporte (Base)"] = 0.0
 
     # Total Consolidado en Moneda Base
-    df["Monto Total Consolidado (Base)"] = df["Monto Material (Base)"] + df["Coste de Envío (Base)"]
-    df["Moneda Base Unificada"] = moneda_base
-    
+    df["Monto Total (Base)"] = df["Monto Material (Base)"] + df["Monto Transporte (Base)"]
+    df["Moneda Base"] = moneda_base
     return df
 
 # ==============================================================================
@@ -260,7 +262,7 @@ with st.sidebar:
     tasa_eur_clp = st.number_input("Tasa EUR / CLP", value=1020.0, step=1.0)
 
 # ---- Pestañas Principales ----
-tab_comparativo, tab_planilla = st.tabs(["⚖️ Cuadro Comparativo", "📝 Planilla de Gestión"])
+tab_comparativo, tab_planilla = st.tabs(["⚖️ Cuadro Comparativo", "📝 Evaluación SOLPED"])
 
 # ==============================================================================
 # PESTAÑA 1: CUADRO COMPARATIVO
@@ -273,38 +275,39 @@ with tab_comparativo:
             df_raw = pd.read_excel(archivo_ofertas)
             df_procesado = aplicar_conversion_multimoneda(df_raw, moneda_base, tasa_usd_clp, tasa_eur_clp)
             
-            # Métricas consolidadas
+            # Métricas rápidas consolidando en Moneda Base
             total_mat = df_procesado["Monto Material (Base)"].sum()
-            total_trans = df_procesado["Coste de Envío (Base)"].sum()
-            total_gen = df_procesado["Monto Total Consolidado (Base)"].sum()
+            total_trans = df_procesado["Monto Transporte (Base)"].sum()
+            total_gen = df_procesado["Monto Total (Base)"].sum()
             
             m1, m2, m3 = st.columns(3)
             m1.metric(f"Total Materiales ({moneda_base})", f"{total_mat:,.2f}")
-            m2.metric(f"Total Transporte / Envío ({moneda_base})", f"{total_trans:,.2f}")
+            m2.metric(f"Total Transporte/Envío ({moneda_base})", f"{total_trans:,.2f}")
             m3.metric(f"Monto Total Consolidado ({moneda_base})", f"{total_gen:,.2f}")
             
             st.divider()
             
-            st.markdown(f"### 📋 Cuadro Comparativo Integrado ({moneda_base})")
+            # Altura fija para habilitar scroll vertical interno
             st.dataframe(
                 df_procesado,
                 use_container_width=True,
+                height=600, 
                 column_config={
                     "Monto Material (Base)": st.column_config.NumberColumn(f"Costo Material ({moneda_base})", format="%.2f"),
-                    "Coste de Envío (Base)": st.column_config.NumberColumn(f"Coste de Envío / Flete ({moneda_base})", format="%.2f"),
-                    "Monto Total Consolidado (Base)": st.column_config.NumberColumn(f"Total Final ({moneda_base})", format="%.2f"),
+                    "Monto Transporte (Base)": st.column_config.NumberColumn(f"Precio Transporte ({moneda_base})", format="%.2f"),
+                    "Monto Total (Base)": st.column_config.NumberColumn(f"Total Final ({moneda_base})", format="%.2f"),
                 }
             )
         except Exception as e:
             st.error(f"Error al procesar el archivo: {e}")
     else:
-        st.info("Sube una planilla Excel en la barra lateral para calcular y comparar costos de materiales y envío.")
+        st.info("Sube una planilla Excel en la barra lateral para procesar los costos de materiales y transporte.")
 
 # ==============================================================================
-# PESTAÑA 2: PLANILLA DE GESTIÓN
+# PESTAÑA 2: PLANILLA DE GESTIÓN (EVALUACIÓN SOLPED)
 # ==============================================================================
 with tab_planilla:
-    st.subheader("Seguimiento y Control de Adjudicaciones")
+    st.subheader("Seguimiento y Control de Adjudicaciones (SOLPED)")
     
     if archivo_ofertas and 'df_procesado' in locals():
         df_gestion = df_procesado.copy()
@@ -317,6 +320,7 @@ with tab_planilla:
         detalle_editado = st.data_editor(
             df_gestion,
             use_container_width=True,
+            height=600,
             num_rows="dynamic",
             key="editor_gestion",
             column_config={
@@ -326,9 +330,9 @@ with tab_planilla:
                     required=True
                 ),
                 "Comentarios": st.column_config.TextColumn("Comentarios del Comprador", width="large"),
-                "Monto Material (Base)": st.column_config.NumberColumn(f"Material ({moneda_base})", format="%.2f"),
-                "Coste de Envío (Base)": st.column_config.NumberColumn(f"Coste Envío ({moneda_base})", format="%.2f"),
-                "Monto Total Consolidado (Base)": st.column_config.NumberColumn(f"Total Consolidado ({moneda_base})", format="%.2f"),
+                "Monto Material (Base)": st.column_config.NumberColumn(f"Costo Material ({moneda_base})", format="%.2f"),
+                "Monto Transporte (Base)": st.column_config.NumberColumn(f"Precio Transporte ({moneda_base})", format="%.2f"),
+                "Monto Total (Base)": st.column_config.NumberColumn(f"Total ({moneda_base})", format="%.2f"),
             },
             disabled=[c for c in df_gestion.columns if c not in ["Estado Adjudicación", "Comentarios"]]
         )
