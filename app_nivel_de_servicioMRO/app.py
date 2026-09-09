@@ -1,12 +1,24 @@
 """
-Streamlit - Cuadro Comparativo y Planilla de Gestión
-Gestión multimoneda (Material + Transporte) y tarjetas de evaluación SOLPED.
+Streamlit - Cuadro Comparativo Integrado y Planilla de Gestión SOLPED
+Gestión multimoneda reactiva con persistencia de estado para Costo Transporte y Carga Manual.
+
+Correr local: streamlit run app.py
 """
 import pandas as pd
 import numpy as np
 import streamlit as st
+from datetime import date
 
 st.set_page_config(page_title="Cuadro Comparativo y Planilla de Gestión", layout="wide")
+
+# ==============================================================================
+# ESTADO GLOBAL DE SESIÓN (SESSION STATE)
+# ==============================================================================
+if "items_data" not in st.session_state:
+    st.session_state["items_data"] = []
+
+if "uploaded_file_name" not in st.session_state:
+    st.session_state["uploaded_file_name"] = None
 
 # ==============================================================================
 # FUNCIONES AUXILIARES DE CONVERSIÓN DE MONEDA
@@ -43,46 +55,33 @@ def encontrar_columna(df, posibles_nombres):
             return col
     return None
 
-def aplicar_conversion_multimoneda(df, moneda_base, tasa_usd_clp, tasa_eur_clp):
-    df = df.copy()
-    
-    nombres_precio_mat = ["Valor neto de pedido", "Valor unitario", "Precio Material", "Precio Unitario", "Precio Neto", "Valor Material"]
-    col_precio_mat = encontrar_columna(df, nombres_precio_mat)
-    
-    nombres_moneda_mat = ["Moneda", "Moneda Material", "Moneda Mat", "CM"]
-    col_moneda_mat = encontrar_columna(df, nombres_moneda_mat)
-    
-    nombres_precio_trans = [
-        "Precio Transporte", "Precio de Transporte", "Valor Flete", "Flete", 
-        "Transporte", "Precio Flete", "Envio", "Envío", "Costo Envio", 
-        "Coste de Envio", "Transporte Costo", "Costo Transporte"
-    ]
-    col_precio_trans = encontrar_columna(df, nombres_precio_trans)
-    
-    nombres_moneda_trans = ["Moneda Transporte", "Moneda Flete", "Moneda Trans", "Moneda Envio"]
-    col_moneda_trans = encontrar_columna(df, nombres_moneda_trans)
-    
-    if col_precio_mat:
-        monedas_mat = df[col_moneda_mat] if col_moneda_mat else "CLP"
-        df["Monto Material (Base)"] = [
-            convertir_a_moneda_base(p, m, moneda_base, tasa_usd_clp, tasa_eur_clp)
-            for p, m in zip(df[col_precio_mat].fillna(0), monedas_mat)
-        ]
-    else:
-        df["Monto Material (Base)"] = 0.0
+def cargar_excel_a_state(archivo):
+    """Parsea el archivo Excel cargado y lo inyecta en el estado global."""
+    df_raw = pd.read_excel(archivo)
+    col_desc = encontrar_columna(df_raw, ["Descripción", "Material", "Texto breve", "Texto de material", "Detalle"])
+    col_cant = encontrar_columna(df_raw, ["Cantidad", "Cant", "CANTIDAD", "Cant."])
+    col_prov = encontrar_columna(df_raw, ["Proveedor", "Licitante", "Nombre Proveedor"])
+    col_precio_mat = encontrar_columna(df_raw, ["Valor neto de pedido", "Valor unitario", "Precio Material", "Precio Unitario", "Precio Neto"])
+    col_moneda_mat = encontrar_columna(df_raw, ["Moneda", "Moneda Material", "CM"])
+    col_precio_trans = encontrar_columna(df_raw, ["Precio Transporte", "Valor Flete", "Flete", "Transporte", "Envio", "Costo Envio", "Costo Transporte"])
+    col_centro = encontrar_columna(df_raw, ["Centro", "Planta", "Ubicación"])
 
-    if col_precio_trans:
-        monedas_trans = df[col_moneda_trans] if col_moneda_trans else (df[col_moneda_mat] if col_moneda_mat else "CLP")
-        df["Monto Transporte (Base)"] = [
-            convertir_a_moneda_base(p, m, moneda_base, tasa_usd_clp, tasa_eur_clp)
-            for p, m in zip(df[col_precio_trans].fillna(0), monedas_trans)
-        ]
-    else:
-        df["Monto Transporte (Base)"] = 0.0
-
-    df["Monto Total (Base)"] = df["Monto Material (Base)"] + df["Monto Transporte (Base)"]
-    df["Moneda Base"] = moneda_base
-    return df
+    items = []
+    for idx, row in df_raw.iterrows():
+        pos_num = (idx + 1) * 10
+        items.append({
+            "posicion": pos_num,
+            "descripcion": str(row[col_desc]) if col_desc and pd.notna(row[col_desc]) else f"POSICIÓN {pos_num}",
+            "centro": str(row[col_centro]) if col_centro and pd.notna(row[col_centro]) else "E024 (Planta Rinconada)",
+            "cantidad": float(row[col_cant]) if col_cant and pd.notna(row[col_cant]) else 1.0,
+            "precio_unitario": float(row[col_precio_mat]) if col_precio_mat and pd.notna(row[col_precio_mat]) else 0.0,
+            "moneda": str(row[col_moneda_mat]).upper().strip() if col_moneda_mat and pd.notna(row[col_moneda_mat]) else "CLP",
+            "proveedor": str(row[col_prov]) if col_prov and pd.notna(row[col_prov]) else "Proveedor Desconocido",
+            "incoterm": "EXW",
+            "costo_transporte": float(row[col_precio_trans]) if col_precio_trans and pd.notna(row[col_precio_trans]) else 0.0,
+            "fecha_entrega": date.today()
+        })
+    st.session_state["items_data"] = items
 
 # ==============================================================================
 # CONFIGURACIÓN TEMA (CLARO PREDETERMINADO / OSCURO)
@@ -160,7 +159,7 @@ if "app_password" in st.secrets:
         st.stop()
 
 # ==============================================================================
-# INTERFAZ PRINCIPAL
+# INTERFAZ PRINCIPAL Y BARRA LATERAL
 # ==============================================================================
 st.title("📊 Cuadro Comparativo y Planilla de Gestión")
 
@@ -168,115 +167,190 @@ with st.sidebar:
     st.header("⚙️ Configuración de Datos")
     archivo_ofertas = st.file_uploader("Subir matriz de ofertas (.xlsx)", type=["xlsx"])
     
+    if archivo_ofertas is not None:
+        if st.session_state["uploaded_file_name"] != archivo_ofertas.name:
+            st.session_state["uploaded_file_name"] = archivo_ofertas.name
+            cargar_excel_a_state(archivo_ofertas)
+            st.success("Planilla Excel cargada correctamente.")
+
     st.divider()
     st.header("💱 Conversión Multimoneda")
     moneda_base = st.selectbox("Moneda Consolidada Base", ["USD", "CLP", "EUR"], index=0)
     tasa_usd_clp = st.number_input("Tasa USD / CLP", value=950.0, step=1.0)
     tasa_eur_clp = st.number_input("Tasa EUR / CLP", value=1020.0, step=1.0)
 
-tab_comparativo, tab_planilla = st.tabs(["⚖️ Cuadro Comparativo", "📝 Evaluación SOLPED"])
+# ==============================================================================
+# SECCIÓN: CARGA MANUAL / DIRECTA
+# ==============================================================================
+with st.expander("➕ Carga Manual / Directa de Posición SOLPED", expanded=False):
+    with st.form("form_carga_manual", clear_on_submit=True):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            man_pos = st.number_input("Posición", value=10, step=10)
+            man_desc = st.text_input("Descripción Material", value="PARTIDOR SUAVE ABB 16A")
+            man_centro = st.text_input("Centro / Planta", value="E024 (Planta Rinconada)")
+        with col2:
+            man_cant = st.number_input("Cantidad", value=1.0, step=1.0)
+            man_pu = st.number_input("Precio Unitario", value=283000.0, step=1000.0)
+            man_moneda = st.selectbox("Moneda", ["CLP", "USD", "EUR"])
+        with col3:
+            man_prov = st.text_input("Proveedor", value="AUTOMATION BUSS")
+            man_inco = st.selectbox("Incoterm / Transporte", ["EXW", "DDP", "FOB", "CIF", "CPT"])
+            man_costo_trans = st.number_input("Costo Transporte ($)", value=109000.0, step=1000.0, help="Ejemplo: 109.000 CLP")
+            man_fecha = st.date_input("Fecha Entrega", value=date.today())
+        
+        btn_add = st.form_submit_button("➕ Agregar Posición a Evaluación")
+        if btn_add:
+            st.session_state["items_data"].append({
+                "posicion": man_pos,
+                "descripcion": man_desc,
+                "centro": man_centro,
+                "cantidad": man_cant,
+                "precio_unitario": man_pu,
+                "moneda": man_moneda,
+                "proveedor": man_prov,
+                "incoterm": man_inco,
+                "costo_transporte": man_costo_trans,
+                "fecha_entrega": man_fecha
+            })
+            st.success(f"Posición {man_pos} agregada correctamente con Costo Transporte de ${man_costo_trans:,.0f}.")
+            st.rerun()
 
 # ==============================================================================
-# PESTAÑA 1: CUADRO COMPARATIVO
+# PESTAÑAS PRINCIPALES
 # ==============================================================================
-with tab_comparativo:
-    st.subheader("Análisis de Ofertas y Proveedores")
-    
-    if archivo_ofertas:
-        try:
-            df_raw = pd.read_excel(archivo_ofertas)
-            df_procesado = aplicar_conversion_multimoneda(df_raw, moneda_base, tasa_usd_clp, tasa_eur_clp)
-            
-            total_mat = df_procesado["Monto Material (Base)"].sum()
-            total_trans = df_procesado["Monto Transporte (Base)"].sum()
-            total_gen = df_procesado["Monto Total (Base)"].sum()
-            
-            m1, m2, m3 = st.columns(3)
-            m1.metric(f"Total Materiales ({moneda_base})", f"{total_mat:,.2f}")
-            m2.metric(f"Total Transporte/Envío ({moneda_base})", f"{total_trans:,.2f}")
-            m3.metric(f"Monto Total Consolidado ({moneda_base})", f"{total_gen:,.2f}")
-            
-            st.divider()
-            
-            st.dataframe(
-                df_procesado,
-                use_container_width=True,
-                height=600, 
-                column_config={
-                    "Monto Material (Base)": st.column_config.NumberColumn(f"Costo Material ({moneda_base})", format="%.2f"),
-                    "Monto Transporte (Base)": st.column_config.NumberColumn(f"Precio Transporte ({moneda_base})", format="%.2f"),
-                    "Monto Total (Base)": st.column_config.NumberColumn(f"Total Final ({moneda_base})", format="%.2f"),
-                }
-            )
-        except Exception as e:
-            st.error(f"Error al procesar el archivo: {e}")
-    else:
-        st.info("Sube una planilla Excel en la barra lateral para procesar los costos de materiales y transporte.")
+tab_planilla, tab_comparativo = st.tabs(["📝 Evaluación SOLPED", "📊 Cuadro Comparativo Integrado"])
 
-# ==============================================================================
-# PESTAÑA 2: EVALUACIÓN SOLPED (TARJETAS DINÁMICAS Y COSTO TRANSPORTE)
-# ==============================================================================
+# ------------------------------------------------------------------------------
+# PESTAÑA 1: EVALUACIÓN SOLPED (EDICIÓN DIRECTA EN TARJETAS)
+# ------------------------------------------------------------------------------
 with tab_planilla:
     st.subheader("Seguimiento y Control de Adjudicaciones (SOLPED)")
     
-    if archivo_ofertas and 'df_procesado' in locals():
-        df_gestion = df_procesado.copy()
+    if not st.session_state["items_data"]:
+        st.info("No hay posiciones cargadas. Sube un archivo Excel en la barra lateral o usa '➕ Carga Manual / Directa' arriba.")
+    else:
+        st.caption("Modifica el **Costo Transporte** o cualquier valor en las tarjetas. Los datos se actualizarán automáticamente en el Cuadro Comparativo Integrado.")
         
-        # Búsqueda inteligente de columnas
-        col_desc = encontrar_columna(df_gestion, ["Descripción", "Material", "Texto breve", "Texto de material", "Detalle"])
-        col_cant = encontrar_columna(df_gestion, ["Cantidad", "Cant", "CANTIDAD", "Cant."])
-        col_prov = encontrar_columna(df_gestion, ["Proveedor", "Licitante", "Nombre Proveedor"])
-        col_precio_mat = encontrar_columna(df_gestion, ["Valor neto de pedido", "Valor unitario", "Precio Material", "Precio Unitario", "Precio Neto"])
-        col_moneda_mat = encontrar_columna(df_gestion, ["Moneda", "Moneda Material", "CM"])
-        col_precio_trans = encontrar_columna(df_gestion, ["Precio Transporte", "Valor Flete", "Flete", "Transporte", "Envio", "Costo Envio", "Costo Transporte"])
+        indices_a_eliminar = []
         
-        # Nueva búsqueda para el centro
-        col_centro = encontrar_columna(df_gestion, ["Centro", "Planta", "Ubicación"])
-
-        for idx, row in df_gestion.iterrows():
-            pos_num = (idx + 1) * 10
-            desc_val = str(row[col_desc]) if col_desc and pd.notna(row[col_desc]) else f"POSICIÓN {pos_num}"
-            cant_val = float(row[col_cant]) if col_cant and pd.notna(row[col_cant]) else 1.0
-            pu_val = float(row[col_precio_mat]) if col_precio_mat and pd.notna(row[col_precio_mat]) else 0.0
-            moneda_val = str(row[col_moneda_mat]) if col_moneda_mat and pd.notna(row[col_moneda_mat]) else "CLP"
-            prov_val = str(row[col_prov]) if col_prov and pd.notna(row[col_prov]) else "Proveedor Desconocido"
-            costo_transporte_inyectado = float(row[col_precio_trans]) if col_precio_trans and pd.notna(row[col_precio_trans]) else 0.0
-            
-            # Formateo completo del Centro
-            centro_val = str(row[col_centro]) if col_centro and pd.notna(row[col_centro]) else "E024 (Planta Rinconada)"
-
-            # Tarjeta de Evaluación SOLPED
+        for idx, item in enumerate(st.session_state["items_data"]):
             with st.container(border=True):
-                # Encabezado (ahora con la descripción del centro completa)
                 col_header, col_del = st.columns([6, 1])
                 with col_header:
-                    st.markdown(f"### SOLPED: 2026-02-20 10:08:00 | Pos {pos_num}: {desc_val}")
-                    st.caption(f"Centro: {centro_val} | UM Original: 2023-02-13 00:00:00")
+                    st.markdown(f"### SOLPED: 2026-02-20 10:08:00 | Pos {item['posicion']}: {item['descripcion']}")
+                    st.caption(f"Centro: {item['centro']} | UM Original: 2023-02-13 00:00:00")
                 with col_del:
-                    st.button("🗑️ Eliminar", key=f"del_{idx}")
+                    if st.button("🗑️ Eliminar", key=f"del_{idx}"):
+                        indices_a_eliminar.append(idx)
 
-                # 7 Columnas: Añadido explicitamente Costo Transp. en la misma fila para visualización directa
                 c1, c2, c3, c4, c5, c6, c7 = st.columns([1.0, 1.8, 1.2, 2.2, 1.2, 1.6, 1.5])
                 
                 with c1:
-                    cant = st.number_input("Cantidad", value=cant_val, min_value=0.0, step=1.0, key=f"cant_{idx}")
+                    st.session_state["items_data"][idx]["cantidad"] = st.number_input(
+                        "Cantidad", value=float(item["cantidad"]), min_value=0.0, step=1.0, key=f"cant_{idx}"
+                    )
                 with c2:
-                    pu = st.number_input("Precio Unitario", value=pu_val, step=100.0, key=f"pu_{idx}")
+                    st.session_state["items_data"][idx]["precio_unitario"] = st.number_input(
+                        "Precio Unitario", value=float(item["precio_unitario"]), step=100.0, key=f"pu_{idx}"
+                    )
                 with c3:
-                    moneda = st.selectbox("Moneda", ["CLP", "USD", "EUR"], index=0 if moneda_val=="CLP" else 1, key=f"mon_{idx}")
+                    st.session_state["items_data"][idx]["moneda"] = st.selectbox(
+                        "Moneda", ["CLP", "USD", "EUR"], 
+                        index=["CLP", "USD", "EUR"].index(item["moneda"]) if item["moneda"] in ["CLP", "USD", "EUR"] else 0, 
+                        key=f"mon_{idx}"
+                    )
                 with c4:
-                    proveedor = st.text_input("Proveedor", value=prov_val, key=f"prov_{idx}")
+                    st.session_state["items_data"][idx]["proveedor"] = st.text_input(
+                        "Proveedor", value=item["proveedor"], key=f"prov_{idx}"
+                    )
                 with c5:
-                    incoterm = st.selectbox("Transporte", ["EXW", "DDP", "FOB", "CIF", "CPT"], key=f"inco_{idx}")
+                    st.session_state["items_data"][idx]["incoterm"] = st.selectbox(
+                        "Transporte", ["EXW", "DDP", "FOB", "CIF", "CPT"], 
+                        index=["EXW", "DDP", "FOB", "CIF", "CPT"].index(item["incoterm"]) if item["incoterm"] in ["EXW", "DDP", "FOB", "CIF", "CPT"] else 0,
+                        key=f"inco_{idx}"
+                    )
                 with c6:
-                    # NUEVA COLUMNA VISIBLE PARA COSTO TRANSPORTE
-                    costo_transporte = st.number_input("Costo Transp.", value=costo_transporte_inyectado, step=1000.0, key=f"ct_{idx}")
+                    # CAMPO EDITABLE DE COSTO TRANSPORTE PERSISTENTE
+                    st.session_state["items_data"][idx]["costo_transporte"] = st.number_input(
+                        "Costo Transp.", value=float(item["costo_transporte"]), step=1000.0, key=f"ct_{idx}"
+                    )
                 with c7:
-                    fecha = st.date_input("Fecha Entrega", key=f"fecha_{idx}")
+                    st.session_state["items_data"][idx]["fecha_entrega"] = st.date_input(
+                        "Fecha Entrega", value=item["fecha_entrega"], key=f"fecha_{idx}"
+                    )
 
-                # Sección Inferior: Cálculo de Totales actualizado en vivo
-                monto_total_pos = (cant * pu) + costo_transporte
-                st.info(f"**Total Calculado ({moneda}):** {monto_total_pos:,.2f} *(Subtotal: {(cant*pu):,.2f} + Transporte: {costo_transporte:,.2f})*")
+                subtotal = st.session_state["items_data"][idx]["cantidad"] * st.session_state["items_data"][idx]["precio_unitario"]
+                ct = st.session_state["items_data"][idx]["costo_transporte"]
+                mon = st.session_state["items_data"][idx]["moneda"]
+                st.info(f"**Total Posición ({mon}):** {(subtotal + ct):,.2f} *(Subtotal Material: {subtotal:,.2f} + Costo Transporte: {ct:,.2f})*")
 
+        if indices_a_eliminar:
+            for idx in sorted(indices_a_eliminar, reverse=True):
+                st.session_state["items_data"].pop(idx)
+            st.rerun()
+
+# ------------------------------------------------------------------------------
+# PESTAÑA 2: CUADRO COMPARATIVO INTEGRADO (CÁLCULO DINÁMICO EN TIEMPO REAL)
+# ------------------------------------------------------------------------------
+with tab_comparativo:
+    st.subheader("Análisis de Ofertas y Proveedores (Integrado)")
+    
+    if not st.session_state["items_data"]:
+        st.info("No hay datos para comparar. Carga una planilla Excel o agrega ítems manualmente.")
     else:
-        st.info("Carga la planilla de ofertas (.xlsx) en la barra lateral para visualizar las tarjetas de evaluación SOLPED.")
+        df_comp = pd.DataFrame(st.session_state["items_data"])
+        
+        monto_mat_base = []
+        monto_trans_base = []
+        
+        for _, row in df_comp.iterrows():
+            subtotal_mat = row["cantidad"] * row["precio_unitario"]
+            m_mat = convertir_a_moneda_base(subtotal_mat, row["moneda"], moneda_base, tasa_usd_clp, tasa_eur_clp)
+            m_trans = convertir_a_moneda_base(row["costo_transporte"], row["moneda"], moneda_base, tasa_usd_clp, tasa_eur_clp)
+            
+            monto_mat_base.append(m_mat)
+            monto_trans_base.append(m_trans)
+            
+        df_comp["Subtotal Material (Origen)"] = df_comp["cantidad"] * df_comp["precio_unitario"]
+        df_comp[f"Monto Material ({moneda_base})"] = monto_mat_base
+        df_comp[f"Costo Transporte ({moneda_base})"] = monto_trans_base
+        df_comp[f"Monto Total ({moneda_base})"] = df_comp[f"Monto Material ({moneda_base})"] + df_comp[f"Costo Transporte ({moneda_base})"]
+        
+        total_mat_gen = sum(monto_mat_base)
+        total_trans_gen = sum(monto_trans_base)
+        total_total_gen = total_mat_gen + total_trans_gen
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric(f"Total Materiales ({moneda_base})", f"{total_mat_gen:,.2f}")
+        m2.metric(f"Total Transporte/Envío ({moneda_base})", f"{total_trans_gen:,.2f}")
+        m3.metric(f"Monto Total Consolidado ({moneda_base})", f"{total_total_gen:,.2f}")
+        
+        st.divider()
+        
+        cols_mostrar = [
+            "posicion", "descripcion", "centro", "cantidad", "precio_unitario", 
+            "moneda", "Subtotal Material (Origen)", "costo_transporte", "proveedor", "incoterm",
+            f"Monto Material ({moneda_base})", f"Costo Transporte ({moneda_base})", f"Monto Total ({moneda_base})"
+        ]
+        
+        st.dataframe(
+            df_comp[cols_mostrar],
+            use_container_width=True,
+            height=500,
+            column_config={
+                "posicion": "Pos",
+                "descripcion": "Descripción Material",
+                "centro": "Centro",
+                "cantidad": "Cant",
+                "precio_unitario": st.column_config.NumberColumn("P. Unitario", format="%.2f"),
+                "moneda": "Moneda",
+                "Subtotal Material (Origen)": st.column_config.NumberColumn("Subtotal Material", format="%.2f"),
+                "costo_transporte": st.column_config.NumberColumn("Costo Transporte (Origen)", format="%.2f"),
+                "proveedor": "Proveedor",
+                "incoterm": "Incoterm",
+                f"Monto Material ({moneda_base})": st.column_config.NumberColumn(f"Mat. ({moneda_base})", format="%.2f"),
+                f"Costo Transporte ({moneda_base})": st.column_config.NumberColumn(f"Transp. ({moneda_base})", format="%.2f"),
+                f"Monto Total ({moneda_base})": st.column_config.NumberColumn(f"Total ({moneda_base})", format="%.2f"),
+            }
+        )
