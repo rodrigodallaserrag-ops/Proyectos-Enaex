@@ -1,6 +1,6 @@
 """
 Streamlit - Cuadro Comparativo y Planilla de Gestión
-Gestión multimoneda (Material + Transporte) y análisis comparativo con tarjetas interactivas SOLPED.
+Gestión multimoneda (Material + Transporte) y tarjetas de evaluación SOLPED.
 
 Correr local: streamlit run app.py
 """
@@ -11,10 +11,9 @@ import streamlit as st
 st.set_page_config(page_title="Cuadro Comparativo y Planilla de Gestión", layout="wide")
 
 # ==============================================================================
-# FUNCIONES AUXILIARES
+# FUNCIONES AUXILIARES DE CONVERSIÓN DE MONEDA
 # ==============================================================================
 def convertir_a_moneda_base(monto, moneda_origen, moneda_destino="USD", usd_clp=950.0, eur_clp=1020.0):
-    """Convierte un monto desde su moneda de origen a una moneda de destino unificada."""
     if pd.isna(monto) or monto == 0:
         return 0.0
     
@@ -47,7 +46,6 @@ def encontrar_columna(df, posibles_nombres):
     return None
 
 def aplicar_conversion_multimoneda(df, moneda_base, tasa_usd_clp, tasa_eur_clp):
-    """Detecta montos y monedas de Material y Transporte, calcula equivalentes en Moneda Base."""
     df = df.copy()
     
     nombres_precio_mat = ["Valor neto de pedido", "Valor unitario", "Precio Material", "Precio Unitario", "Precio Neto", "Valor Material"]
@@ -89,7 +87,7 @@ def aplicar_conversion_multimoneda(df, moneda_base, tasa_usd_clp, tasa_eur_clp):
     return df
 
 # ==============================================================================
-# CONFIGURACIÓN TEMA
+# CONFIGURACIÓN TEMA (CLARO PREDETERMINADO / OSCURO)
 # ==============================================================================
 if "tema" not in st.session_state:
     st.session_state["tema"] = "claro"
@@ -102,8 +100,17 @@ if st.button(icono_tema, key="theme_toggle", help="Alternar Modo Claro/Oscuro"):
 if st.session_state["tema"] == "claro":
     st.markdown("""
         <style>
-        .st-key-theme_toggle { position: fixed !important; top: 65px !important; right: 15px !important; z-index: 999999 !important; width: 45px !important; height: 45px !important; min-width: 0 !important; }
-        .st-key-theme_toggle button { background: #FFFFFF !important; border: 1px solid #E0E0E0 !important; border-radius: 50% !important; box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important; font-size: 1.4rem !important; padding: 0 !important; margin: 0 !important; color: #111111 !important; display: flex !important; align-items: center !important; justify-content: center !important; width: 100% !important; height: 100% !important; min-height: unset !important; }
+        .st-key-theme_toggle {
+            position: fixed !important; top: 65px !important; right: 15px !important;
+            z-index: 999999 !important; width: 45px !important; height: 45px !important; min-width: 0 !important; 
+        }
+        .st-key-theme_toggle button {
+            background: #FFFFFF !important; border: 1px solid #E0E0E0 !important;
+            border-radius: 50% !important; box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important;
+            font-size: 1.4rem !important; padding: 0 !important; margin: 0 !important;
+            color: #111111 !important; display: flex !important; align-items: center !important;
+            justify-content: center !important; width: 100% !important; height: 100% !important; min-height: unset !important;
+        }
         .st-key-theme_toggle button p { margin: 0 !important; padding: 0 !important; line-height: 1 !important; font-size: 1.4rem !important; }
         .st-key-theme_toggle button:hover { transform: scale(1.1) !important; background: #F0F0F0 !important; }
         </style>
@@ -111,16 +118,31 @@ if st.session_state["tema"] == "claro":
 else:
     st.markdown("""
         <style>
-        .st-key-theme_toggle { position: fixed !important; top: 65px !important; right: 15px !important; z-index: 999999 !important; width: 45px !important; height: 45px !important; min-width: 0 !important; }
-        .st-key-theme_toggle button { background: #1E2329 !important; border: 1px solid #444444 !important; border-radius: 50% !important; box-shadow: 0 2px 5px rgba(0,0,0,0.3) !important; font-size: 1.4rem !important; padding: 0 !important; margin: 0 !important; color: #FF3333 !important; display: flex !important; align-items: center !important; justify-content: center !important; width: 100% !important; height: 100% !important; min-height: unset !important; }
+        .st-key-theme_toggle {
+            position: fixed !important; top: 65px !important; right: 15px !important;
+            z-index: 999999 !important; width: 45px !important; height: 45px !important; min-width: 0 !important;
+        }
+        .st-key-theme_toggle button {
+            background: #1E2329 !important; border: 1px solid #444444 !important;
+            border-radius: 50% !important; box-shadow: 0 2px 5px rgba(0,0,0,0.3) !important;
+            font-size: 1.4rem !important; padding: 0 !important; margin: 0 !important;
+            color: #FF3333 !important; display: flex !important; align-items: center !important;
+            justify-content: center !important; width: 100% !important; height: 100% !important; min-height: unset !important;
+        }
         .st-key-theme_toggle button p { margin: 0 !important; padding: 0 !important; line-height: 1 !important; font-size: 1.4rem !important; }
         .st-key-theme_toggle button:hover { transform: scale(1.1) !important; background: #2C323A !important; border-color: #FF3333 !important; }
-        .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] { background-color: #0E1117 !important; color: #FF3333 !important; }
+        .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
+            background-color: #0E1117 !important; color: #FF3333 !important;
+        }
         p, span, label, h1, h2, h3, h4, h5, h6, div, td, th, caption, .stMarkdown { color: #FF3333 !important; }
-        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button) { background-color: #CC0000 !important; color: #FFFFFF !important; border: 1px solid #FF4D4D !important; font-weight: bold !important; }
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button) {
+            background-color: #CC0000 !important; color: #FFFFFF !important; border: 1px solid #FF4D4D !important; font-weight: bold !important;
+        }
         div[data-testid="stButton"] > button:not(.st-key-theme_toggle button):hover { background-color: #FF0000 !important; color: #FFFFFF !important; border-color: #FF6666 !important; }
         input, select, textarea, div[data-baseweb="select"] { background-color: #1E2329 !important; color: #FF3333 !important; border-color: #CC0000 !important; }
-        [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) { background-color: #1E2329 !important; padding: 2rem !important; border-radius: 12px !important; border: 1px solid #CC0000 !important; }
+        [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
+            background-color: #1E2329 !important; padding: 2rem !important; border-radius: 12px !important; border: 1px solid #CC0000 !important;
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -194,7 +216,7 @@ with tab_comparativo:
         st.info("Sube una planilla Excel en la barra lateral para procesar los costos de materiales y transporte.")
 
 # ==============================================================================
-# PESTAÑA 2: EVALUACIÓN SOLPED (TARJETAS INTERACTIVAS)
+# PESTAÑA 2: EVALUACIÓN SOLPED (TARJETAS DINÁMICAS Y COSTO TRANSPORTE)
 # ==============================================================================
 with tab_planilla:
     st.subheader("Seguimiento y Control de Adjudicaciones (SOLPED)")
@@ -202,61 +224,67 @@ with tab_planilla:
     if archivo_ofertas and 'df_procesado' in locals():
         df_gestion = df_procesado.copy()
         
-        # Búsqueda dinámica de nombres de columnas originales para inyectar en la UI
+        # Búsqueda inteligente de columnas del Excel inyectado
         col_desc = encontrar_columna(df_gestion, ["Descripción", "Material", "Texto breve", "Texto de material", "Detalle"])
         col_cant = encontrar_columna(df_gestion, ["Cantidad", "Cant", "CANTIDAD", "Cant."])
         col_prov = encontrar_columna(df_gestion, ["Proveedor", "Licitante", "Nombre Proveedor"])
         col_precio_mat = encontrar_columna(df_gestion, ["Valor neto de pedido", "Valor unitario", "Precio Material", "Precio Unitario", "Precio Neto"])
         col_moneda_mat = encontrar_columna(df_gestion, ["Moneda", "Moneda Material", "CM"])
-        col_precio_trans = encontrar_columna(df_gestion, ["Precio Transporte", "Valor Flete", "Flete", "Transporte", "Envio", "Costo Envio"])
+        col_precio_trans = encontrar_columna(df_gestion, ["Precio Transporte", "Valor Flete", "Flete", "Transporte", "Envio", "Costo Envio", "Costo Transporte"])
 
-        st.markdown("Revisa, ajusta cantidades o edita los **Costos de Transporte** inyectados. El Total se actualizará en tiempo real.")
+        st.caption("Ajusta los valores inyectados o modifica manualmente el **Costo Transporte**. El Total se actualizará en tiempo real.")
 
         for idx, row in df_gestion.iterrows():
-            # Inyección de datos detectados (o valores por defecto)
-            desc_inyectada = row[col_desc] if col_desc and pd.notna(row[col_desc]) else f"Posición {idx+1}"
-            cant_inyectada = float(row[col_cant]) if col_cant and pd.notna(row[col_cant]) else 1.0
-            pu_inyectado = float(row[col_precio_mat]) if col_precio_mat and pd.notna(row[col_precio_mat]) else 0.0
-            moneda_inyectada = str(row[col_moneda_mat]) if col_moneda_mat and pd.notna(row[col_moneda_mat]) else "CLP"
-            prov_inyectado = str(row[col_prov]) if col_prov and pd.notna(row[col_prov]) else "Proveedor Sin Definir"
-            transporte_inyectado = float(row[col_precio_trans]) if col_precio_trans and pd.notna(row[col_precio_trans]) else 0.0
-            
-            with st.container():
-                st.markdown(f"### Pos {(idx+1)*10}: {desc_inyectada}")
-                st.caption(f"Centro: General | UM Original: UN")
-                
-                # Fila 1: Datos Base
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    cantidad = st.number_input("Cantidad", value=cant_inyectada, min_value=0.0, step=1.0, key=f"cant_{idx}")
-                with col2:
-                    precio_unitario = st.number_input("Precio Unitario", value=pu_inyectado, step=100.0, key=f"pu_{idx}")
-                with col3:
-                    moneda = st.text_input("Moneda", value=moneda_inyectada, key=f"moneda_{idx}", disabled=True)
-                with col4:
-                    proveedor = st.text_input("Proveedor", value=prov_inyectado, key=f"prov_{idx}")
+            pos_num = (idx + 1) * 10
+            desc_val = str(row[col_desc]) if col_desc and pd.notna(row[col_desc]) else f"POSICIÓN {pos_num}"
+            cant_val = float(row[col_cant]) if col_cant and pd.notna(row[col_cant]) else 1.0
+            pu_val = float(row[col_precio_mat]) if col_precio_mat and pd.notna(row[col_precio_mat]) else 0.0
+            moneda_val = str(row[col_moneda_mat]) if col_moneda_mat and pd.notna(row[col_moneda_mat]) else "CLP"
+            prov_val = str(row[col_prov]) if col_prov and pd.notna(row[col_prov]) else "Proveedor Desconocido"
+            costo_transporte_inyectado = float(row[col_precio_trans]) if col_precio_trans and pd.notna(row[col_precio_trans]) else 0.0
 
-                # Fila 2: Transporte y Total
-                col5, col6, col7, col8 = st.columns(4)
-                with col5:
-                    incoterm = st.selectbox("Condición Transp.", ["EXW", "DDP", "FOB", "CIF", "Otro"], key=f"inco_{idx}")
-                with col6:
+            # Tarjeta de Evaluación SOLPED
+            with st.container(border=True):
+                # Encabezado idéntico a la imagen subida
+                col_header, col_del = st.columns([5, 1])
+                with col_header:
+                    st.markdown(f"### SOLPED: 2026-02-20 10:08:00 | Pos {pos_num}: {desc_val}")
+                    st.caption("Centro: E024 (Planta Ri... | UM Original: 2023-02-13 00:00:00")
+                with col_del:
+                    st.button("🗑️ Eliminar", key=f"del_{idx}")
+
+                # Fila 1: Cantidad, Precio Unitario, Moneda, Proveedor, Incoterm, Fecha Entrega
+                c1, c2, c3, c4, c5, c6 = st.columns([1.2, 1.8, 1.2, 2.5, 1.5, 1.8])
+                with c1:
+                    cant = st.number_input("Cantidad", value=cant_val, min_value=0.0, step=1.0, key=f"cant_{idx}")
+                with c2:
+                    pu = st.number_input("Precio Unitario", value=pu_val, step=100.0, key=f"pu_{idx}")
+                with c3:
+                    moneda = st.selectbox("Moneda", ["CLP", "USD", "EUR"], index=0 if moneda_val=="CLP" else 1, key=f"mon_{idx}")
+                with c4:
+                    proveedor = st.text_input("Proveedor", value=prov_val, key=f"prov_{idx}")
+                with c5:
+                    incoterm = st.selectbox("Transporte", ["EXW", "DDP", "FOB", "CIF", "CPT"], key=f"inco_{idx}")
+                with c6:
+                    fecha = st.date_input("Fecha Entrega", key=f"fecha_{idx}")
+
+                # Fila 2: IMPLEMENTACIÓN DE COSTO TRANSPORTE Y TOTAL
+                c_trans, c_tot = st.columns([3, 3])
+                with c_trans:
+                    # NUEVO CAMPO SOLICITADO: Costo de Transporte editable
                     costo_transporte = st.number_input(
-                        "Costo de Transporte (Inyectado)", 
-                        value=transporte_inyectado, 
-                        step=1000.0, 
-                        help="Valor detectado. Edita si el precio de flete/envío es incorrecto.",
-                        key=f"costo_trans_{idx}"
+                        "Costo Transporte ($)",
+                        value=costo_transporte_inyectado,
+                        min_value=0.0,
+                        step=1000.0,
+                        help="Ingresa o modifica el costo de envío/flete para esta posición.",
+                        key=f"costo_transporte_{idx}"
                     )
-                with col7:
-                    fecha_entrega = st.date_input("Fecha Entrega Aprox.", key=f"fecha_{idx}")
-                
-                with col8:
-                    # Cálculo en Tiempo Real
-                    costo_material_total = cantidad * precio_unitario
-                    total_final = costo_material_total + costo_transporte
-                    st.info(f"**Monto Total ({moneda})**\n### {total_final:,.2f}")
-                    
-                st.divider()
+                with c_tot:
+                    # Cálculo automático del Total Final
+                    monto_total_pos = (cant * pu) + costo_transporte
+                    st.markdown(f"**Total Posición ({moneda})**")
+                    st.subheader(f"{monto_total_pos:,.2f}")
+
     else:
-        st.info("Carga la planilla de ofertas en la barra lateral para visualizar las posiciones SOLPED a evaluar.")
+        st.info("Carga la planilla de ofertas (.xlsx) en la barra lateral para visualizar las tarjetas de evaluación SOLPED.")
