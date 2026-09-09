@@ -1,36 +1,21 @@
 """
-Streamlit - Dx Compradores
-Réplica del pbix "Nivel_de_servicio_BI.pbix", página "Dx Compradores" y Trazabilidad.
-Incluye gestión multimoneda y conversión de costos de transporte.
+Streamlit - Cuadro Comparativo y Planilla de Gestión
+Gestión multimoneda y análisis comparativo de ofertas y proveedores.
 
 Correr local: streamlit run app.py
 """
-import glob
-import os
-import re
 import pandas as pd
 import numpy as np
 import streamlit as st
 
-import config
-import loaders
-import transform
-
-# Importación del archivo ariba_trazabilidad.py con alias para mantener compatibilidad
-try:
-    import ariba_trazabilidad as trazabilidad
-    HAS_TRAZABILIDAD = True
-except ImportError:
-    HAS_TRAZABILIDAD = False
-
-st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
+st.set_page_config(page_title="Cuadro Comparativo y Planilla de Gestión", layout="wide")
 
 # ==============================================================================
 # FUNCIONES AUXILIARES DE CONVERSIÓN DE MONEDA
 # ==============================================================================
 def convertir_a_moneda_base(monto, moneda_origen, moneda_destino="USD", usd_clp=950.0, eur_clp=1020.0):
     """
-    Convierte un monto desde su moneda de origen a una moneda de destino unificada.
+    Convierte un monto desde su moneda de origen a una moneda de destino unificada[cite: 9].
     """
     if pd.isna(monto) or monto == 0:
         return 0.0
@@ -38,7 +23,7 @@ def convertir_a_moneda_base(monto, moneda_origen, moneda_destino="USD", usd_clp=
     mon_orig = str(moneda_origen).upper().strip() if pd.notna(moneda_origen) else "CLP"
     mon_dest = str(moneda_destino).upper().strip()
     
-    # 1. Convertir primero a CLP como moneda intermedia de referencia
+    # 1. Convertir primero a CLP como moneda intermedia de referencia[cite: 9]
     if mon_orig in ["CLP", "CLF", "PESO", "PESOS"]:
         monto_clp = float(monto)
     elif mon_orig in ["USD", "US$", "DOLARES", "DOLAR"]:
@@ -46,9 +31,9 @@ def convertir_a_moneda_base(monto, moneda_origen, moneda_destino="USD", usd_clp=
     elif mon_orig in ["EUR", "EUR$", "EUROS"]:
         monto_clp = float(monto) * eur_clp
     else:
-        monto_clp = float(monto)  # Por defecto si no se reconoce
+        monto_clp = float(monto)  # Por defecto si no se reconoce[cite: 9]
         
-    # 2. Convertir de CLP a la Moneda Destino elegida
+    # 2. Convertir de CLP a la Moneda Destino elegida[cite: 9]
     if mon_dest == "CLP":
         return monto_clp
     elif mon_dest == "USD":
@@ -60,74 +45,27 @@ def convertir_a_moneda_base(monto, moneda_origen, moneda_destino="USD", usd_clp=
 
 def aplicar_conversion_multimoneda(df, moneda_base, tasa_usd_clp, tasa_eur_clp):
     """
-    Calcula los valores monetarios normalizados de material, transporte y total.
+    Calcula los valores monetarios normalizados[cite: 9].
+    (Ajusta los nombres de las columnas según tu nuevo archivo de proveedores).
     """
     df = df.copy()
     
-    # Identificación/fallback de columnas de precio y moneda
-    col_precio_mat = "Precio Material" if "Precio Material" in df.columns else ("Precio Neto" if "Precio Neto" in df.columns else None)
-    col_moneda_mat = "Moneda Material" if "Moneda Material" in df.columns else ("Moneda" if "Moneda" in df.columns else None)
-    col_precio_trans = "Precio Transporte" if "Precio Transporte" in df.columns else ("Valor Flete" if "Valor Flete" in df.columns else None)
-    col_moneda_trans = "Moneda Transporte" if "Moneda Transporte" in df.columns else ("Moneda Flete" if "Moneda Flete" in df.columns else None)
+    # Identificación/fallback de columnas de precio y moneda[cite: 9]
+    col_precio_mat = "Precio Unitario" if "Precio Unitario" in df.columns else None
+    col_moneda_mat = "Moneda" if "Moneda" in df.columns else None
     
-    # Conversión Material
+    # Conversión
     if col_precio_mat and col_precio_mat in df.columns:
         monedas_mat = df[col_moneda_mat] if (col_moneda_mat and col_moneda_mat in df.columns) else "USD"
-        df["Monto Material (Base)"] = [
+        df["Precio Normalizado (Base)"] = [
             convertir_a_moneda_base(p, m, moneda_base, tasa_usd_clp, tasa_eur_clp)
             for p, m in zip(df[col_precio_mat].fillna(0), monedas_mat)
         ]
     else:
-        df["Monto Material (Base)"] = 0.0
+        df["Precio Normalizado (Base)"] = 0.0
 
-    # Conversión Transporte
-    if col_precio_trans and col_precio_trans in df.columns:
-        monedas_trans = df[col_moneda_trans] if (col_moneda_trans and col_moneda_trans in df.columns) else "CLP"
-        df["Monto Transporte (Base)"] = [
-            convertir_a_moneda_base(p, m, moneda_base, tasa_usd_clp, tasa_eur_clp)
-            for p, m in zip(df[col_precio_trans].fillna(0), monedas_trans)
-        ]
-    else:
-        df["Monto Transporte (Base)"] = 0.0
-
-    df["Monto Total (Base)"] = df["Monto Material (Base)"] + df["Monto Transporte (Base)"]
     df["Moneda Base"] = moneda_base
     return df
-
-# ==============================================================================
-# FUNCIONES AUXILIARES PARA MANEJO DE ARCHIVOS DUPLICADOS
-# ==============================================================================
-def buscar_archivo_mas_reciente(patron_o_ruta: str) -> str:
-    if not isinstance(patron_o_ruta, str) or patron_o_ruta.startswith("onedrive:"):
-        return patron_o_ruta
-
-    nombre_base, ext = os.path.splitext(patron_o_ruta)
-    patron_busqueda = f"{nombre_base}*{ext}"
-    
-    coincidencias = glob.glob(patron_busqueda)
-    if coincidencias:
-        return max(coincidencias, key=os.path.getmtime)
-    
-    return patron_o_ruta
-
-def obtener_ultimo_subido(archivos):
-    if isinstance(archivos, list):
-        return archivos[-1] if len(archivos) > 0 else None
-    return archivos
-
-# ==============================================================================
-# OCULTAR NAVEGACIÓN GLOBAL (TRAZABILIDAD ARIBA)
-# ==============================================================================
-st.markdown("""
-    <style>
-    [data-testid="stSidebarNav"] a[href*="trazabilidad"],
-    [data-testid="stSidebarNav"] a[href*="Trazabilidad"],
-    [data-testid="stSidebarNav"] a[href*="ariba"],
-    [data-testid="stSidebarNav"] a[href*="Ariba"] {
-        display: none !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
 
 # ==============================================================================
 # CONFIGURACIÓN TEMA (CLARO PREDETERMINADO / OSCURO)
@@ -180,7 +118,7 @@ if st.session_state["tema"] == "claro":
             background: #F0F0F0 !important;
         }
         </style>
-    """, unsafe_allow_html=True)
+    """, unsafe_allow_html=True) #[cite: 9]
 else:
     st.markdown("""
         <style>
@@ -256,693 +194,90 @@ else:
             border: 1px solid #CC0000 !important;
         }
         </style>
-    """, unsafe_allow_html=True)
+    """, unsafe_allow_html=True) #[cite: 9]
 
 
-# ---- Función de Clasificación Corregida ----
-def determinar_tipo_ariba(row):
-    sol = str(row.get("Solicitud de pedido", "")).strip()
-    material = str(row.get("Material", "")).strip()
-    tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0", "null"])
-    es_mrp_flag = str(row.get("Solped MRP", "")).strip().lower() in ["sí", "si", "true", "mrp", "1"]
-    en_trazabilidad = bool(row.get("En_Trazabilidad", False) or row.get("En Trazabilidad", False))
-
-    texto_origen = ""
-    for col in ["Tipo_Ariba", "Origen Ariba", "Origen", "Tipo Flujo", "Tipo Pedido"]:
-        if col in row and pd.notna(row[col]) and str(row[col]).strip() != "":
-            texto_origen += " " + str(row[col]).upper()
-
-    if sol.startswith("5") or es_mrp_flag or "MRP" in texto_origen:
-        return "⚪ SAP MRP"
-
-    if sol.startswith("1") or sol.startswith("19") or sol.upper().startswith("CL") or "ERP" in texto_origen:
-        return "⚙️ SAP ERP"
-
-    if sol.startswith("6"):
-        if "NO CATALOGAD" in texto_origen or "NOCATALOGAD" in texto_origen or "SIN CODIGO" in texto_origen:
-            return "🔵 ARIBA NO CATALOGADA"
-        elif en_trazabilidad or not tiene_material:
-            return "🔵 ARIBA NO CATALOGADA"
-        else:
-            return "🟢 ARIBA CATALOGADA / DIRECTA"
-
-    if "NO CATALOGAD" in texto_origen or "NOCATALOGAD" in texto_origen:
-        return "🔵 ARIBA NO CATALOGADA"
-    elif "DIRECTA" in texto_origen or "CATALOGAD" in texto_origen:
-        return "🟢 ARIBA CATALOGADA / DIRECTA"
-
-    return "⚪ OTROS"
-
-
-# ---- Acceso con contraseña ----
+# ==============================================================================
+# ACCESO CON CONTRASEÑA
+# ==============================================================================
 if "app_password" in st.secrets:
     if not st.session_state.get("_autenticado"):
-        st.title("Dx Compradores — Nivel de Servicio")
-        clave_ingresada = st.text_input("Contraseña de acceso", type="password")
-        if st.button("Ingresar"):
-            if clave_ingresada == st.secrets["app_password"]:
-                st.session_state["_autenticado"] = True
-                loaders._descargar_onedrive.clear()
-                st.session_state.pop("_clave_pipeline", None)
-                st.rerun()
+        st.title("📊 Cuadro Comparativo y Planilla de Gestión")
+        clave_ingresada = st.text_input("Contraseña de acceso", type="password") #[cite: 9]
+        if st.button("Ingresar"): #[cite: 9]
+            if clave_ingresada == st.secrets["app_password"]: #[cite: 9]
+                st.session_state["_autenticado"] = True #[cite: 9]
+                st.rerun() #[cite: 9]
             else:
-                st.error("Contraseña incorrecta.")
-        st.stop()
+                st.error("Contraseña incorrecta.") #[cite: 9]
+        st.stop() #[cite: 9]
+
+
+# ==============================================================================
+# INTERFAZ PRINCIPAL
+# ==============================================================================
+st.title("📊 Cuadro Comparativo y Planilla de Gestión")
+
+with st.sidebar:
+    st.header("Datos de entrada")
+    archivo_ofertas = st.file_uploader("Subir matriz de ofertas (.xlsx)", type=["xlsx"])
+    
+    st.divider() #[cite: 9]
+    st.header("💱 Conversión Multimoneda") #[cite: 9]
+    moneda_base = st.selectbox("Moneda Consolidada Base", ["USD", "CLP", "EUR"], index=0) #[cite: 9]
+    tasa_usd_clp = st.number_input("Tasa USD / CLP", value=950.0, step=1.0) #[cite: 9]
+    tasa_eur_clp = st.number_input("Tasa EUR / CLP", value=1020.0, step=1.0) #[cite: 9]
 
 # ---- Pestañas Principales ----
-tab_dx, tab_trazabilidad = st.tabs(["📊 Dx Compradores", "🔗 Trazabilidad No Catalogadas"])
+tab_comparativo, tab_planilla = st.tabs(["⚖️ Cuadro Comparativo", "📝 Planilla de Gestión"])
 
 # ==============================================================================
-# PESTAÑA 1: DX COMPRADORES
+# PESTAÑA 1: CUADRO COMPARATIVO
 # ==============================================================================
-with tab_dx:
-    st.title("Dx Compradores — Nivel de Servicio")
-
-    # ---- Fuente de datos ----
-    with st.sidebar:
-        st.header("Datos de entrada")
-        modo = st.radio(
-            "Origen de datos",
-            ["OneDrive (automático)", "Subir archivos", "Archivos locales (data/)"],
-            index=0,
-        )
-
-        archivo_data = archivo_resp_grupo = archivo_centro = archivo_mrp = None
-        if modo == "OneDrive (automático)":
-            archivo_data = "onedrive:me5a_parquet"
-            archivo_resp_grupo = "onedrive:responsable_grupo_compras"
-            archivo_centro = "onedrive:centro_sociedad_mro"
-            archivo_mrp = "onedrive:responsable_mrp"
-
-            if st.button("🔄 Forzar recarga desde OneDrive ahora"):
-                loaders._descargar_onedrive.clear()
-                st.session_state.pop("_clave_pipeline", None)
-                st.rerun()
-
-            if "onedrive" not in st.secrets:
-                st.error(
-                    "Falta configurar los Secrets de OneDrive (Settings → Secrets). "
-                    "Mientras tanto, usa 'Subir archivos'."
-                )
-                st.stop()
-
-        elif modo == "Subir archivos":
-            files_data = st.file_uploader(
-                "ME5A_con_Ariba (.xlsx o .parquet)",
-                type=["xlsx", "parquet"],
-                accept_multiple_files=True,
-                help="Puedes subir uno o varios archivos. Se tomará el último.",
-            )
-            files_resp = st.file_uploader("Responsable_Grupo_Compras.xlsx", type="xlsx", accept_multiple_files=True)
-            files_centro = st.file_uploader("Centro_Sociedad_MRO.xlsx", type="xlsx", accept_multiple_files=True)
-            files_mrp = st.file_uploader("Responsable_MRP.xlsx", type="xlsx", accept_multiple_files=True)
-
-            archivo_data = obtener_ultimo_subido(files_data)
-            archivo_resp_grupo = obtener_ultimo_subido(files_resp)
-            archivo_centro = obtener_ultimo_subido(files_centro)
-            archivo_mrp = obtener_ultimo_subido(files_mrp)
-
-            if not all([archivo_data, archivo_resp_grupo, archivo_centro, archivo_mrp]):
-                st.info("Sube los 4 archivos para generar el reporte.")
-                st.stop()
-        else:
-            archivo_parquet_local = buscar_archivo_mas_reciente("data/ME5A_con_Ariba.parquet")
-            archivo_excel_local = buscar_archivo_mas_reciente("data/ME5A_con_Ariba.xlsx")
-
-            if os.path.exists(archivo_parquet_local):
-                archivo_data = archivo_parquet_local
-            else:
-                archivo_data = archivo_excel_local
-
-            archivo_resp_grupo = buscar_archivo_mas_reciente("data/Responsable_Grupo_Compras.xlsx")
-            archivo_centro = buscar_archivo_mas_reciente("data/Centro_Sociedad_MRO.xlsx")
-            archivo_mrp = buscar_archivo_mas_reciente("data/Responsable_MRP.xlsx")
-
-        st.header("Parámetros")
-        fecha_corte = st.date_input("Fecha de corte del reporte (FechaCorteReporte)", value=pd.Timestamp.today())
-        st.caption(f"SLA: {config.SLA_DIAS_ERP_MRP} días ERP/MRP · {config.SLA_DIAS_ARIBA} días Ariba")
-
-        # ---- SECCIÓN CONVERSIÓN DE MONEDAS ----
-        st.divider()
-        st.header("💱 Conversión Multimoneda")
-        moneda_base = st.selectbox("Moneda Consolidada Base", ["USD", "CLP", "EUR"], index=0)
-        tasa_usd_clp = st.number_input("Tasa USD / CLP", value=950.0, step=1.0)
-        tasa_eur_clp = st.number_input("Tasa EUR / CLP", value=1020.0, step=1.0)
-
-    def _clave_archivo(archivo):
-        if isinstance(archivo, list):
-            return tuple(_clave_archivo(a) for a in archivo)
-        if hasattr(archivo, "name") and hasattr(archivo, "size"):
-            return (archivo.name, archivo.size)
-        return archivo
-
-    clave_actual = (
-        _clave_archivo(archivo_data),
-        _clave_archivo(archivo_resp_grupo),
-        _clave_archivo(archivo_centro),
-        _clave_archivo(archivo_mrp),
-        pd.Timestamp(fecha_corte),
-        "df_trazabilidad_limpio" in st.session_state,
-        moneda_base,
-        tasa_usd_clp,
-        tasa_eur_clp
-    )
-
-    if st.session_state.get("_clave_pipeline") != clave_actual:
+with tab_comparativo:
+    st.subheader("Análisis de Ofertas y Proveedores")
+    
+    if archivo_ofertas:
         try:
-            df_data = loaders.cargar_data_pr(archivo_data)
-            df_resp_grupo = loaders.cargar_responsable_grupo_compras(archivo_resp_grupo)
-            df_centro_sociedad = loaders.cargar_centro_sociedad_mro(archivo_centro)
-            df_resp_mrp = loaders.cargar_responsable_mrp(archivo_mrp)
+            df_ofertas = pd.read_excel(archivo_ofertas)
+            # Aplicar conversión multimoneda (asegúrate de que las columnas coincidan con tu excel)
+            df_ofertas_convertido = aplicar_conversion_multimoneda(df_ofertas, moneda_base, tasa_usd_clp, tasa_eur_clp)
+            st.dataframe(df_ofertas_convertido, use_container_width=True)
             
-            df_calculado = transform.pipeline_completo(
-                df_data, df_resp_grupo, df_centro_sociedad, df_resp_mrp,
-                fecha_corte=pd.Timestamp(fecha_corte),
-                df_trazabilidad=st.session_state.get("df_trazabilidad_limpio"),
-            )
-            df_calculado["Año"] = df_calculado["Fecha de pedido"].dt.year
-            df_calculado["Mes"] = df_calculado["Fecha de pedido"].dt.month
-            df_calculado["Día"] = df_calculado["Fecha de pedido"].dt.day
-
-            if "df_trazabilidad_limpio" in st.session_state:
-                df_traz = st.session_state["df_trazabilidad_limpio"]
-                col_traz = "Solicitud de pedido" if "Solicitud de pedido" in df_traz.columns else "Solped SAP (600)"
-                
-                solpeds_no_cat = set(
-                    df_traz[col_traz]
-                    .dropna()
-                    .astype(str)
-                    .str.strip()
-                    .str.replace(r"\.0$", "", regex=True)
-                )
-
-                solpeds_me5a = (
-                    df_calculado["Solicitud de pedido"]
-                    .astype(str)
-                    .str.strip()
-                    .str.replace(r"\.0$", "", regex=True)
-                )
-
-                df_calculado["En_Trazabilidad"] = solpeds_me5a.isin(solpeds_no_cat)
-            else:
-                df_calculado["En_Trazabilidad"] = False
-
-            df_calculado["Tipo Ariba"] = df_calculado.apply(determinar_tipo_ariba, axis=1)
-            df_calculado.loc[df_calculado["En_Trazabilidad"], "Tipo Ariba"] = "🔵 ARIBA NO CATALOGADA"
-
-            # --- LÓGICA DE NEGOCIO PENDIENTES ---
-            es_no_catalogada = df_calculado["Tipo Ariba"] == "🔵 ARIBA NO CATALOGADA"
-            sin_pr_agregada = df_calculado["Fecha de pedido"].isna() | df_calculado["Pedido"].isna()
-            tiene_pr_inicial = df_calculado["Fecha de liberación"].notna()
-            
-            casos_pendientes = es_no_catalogada & sin_pr_agregada & tiene_pr_inicial
-
-            fecha_hoy = pd.Timestamp.today().normalize()
-            fecha_liberacion = pd.to_datetime(df_calculado["Fecha de liberación"], errors="coerce").dt.normalize()
-            dias_acumulados = (fecha_hoy - fecha_liberacion).dt.days
-            
-            df_calculado["Nivel de Servicio"] = np.where(
-                casos_pendientes,
-                dias_acumulados,
-                df_calculado["Nivel de Servicio"]
-            )
-
-            # --- CONVERSIÓN MULTIMONEDA MATERIAL + TRANSPORTE ---
-            df_calculado = aplicar_conversion_multimoneda(
-                df_calculado, moneda_base, tasa_usd_clp, tasa_eur_clp
-            )
-
-            st.session_state["_df_pipeline"] = df_calculado
-            st.session_state["_clave_pipeline"] = clave_actual
-
+            # Aquí puedes añadir tus tarjetas KPI o gráficos de comparación
         except Exception as e:
-            st.error(f"🚨 **No se pudieron cargar los datos.**\n\nDetalle técnico: `{e}`")
-            st.stop()
-
-    df = st.session_state["_df_pipeline"]
-
-    NS_MIN_GLOBAL = int(df["Nivel de Servicio"].min()) if len(df) and pd.notna(df["Nivel de Servicio"].min()) else 0
-    NS_MAX_GLOBAL = int(df["Nivel de Servicio"].max()) if len(df) and pd.notna(df["Nivel de Servicio"].max()) else 100
-
-    checkpoints = [("0. Total tras el pipeline (sin filtros)", len(df))]
-    metricas_por_etapa = []
-
-    def _snapshot(nombre, d):
-        n = len(d)
-        pct = (d["Cumple"] == "Cumple").sum() / n * 100 if n else 0
-        prom = d["Nivel de Servicio"].mean() if n else float("nan")
-        pos_oc = d["Pedido"].nunique() + (1 if d["Pedido"].isna().any() else 0)
-        metricas_por_etapa.append(
-            (nombre, f"{n:,}", f"{pct:.0f}%", f"{prom:.0f}" if pd.notna(prom) else "-", f"{pos_oc:,}")
-        )
-
-    _snapshot("0. Sin filtros", df)
-
-    # ---- Filtros ----
-    st.subheader("Filtros")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        centros = st.multiselect("Centro", sorted(df["Centro"].dropna().unique()))
-    with c2:
-        aplica = st.multiselect("Aplica?", sorted(df["Aplica?"].dropna().unique()))
-    with c3:
-        tipos_ariba = st.multiselect("Origen / Tipo Solicitud", sorted(df["Tipo Ariba"].dropna().unique()))
-
-    solpeds_excluir_raw = st.text_area(
-        "🚫 Excluir Solicitudes de Pedido (IDs)", 
-        placeholder="Pega las IDs a excluir separadas por coma, espacio o línea. Ej: 10045982, 3001892",
-        height=80
-    )
-
-    df_f = df.copy()
-
-    if solpeds_excluir_raw.strip():
-        ids_excluir = set(re.split(r'[,\s\n]+', solpeds_excluir_raw.strip()))
-        ids_excluir = {i for i in ids_excluir if i}
-        
-        if ids_excluir:
-            solpeds_str = df_f["Solicitud de pedido"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-            df_f = df_f[~solpeds_str.isin(ids_excluir)]
-            checkpoints.append(("0b. Tras exclusión por ID Solped", len(df_f)))
-
-    if centros:
-        df_f = df_f[df_f["Centro"].isin(centros)]
-    checkpoints.append(("1. Tras filtro Centro", len(df_f)))
-
-    if aplica:
-        df_f = df_f[df_f["Aplica?"].isin(aplica)]
-    checkpoints.append(("2. Tras filtro Aplica?", len(df_f)))
-
-    if tipos_ariba:
-        df_f = df_f[df_f["Tipo Ariba"].isin(tipos_ariba)]
-    checkpoints.append(("2b. Tras filtro Origen / Tipo Solicitud", len(df_f)))
-
-    _snapshot("2. Tras Centro + Aplica? + Origen + Exclusiones", df_f)
-
-    # ---- Estado Solped ----
-    st.caption("Estado Solped (el filtro de fecha de abajo solo aplica dentro de 'Pedido completo')")
-    h1, h2, h3, h4 = st.columns(4)
-    with h1:
-        estados = st.multiselect("Estado Solped", sorted(df_f["Estado Solped"].dropna().unique()))
-
-    if estados:
-        df_f = df_f[df_f["Estado Solped"].isin(estados)]
-    checkpoints.append(("3. Tras filtro Estado Solped (total)", len(df_f)))
-    _snapshot("3. Tras Estado Solped", df_f)
-
-    # ---- Jerarquía Fecha ----
-    df_pedido_completo = df_f[df_f["Estado Solped"] == "Pedido completo"]
-
-    with h2:
-        años = st.multiselect("Año", sorted(df_pedido_completo["Año"].dropna().unique().astype(int)))
-    with h3:
-        _base_mes = df_pedido_completo[df_pedido_completo["Año"].isin(años)] if años else df_pedido_completo
-        meses = st.multiselect("Mes", sorted(_base_mes["Mes"].dropna().unique().astype(int)))
-    with h4:
-        _base_dia = _base_mes[_base_mes["Mes"].isin(meses)] if meses else _base_mes
-        fechas_disponibles = sorted(_base_dia["Fecha de pedido"].dt.date.dropna().unique())
-        fechas = st.multiselect("Día", fechas_disponibles, format_func=lambda f: f.strftime("%d-%m-%Y"))
-
-    if años or meses or fechas:
-        es_pedido_completo = df_f["Estado Solped"] == "Pedido completo"
-        cond_fecha = pd.Series(True, index=df_f.index)
-        if años:
-            cond_fecha &= df_f["Año"].isin(años)
-        if meses:
-            cond_fecha &= df_f["Mes"].isin(meses)
-        if fechas:
-            cond_fecha &= df_f["Fecha de pedido"].dt.date.isin(fechas)
-        df_f = df_f[~es_pedido_completo | (es_pedido_completo & cond_fecha)]
-
-    _snapshot("4. Tras jerarquía Año/Mes/Día", df_f)
-
-    c4, c5 = st.columns(2)
-    with c4:
-        solped_mrp = st.multiselect("Solped MRP", sorted(df_f["Solped MRP"].dropna().unique()))
-    with c5:
-        cumple = st.multiselect("Nivel de Servicio (Cumple)", sorted(df_f["Cumple"].dropna().unique()))
-
-    if solped_mrp:
-        df_f = df_f[df_f["Solped MRP"].isin(solped_mrp)]
-    if cumple:
-        df_f = df_f[df_f["Cumple"].isin(cumple)]
-
-    st.divider()
-    st.subheader("Filtro por días de gestión (Nivel de Servicio)")
-
-    if len(df_f):
-        f1, f2 = st.columns([1, 2])
-        with f1:
-            excluir_negativos = st.checkbox("Excluir negativos (solo desde 0)", value=False)
-        with f2:
-            if excluir_negativos:
-                rango_ns = (0, NS_MAX_GLOBAL)
-            elif NS_MIN_GLOBAL < NS_MAX_GLOBAL:
-                rango_ns = st.slider("Rango de días de gestión", min_value=NS_MIN_GLOBAL, max_value=NS_MAX_GLOBAL, value=(NS_MIN_GLOBAL, NS_MAX_GLOBAL))
-            else:
-                rango_ns = (NS_MIN_GLOBAL, NS_MAX_GLOBAL)
-
-        df_f = df_f[df_f["Nivel de Servicio"].between(rango_ns[0], rango_ns[1])]
-
-    # ---- Tarjetas KPI ----
-    VERDE, VERDE_BORDE = "rgba(35, 145, 75, 0.16)", "rgba(35, 145, 75, 0.55)"
-    ROJO, ROJO_BORDE = "rgba(204, 0, 0, 0.14)", "rgba(204, 0, 0, 0.55)"
-
-    pct_cumplimiento = (df_f["Cumple"] == "Cumple").sum() / max(len(df_f), 1) * 100
-    promedio_dias = df_f["Nivel de Servicio"].mean()
-    pedidos_distintos = df_f["Pedido"].nunique() + (1 if df_f["Pedido"].isna().any() else 0)
-    monto_total_acum = df_f["Monto Total (Base)"].sum() if "Monto Total (Base)" in df_f.columns else 0.0
-
-    color_texto_card = "#FF3333" if st.session_state["tema"] == "oscuro" else "#404B55"
-    color_sub_card = "#FF3333" if st.session_state["tema"] == "oscuro" else "#555"
-
-    def tarjeta(titulo: str, valor: str, subtitulo: str = "", fondo: str = "rgba(64,75,85,0.07)", borde: str = "rgba(64,75,85,0.35)") -> str:
-        html_sub = f'<div style="font-size:0.78rem;color:{color_sub_card};margin-top:4px;font-weight:500;">{subtitulo}</div>' if subtitulo else ""
-        return (
-            f'<div style="background:{fondo};border:1.5px solid {borde};border-radius:8px;'
-            f'padding:12px 18px;text-align:center;">'
-            f'<div style="font-size:0.78rem;color:{color_texto_card};font-weight:600;letter-spacing:.03em;'
-            f'text-transform:uppercase;opacity:.85;margin-bottom:4px;">{titulo}</div>'
-            f'<div style="font-size:1.8rem;font-weight:700;color:{color_texto_card};line-height:1.1;">{valor}</div>'
-            f'{html_sub}'
-            f'</div>'
-        )
-
-    if pd.isna(promedio_dias):
-        f_dias, b_dias, txt_dias = "rgba(64,75,85,0.07)", "rgba(64,75,85,0.35)", "-"
-    elif promedio_dias > 10:
-        f_dias, b_dias, txt_dias = ROJO, ROJO_BORDE, f"{promedio_dias:.0f}"
+            st.error(f"Error al procesar el archivo: {e}")
     else:
-        f_dias, b_dias, txt_dias = VERDE, VERDE_BORDE, f"{promedio_dias:.0f}"
+        st.info("Sube un archivo en la barra lateral para generar el cuadro comparativo.")
 
-    f_pct, b_pct = (VERDE, VERDE_BORDE) if pct_cumplimiento >= 85 else (ROJO, ROJO_BORDE)
-
-    t1, t2, t3, t4 = st.columns(4)
-    with t1:
-        st.markdown(tarjeta("Nivel de Servicio", f"{txt_dias} días", fondo=f_dias, borde=b_dias), unsafe_allow_html=True)
-    with t2:
-        st.markdown(tarjeta("% Cumplimiento SLA", f"{pct_cumplimiento:.0f}%", fondo=f_pct, borde=b_pct), unsafe_allow_html=True)
-    with t3:
-        st.markdown(tarjeta("OC generadas", f"{pedidos_distintos:,}"), unsafe_allow_html=True)
-    with t4:
-        st.markdown(tarjeta("Monto Total Consolidated", f"{monto_total_acum:,.2f} {moneda_base}"), unsafe_allow_html=True)
-
-    st.divider()
-
-    # ---- Estilo corporativo Enaex ----
-    ENAEX_GRIS = "#1E2329" if st.session_state["tema"] == "oscuro" else "#404B55"
-    ENAEX_ROJO = "#CC0000"
-
-    def tabla_enaex(tabla: pd.DataFrame, max_height: int | None = None, compacta: bool = False) -> str:
-        cols = list(tabla.columns)
-
-        def _fmt(col, val):
-            if pd.isna(val):
-                return "-"
-            if col in ["Promedio días de gestión", "Promedio Lead Time Total"]:
-                return f"{val:,.0f}"
-            if col == "% Cumplimiento":
-                return f"{val:,.0f}%"
-            if col == "Pos. OC generadas":
-                return f"{val:,.0f}"
-            return str(val)
-
-        pad = "4px 6px" if compacta else "7px 12px"
-        pad_th = "5px 6px" if compacta else "9px 12px"
-        fuente = "0.72rem" if compacta else "0.86rem"
-        fuente_th = "0.66rem" if compacta else "0.82rem"
-        color_texto_tabla = "#FF3333" if st.session_state["tema"] == "oscuro" else "#404B55"
-
-        filas = []
-        for i, r in enumerate(tabla.itertuples(index=False)):
-            es_total = str(r[0]) == "TOTAL"
-            if es_total:
-                estilo_fila = f"background:{ENAEX_GRIS};color:#fff;font-weight:700;border-top:2px solid {ENAEX_ROJO};"
-            else:
-                fondo = "#ffffff" if (i % 2 == 0 and st.session_state["tema"] == "claro") else ("#f4f5f7" if st.session_state["tema"] == "claro" else "#14181d")
-                estilo_fila = f"background:{fondo};color:{color_texto_tabla};"
-            celdas = []
-            for j, c in enumerate(cols):
-                align = "left" if j == 0 else "right"
-                celdas.append(f'<td style="padding:{pad};text-align:{align};border-bottom:1px solid #d8dbdf;white-space:nowrap;">{_fmt(c, r[j])}</td>')
-            filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
-
-        encabezados = "".join(
-            f'<th style="padding:{pad_th};text-align:{"left" if j == 0 else "right"};background:{ENAEX_GRIS};color:#fff;font-weight:600;font-size:{fuente_th};white-space:nowrap;">{c}</th>'
-            for j, c in enumerate(cols)
-        )
-
-        tabla_html = f'<table style="width:100%;border-collapse:collapse;font-size:{fuente};font-family:inherit;border:1px solid #d8dbdf;"><thead><tr>{encabezados}</tr></thead><tbody>{"".join(filas)}</tbody></table>'
-        alto = f"max-height:{max_height}px;overflow-y:auto;" if max_height else ""
-        return f'<div style="{alto}overflow-x:auto;border:1px solid #d8dbdf;border-radius:4px;">{tabla_html}</div>'
-
-    # ---- Tabla por Comprador ----
-    st.subheader("Por comprador")
-    col_comprador = "Comprador (Grupo de compras)" if "Comprador (Grupo de compras)" in df_f.columns else "Comprador por Grupo Compras"
-    tabla_comprador = transform.calcular_metricas_por_grupo(df_f, [col_comprador])
-    tabla_comprador = transform.agregar_fila_total(tabla_comprador, df_f, [col_comprador])
-    tabla_comprador = tabla_comprador.drop(columns=["Promedio Lead Time Total"], errors="ignore")
-    st.markdown(tabla_enaex(tabla_comprador), unsafe_allow_html=True)
-
-    st.write("")
-
-    vc1, vc2 = st.columns(2)
-    with vc1:
-        st.subheader("Por centro logístico")
-        tabla_fija = transform.tabla_centros_fija(df_f)
-        tabla_fija = tabla_fija.drop(columns=["Promedio Lead Time Total"], errors="ignore")
-        st.markdown(tabla_enaex(tabla_fija, compacta=True), unsafe_allow_html=True)
-
-    with vc2:
-        st.subheader("Detalle por centro")
-        cols_detalle = [c for c in ["Centro", "Nombre Centro 2"] if c in df_f.columns]
-        tabla_detalle = transform.calcular_metricas_por_grupo(df_f, cols_detalle)
-        tabla_detalle = tabla_detalle.sort_values("Pos. OC generadas", ascending=False)
-        tabla_detalle = transform.agregar_fila_total(tabla_detalle, df_f, cols_detalle)
-        tabla_detalle = tabla_detalle.drop(columns=["Promedio Lead Time Total"], errors="ignore")
-        st.markdown(tabla_enaex(tabla_detalle, max_height=300, compacta=True), unsafe_allow_html=True)
-
-    st.divider()
-
-    # ---- Detalle de solicitudes con Columnas Financieras ----
-    COLUMNAS_DETALLE = [
-        "Centro",
-        "Material",
-        "Texto breve",
-        "Solicitud de pedido",
-        "Tipo Ariba",
-        "Monto Material (Base)",
-        "Monto Transporte (Base)",
-        "Monto Total (Base)",
-        "Moneda Base",
-        "Fecha de solicitud",
-        "Fecha de liberación",
-        "Fecha modificación",
-        "Grupo de compras",
-        "Cantidad pedida",
-        "Pedido",
-        "Fecha de pedido",
-        "Posición de pedido",
-        "Comprador (Grupo de compras)",
-        "Solped MRP",
-        "Nombre Centro 2",
-        "Estado Solped",
-        "Nivel de Servicio",
-        "Comentario",
-        "Cumple",
-    ]
-
-    def preparar_detalle(d: pd.DataFrame) -> pd.DataFrame:
-        d = d.copy()
-        for col_fecha in ["Fecha de solicitud", "Fecha de liberación", "Fecha modificación", "Fecha de pedido"]:
-            if col_fecha in d.columns:
-                d[col_fecha] = pd.to_datetime(d[col_fecha], errors="coerce").dt.date
-        if "Comentario" not in d.columns:
-            d["Comentario"] = ""
-        return d[[c for c in COLUMNAS_DETALLE if c in d.columns]]
-
-    detalle = preparar_detalle(df_f)
-
-    with st.expander("Ver detalle de solicitudes y costos multimoneda", expanded=False):
-        st.caption("Los importes financieros están ajustados a la **Moneda Consolidada Base** configurada en la barra lateral.")
+# ==============================================================================
+# PESTAÑA 2: PLANILLA DE GESTIÓN
+# ==============================================================================
+with tab_planilla:
+    st.subheader("Seguimiento y Control de Adjudicaciones")
+    st.write("Gestiona el estado de las evaluaciones y añade comentarios.")
+    
+    if archivo_ofertas and 'df_ofertas_convertido' in locals():
+        # Crear columnas de gestión si no existen
+        df_gestion = df_ofertas_convertido.copy()
+        if "Estado" not in df_gestion.columns:
+            df_gestion["Estado"] = "En Evaluación"
+        if "Comentario" not in df_gestion.columns:
+            df_gestion["Comentario"] = ""
+            
         detalle_editado = st.data_editor(
-            detalle,
+            df_gestion,
             use_container_width=True,
-            num_rows="fixed",
-            key="editor_detalle",
+            num_rows="dynamic",
+            key="editor_gestion",
             column_config={
-                "Tipo Ariba": st.column_config.TextColumn("Origen / Tipo Solicitud", width="medium"),
-                "Monto Material (Base)": st.column_config.NumberColumn(f"Material ({moneda_base})", format="%.2f"),
-                "Monto Transporte (Base)": st.column_config.NumberColumn(f"Transporte ({moneda_base})", format="%.2f"),
-                "Monto Total (Base)": st.column_config.NumberColumn(f"Total ({moneda_base})", format="%.2f"),
-                "Comentario": st.column_config.TextColumn("Comentario", width="medium"),
-                "Nivel de Servicio": st.column_config.NumberColumn("Nivel de Servicio (días)"),
-            },
-            disabled=[c for c in detalle.columns if c != "Comentario"],
+                "Estado": st.column_config.SelectboxColumn(
+                    "Estado de Adjudicación",
+                    options=["En Evaluación", "Adjudicado", "Rechazado", "Stand-by"],
+                    required=True
+                ),
+                "Comentario": st.column_config.TextColumn("Comentarios del Comprador")
+            }
         )
-
-    # ---- Exportación a Excel ----
-    semana_ref = pd.Timestamp(fecha_corte) - pd.Timedelta(days=7)
-    num_semana = semana_ref.isocalendar()[1]
-    nombre_archivo = f"Sem{num_semana:02d}-{semana_ref.year}.xlsx"
-
-    def generar_excel(detalle_df: pd.DataFrame) -> bytes:
-        from io import BytesIO
-        from openpyxl import Workbook
-        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-        from openpyxl.utils import get_column_letter
-
-        gris = "FF404B55"
-        rojo = "FFCC0000"
-        fuente_base = "Arial"
-
-        wb = Workbook()
-        borde = Border(bottom=Side(style="thin", color="FFD8DBDF"))
-
-        def escribir_hoja(ws, titulo, tabla, col_inicio=1, fila_inicio=1):
-            ws.cell(row=fila_inicio, column=col_inicio, value=titulo).font = Font(name=fuente_base, bold=True, size=12, color=gris)
-            fila = fila_inicio + 1
-            for j, col in enumerate(tabla.columns):
-                c = ws.cell(row=fila, column=col_inicio + j, value=str(col))
-                c.font = Font(name=fuente_base, bold=True, color="FFFFFFFF", size=10)
-                c.fill = PatternFill("solid", fgColor=gris)
-                c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-            for i, r in enumerate(tabla.itertuples(index=False, name=None)):
-                es_total = str(r[0]) == "TOTAL"
-                for j, col in enumerate(tabla.columns):
-                    val = r[j]
-                    if pd.isna(val):
-                        val = None
-                    elif isinstance(val, (int, float)) and col in ("Promedio días de gestión", "Promedio Lead Time Total", "% Cumplimiento", "Pos. OC generadas"):
-                        val = round(float(val))
-                    elif hasattr(val, "item"):
-                        val = val.item()
-                    c = ws.cell(row=fila + 1 + i, column=col_inicio + j, value=val)
-                    c.font = Font(name=fuente_base, size=10, bold=es_total, color=gris)
-                    c.border = borde
-                    if es_total:
-                        c.fill = PatternFill("solid", fgColor="FFEFF0F2")
-                    if col == "% Cumplimiento" and val is not None:
-                        c.number_format = '0"%"'
-                    if col in ("Monto Material (Base)", "Monto Transporte (Base)", "Monto Total (Base)") and val is not None:
-                        c.number_format = '#,##0.00'
-                    if col in ("Fecha de solicitud", "Fecha de liberación", "Fecha modificación", "Fecha de pedido"):
-                        c.number_format = "DD-MM-YYYY"
-            return fila + 1 + len(tabla)
-
-        def ajustar_ancho(ws, tabla, col_inicio=1, extra=3):
-            for j, col in enumerate(tabla.columns):
-                largos = [len(str(col))]
-                for v in tabla[col].head(200):
-                    largos.append(0 if pd.isna(v) else len(str(v)))
-                ws.column_dimensions[get_column_letter(col_inicio + j)].width = min(max(largos) + extra, 45)
-
-        ws = wb.active
-        ws.title = "Resumen"
-        ws["A1"] = f"Nivel de Servicio MRO — Registro semana {num_semana:02d}/{semana_ref.year}"
-        ws["A1"].font = Font(name=fuente_base, bold=True, size=14, color=gris)
-        ws["A2"] = f"Fecha de corte del reporte: {pd.Timestamp(fecha_corte).date()}"
-        ws["A2"].font = Font(name=fuente_base, size=10, italic=True, color=gris)
-
-        resumen = pd.DataFrame({
-            "Indicador": ["Promedio Nivel de Servicio (días)", "% Cumplimiento SLA", "OC generadas", "Líneas consideradas", f"Monto Total Consolidado ({moneda_base})"],
-            "Valor": [round(promedio_dias) if pd.notna(promedio_dias) else None, round(pct_cumplimiento), pedidos_distintos, len(df_f), round(monto_total_acum, 2)],
-        })
-        fila = escribir_hoja(ws, "Indicadores generales", resumen, fila_inicio=5)
-        ws.cell(row=5, column=1).font = Font(name=fuente_base, bold=True, size=12, color=rojo)
-        ajustar_ancho(ws, resumen)
-
-        fila = escribir_hoja(ws, "Por comprador", tabla_comprador, fila_inicio=fila + 2)
-        fila = escribir_hoja(ws, "Por centro logístico", tabla_fija, fila_inicio=fila + 2)
-        escribir_hoja(ws, "Detalle por centro", tabla_detalle, fila_inicio=fila + 2)
-
-        ws2 = wb.create_sheet("Detalle solicitudes")
-        escribir_hoja(ws2, "Detalle de solicitudes", detalle_df)
-        ajustar_ancho(ws2, detalle_df)
-        ws2.freeze_panes = "A3"
-
-        buffer = BytesIO()
-        wb.save(buffer)
-        return buffer.getvalue()
-
-    st.subheader("Registro semanal")
-    clave_excel = (len(df_f), int(pd.util.hash_pandas_object(detalle_editado["Comentario"].fillna("")).sum()), pd.Timestamp(fecha_corte), moneda_base)
-
-    col_prep, col_desc = st.columns([1, 2])
-    with col_prep:
-        if st.button("📄 Preparar Excel"):
-            with st.spinner("Generando el Excel..."):
-                try:
-                    st.session_state["_excel_bytes"] = generar_excel(detalle_editado)
-                    st.session_state["_excel_clave"] = clave_excel
-                except Exception as e:
-                    st.error(f"No se pudo generar el Excel: {e}")
-
-    with col_desc:
-        excel_listo = st.session_state.get("_excel_bytes") is not None
-        excel_desactualizado = st.session_state.get("_excel_clave") != clave_excel
-        if excel_listo and excel_desactualizado:
-            st.caption("⚠️ Los filtros o la moneda cambiaron. Vuelve a preparar el Excel.")
-        if excel_listo:
-            st.download_button(
-                f"⬇ Descargar {nombre_archivo}",
-                data=st.session_state["_excel_bytes"],
-                file_name=nombre_archivo,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-        else:
-            st.caption('Haz clic en "Preparar Excel" para generar el archivo de descarga.')
-
-
-# ==============================================================================
-# PESTAÑA 2: TRAZABILIDAD NO CATALOGADAS
-# ==============================================================================
-with tab_trazabilidad:
-    st.title("🔍 Trazabilidad PR No Catalogadas — Ariba")
-
-    if not HAS_TRAZABILIDAD:
-        st.warning("⚠️ **Módulo 'ariba_trazabilidad.py' no disponible.**")
     else:
-        st.markdown("Procesa el reporte de **Trazabilidad Ariba** sin consolidar para vincular solicitudes.")
-
-        traz_col1, traz_col2 = st.columns([2, 1])
-        with traz_col1:
-            archivo_trazabilidad = st.file_uploader("Cargar Reporte PR No Catalogadas (.csv)", type=["csv"], key="uploader_trazabilidad")
-        with traz_col2:
-            empresa_id = st.text_input("Empresa compradora (ID)", value=getattr(trazabilidad, "EMPRESA_POR_DEFECTO", "1000"))
-
-        if archivo_trazabilidad:
-            if st.button("🚀 Procesar Trazabilidad", key="btn_procesar_traz"):
-                with st.spinner("Procesando trazabilidad..."):
-                    try:
-                        df_cadena, df_resumen = trazabilidad.procesar_trazabilidad_completa(archivo_trazabilidad, empresa=empresa_id)
-                        st.session_state["df_trazabilidad_cadena"] = df_cadena
-                        st.session_state["df_trazabilidad_limpio"] = df_resumen
-                        st.session_state.pop("_clave_pipeline", None)
-                        st.success("¡Trazabilidad procesada con éxito!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al procesar el archivo: {e}")
-
-        if "df_trazabilidad_limpio" in st.session_state and "df_trazabilidad_cadena" in st.session_state:
-            df_cadena = st.session_state["df_trazabilidad_cadena"]
-            df_resumen = st.session_state["df_trazabilidad_limpio"]
-
-            kpi_t1, kpi_t2, kpi_t3 = st.columns(3)
-            with kpi_t1:
-                st.metric("Total PR Iniciales", f"{len(df_cadena):,}")
-            with kpi_t2:
-                completas = (df_cadena["Cadena completa"] == "Sí").sum() if "Cadena completa" in df_cadena.columns else 0
-                st.metric("Cadenas Completas (con SAP)", f"{completas:,}")
-            with kpi_t3:
-                st.metric("Solpeds 600 Identificadas", f"{len(df_resumen):,}")
-
-            st.divider()
-
-            tab_cad, tab_res = st.tabs(["📋 Cadena Detallada", "📊 Resumen por Solped (SAP 600)"])
-
-            with tab_cad:
-                st.dataframe(df_cadena, use_container_width=True)
-            with tab_res:
-                st.dataframe(df_resumen, use_container_width=True)
+        st.info("Sube los datos iniciales en la barra lateral para habilitar la planilla de gestión editable.")
