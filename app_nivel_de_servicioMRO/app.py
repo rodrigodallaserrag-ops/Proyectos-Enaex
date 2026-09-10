@@ -2,12 +2,7 @@
 Streamlit - Cuadro Comparativo Integrado y Planilla de Gestión SOLPED
 Gestión multimoneda reactiva con persistencia de estado para Costo Transporte y Carga Manual.
 
-Correr local: streamlit run app.py
-"""
-import pandas as pd
-import numpy as np
-import streamlit as st
-from datetime import date
+
 
 st.set_page_config(page_title="Cuadro Comparativo y Planilla de Gestión", layout="wide")
 
