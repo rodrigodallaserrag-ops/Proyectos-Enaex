@@ -20,6 +20,9 @@ if "items_data" not in st.session_state:
 if "uploaded_file_name" not in st.session_state:
     st.session_state["uploaded_file_name"] = None
 
+if "costo_transporte_global" not in st.session_state:
+    st.session_state["costo_transporte_global"] = 0.0
+
 # ==============================================================================
 # FUNCIONES AUXILIARES DE CONVERSIÓN DE MONEDA
 # ==============================================================================
@@ -271,7 +274,6 @@ with tab_planilla:
                         key=f"inco_{idx}"
                     )
                 with c6:
-                    # CAMPO EDITABLE DE COSTO TRANSPORTE PERSISTENTE
                     st.session_state["items_data"][idx]["costo_transporte"] = st.number_input(
                         "Costo Transp.", value=float(item["costo_transporte"]), step=1000.0, key=f"ct_{idx}"
                     )
@@ -318,13 +320,32 @@ with tab_comparativo:
         df_comp[f"Monto Total ({moneda_base})"] = df_comp[f"Monto Material ({moneda_base})"] + df_comp[f"Costo Transporte ({moneda_base})"]
         
         total_mat_gen = sum(monto_mat_base)
-        total_trans_gen = sum(monto_trans_base)
-        total_total_gen = total_mat_gen + total_trans_gen
+        total_trans_items = sum(monto_trans_base)
+
+        # ----------------------------------------------------------------------
+        # CAMPO INTERACTIVO: COSTO TRANSPORTE GLOBAL AL LADO DE LOS TOTALES
+        # ----------------------------------------------------------------------
+        col_input_trans, col_m1, col_m2, col_m3 = st.columns([1.3, 1, 1, 1])
         
-        m1, m2, m3 = st.columns(3)
-        m1.metric(f"Total Materiales ({moneda_base})", f"{total_mat_gen:,.2f}")
-        m2.metric(f"Total Transporte/Envío ({moneda_base})", f"{total_trans_gen:,.2f}")
-        m3.metric(f"Monto Total Consolidado ({moneda_base})", f"{total_total_gen:,.2f}")
+        with col_input_trans:
+            costo_trans_global = st.number_input(
+                f"🚚 Costo Transporte Global ({moneda_base})",
+                value=float(st.session_state.get("costo_transporte_global", 0.0)),
+                step=1000.0,
+                key="input_costo_transporte_global",
+                help="Ingresa un costo de transporte adicional para calcularlo dinámicamente con el total."
+            )
+            st.session_state["costo_transporte_global"] = costo_trans_global
+
+        total_trans_gen = total_trans_items + costo_trans_global
+        total_total_gen = total_mat_gen + total_trans_gen
+
+        with col_m1:
+            st.metric(f"Total Materiales ({moneda_base})", f"{total_mat_gen:,.2f}")
+        with col_m2:
+            st.metric(f"Total Transporte ({moneda_base})", f"{total_trans_gen:,.2f}")
+        with col_m3:
+            st.metric(f"Monto Total Consolidado ({moneda_base})", f"{total_total_gen:,.2f}")
         
         st.divider()
         
