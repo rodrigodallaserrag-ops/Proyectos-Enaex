@@ -6,7 +6,9 @@ Correr local: streamlit run app.py
 """
 import glob
 import os
+import re
 import pandas as pd
+import numpy as np
 import streamlit as st
 
 import config
@@ -33,7 +35,6 @@ def buscar_archivo_mas_reciente(patron_o_ruta: str) -> str:
     if not isinstance(patron_o_ruta, str) or patron_o_ruta.startswith("onedrive:"):
         return patron_o_ruta
 
-    # Si la ruta exacta existe, verificar si existen duplicados con (1), (2), etc.
     nombre_base, ext = os.path.splitext(patron_o_ruta)
     patron_busqueda = f"{nombre_base}*{ext}"
     
@@ -44,10 +45,6 @@ def buscar_archivo_mas_reciente(patron_o_ruta: str) -> str:
     return patron_o_ruta
 
 def obtener_ultimo_subido(archivos):
-    """
-    Si el usuario sube múltiples archivos duplicados vía File Uploader,
-    selecciona el último elemento cargado.
-    """
     if isinstance(archivos, list):
         return archivos[-1] if len(archivos) > 0 else None
     return archivos
@@ -57,7 +54,6 @@ def obtener_ultimo_subido(archivos):
 # ==============================================================================
 st.markdown("""
     <style>
-    /* Ocultar enlaces del menú lateral que contengan 'trazabilidad' o 'ariba' */
     [data-testid="stSidebarNav"] a[href*="trazabilidad"],
     [data-testid="stSidebarNav"] a[href*="Trazabilidad"],
     [data-testid="stSidebarNav"] a[href*="ariba"],
@@ -73,7 +69,6 @@ st.markdown("""
 if "tema" not in st.session_state:
     st.session_state["tema"] = "claro"
 
-# Botón flotante para cambiar tema
 icono_tema = "🌙" if st.session_state["tema"] == "claro" else "☀️"
 if st.button(icono_tema, key="theme_toggle", help="Alternar Modo Claro/Oscuro"):
     st.session_state["tema"] = "oscuro" if st.session_state["tema"] == "claro" else "claro"
@@ -286,7 +281,6 @@ with tab_dx:
                 st.stop()
 
         elif modo == "Subir archivos":
-            # accept_multiple_files=True permite seleccionar archivos duplicados descargados (ej. ME5A (1).parquet)
             files_data = st.file_uploader(
                 "ME5A_con_Ariba (.xlsx o .parquet)",
                 type=["xlsx", "parquet"],
@@ -306,11 +300,9 @@ with tab_dx:
                 st.info("Sube los 4 archivos para generar el reporte.")
                 st.stop()
         else:
-            # En modo local, buscar automáticamente duplicados con (1), (2), o .parquet/.xlsx más reciente
             archivo_parquet_local = buscar_archivo_mas_reciente("data/ME5A_con_Ariba.parquet")
             archivo_excel_local = buscar_archivo_mas_reciente("data/ME5A_con_Ariba.xlsx")
 
-            # Priorizar parquet local si existe
             if os.path.exists(archivo_parquet_local):
                 archivo_data = archivo_parquet_local
             else:
@@ -348,7 +340,9 @@ with tab_dx:
             df_resp_mrp = loaders.cargar_responsable_mrp(archivo_mrp)
             
             df_calculado = transform.pipeline_completo(
-                df_data, df_resp_grupo, df_centro_sociedad, df_resp_mrp, fecha_corte=pd.Timestamp(fecha_corte)
+                df_data, df_resp_grupo, df_centro_sociedad, df_resp_mrp,
+                fecha_corte=pd.Timestamp(fecha_corte),
+                df_trazabilidad=st.session_state.get("df_trazabilidad_limpio"),
             )
             df_calculado["Año"] = df_calculado["Fecha de pedido"].dt.year
             df_calculado["Mes"] = df_calculado["Fecha de pedido"].dt.month
@@ -378,6 +372,33 @@ with tab_dx:
                 df_calculado["En_Trazabilidad"] = False
 
             df_calculado["Tipo Ariba"] = df_calculado.apply(determinar_tipo_ariba, axis=1)
+
+            # Si la solicitud matcheó con Trazabilidad (mismo match que ya usa
+            # el reemplazo de fecha en transform.py), ese es un dato real de
+            # SAP — más confiable que la heurística de texto/prefijo de
+            # determinar_tipo_ariba. Se fuerza la etiqueta a "No Catalogada"
+            # para esas filas, sin importar qué haya devuelto la heurística
+            # (por ejemplo, si el rango de fechas subido a Trazabilidad no
+            # coincidía antes y la había dejado como Catalogada/Directa).
+            df_calculado.loc[df_calculado["En_Trazabilidad"], "Tipo Ariba"] = "🔵 ARIBA NO CATALOGADA"
+
+            # --- INICIO NUEVA LÓGICA DE NEGOCIO ---
+            es_no_catalogada = df_calculado["Tipo Ariba"] == "🔵 ARIBA NO CATALOGADA"
+            sin_pr_agregada = df_calculado["Fecha de pedido"].isna() | df_calculado["Pedido"].isna()
+            tiene_pr_inicial = df_calculado["Fecha de liberación"].notna()
+            
+            casos_pendientes = es_no_catalogada & sin_pr_agregada & tiene_pr_inicial
+
+            fecha_hoy = pd.Timestamp.today().normalize()
+            fecha_liberacion = pd.to_datetime(df_calculado["Fecha de liberación"], errors="coerce").dt.normalize()
+            dias_acumulados = (fecha_hoy - fecha_liberacion).dt.days
+            
+            df_calculado["Nivel de Servicio"] = np.where(
+                casos_pendientes,
+                dias_acumulados,
+                df_calculado["Nivel de Servicio"]
+            )
+            # --- FIN NUEVA LÓGICA DE NEGOCIO ---
 
             st.session_state["_df_pipeline"] = df_calculado
             st.session_state["_clave_pipeline"] = clave_actual
@@ -415,7 +436,26 @@ with tab_dx:
     with c3:
         tipos_ariba = st.multiselect("Origen / Tipo Solicitud", sorted(df["Tipo Ariba"].dropna().unique()))
 
+    # ---- Filtro para Excluir IDs de Solped ----
+    solpeds_excluir_raw = st.text_area(
+        "🚫 Excluir Solicitudes de Pedido (IDs)", 
+        placeholder="Pega las IDs a excluir separadas por coma, espacio o línea. Ej: 10045982, 3001892",
+        help="Ingresa las IDs de Solped que deseas ocultar y excluir del reporte.",
+        height=80
+    )
+
     df_f = df.copy()
+
+    # Aplicación de exclusión de IDs
+    if solpeds_excluir_raw.strip():
+        ids_excluir = set(re.split(r'[,\s\n]+', solpeds_excluir_raw.strip()))
+        ids_excluir = {i for i in ids_excluir if i}  # Elimina valores vacíos
+        
+        if ids_excluir:
+            solpeds_str = df_f["Solicitud de pedido"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+            df_f = df_f[~solpeds_str.isin(ids_excluir)]
+            checkpoints.append(("0b. Tras exclusión por ID Solped", len(df_f)))
+
     if centros:
         df_f = df_f[df_f["Centro"].isin(centros)]
     checkpoints.append(("1. Tras filtro Centro", len(df_f)))
@@ -428,7 +468,7 @@ with tab_dx:
         df_f = df_f[df_f["Tipo Ariba"].isin(tipos_ariba)]
     checkpoints.append(("2b. Tras filtro Origen / Tipo Solicitud", len(df_f)))
 
-    _snapshot("2. Tras Centro + Aplica? + Origen", df_f)
+    _snapshot("2. Tras Centro + Aplica? + Origen + Exclusiones", df_f)
 
     # ---- Estado Solped ----
     st.caption("Estado Solped (el filtro de fecha de abajo solo aplica dentro de 'Pedido completo')")
@@ -579,7 +619,6 @@ with tab_dx:
             tarjeta(
                 "Nivel de Servicio",
                 f"{txt_dias} días",
-                subtitulo=f"Lead Time Total: <b>{txt_lt}</b> días",
                 fondo=f_dias,
                 borde=b_dias,
             ),
@@ -675,6 +714,7 @@ with tab_dx:
     )
     tabla_comprador = transform.calcular_metricas_por_grupo(df_f, [col_comprador])
     tabla_comprador = transform.agregar_fila_total(tabla_comprador, df_f, [col_comprador])
+    tabla_comprador = tabla_comprador.drop(columns=["Promedio Lead Time Total"], errors="ignore")
     st.markdown(tabla_enaex(tabla_comprador), unsafe_allow_html=True)
 
     st.write("")
@@ -686,6 +726,7 @@ with tab_dx:
         st.subheader("Por centro logístico")
         st.caption("Vista fija — el total calza con la vista por comprador.")
         tabla_fija = transform.tabla_centros_fija(df_f)
+        tabla_fija = tabla_fija.drop(columns=["Promedio Lead Time Total"], errors="ignore")
         st.markdown(tabla_enaex(tabla_fija, compacta=True), unsafe_allow_html=True)
 
     with vc2:
@@ -695,6 +736,7 @@ with tab_dx:
         tabla_detalle = transform.calcular_metricas_por_grupo(df_f, cols_detalle)
         tabla_detalle = tabla_detalle.sort_values("Pos. OC generadas", ascending=False)
         tabla_detalle = transform.agregar_fila_total(tabla_detalle, df_f, cols_detalle)
+        tabla_detalle = tabla_detalle.drop(columns=["Promedio Lead Time Total"], errors="ignore")
         st.markdown(tabla_enaex(tabla_detalle, max_height=300, compacta=True), unsafe_allow_html=True)
 
     st.divider()
