@@ -86,19 +86,44 @@ def obtener_indicadores_tiempo_real():
     return valores_defecto
 
 # =============================================================================
+# FUNCIONES DE CONVERSIÓN DE MONEDA MULTIVARIABLE
+# =============================================================================
+def convertir_moneda(monto, moneda_origen, tc_usd, tc_uf, tc_eur):
+    monto, moneda_origen = float(monto or 0.0), str(moneda_origen).upper().strip()
+    if moneda_origen in ["CLP", "PESO", "PESOS"]: clp = monto
+    elif moneda_origen in ["USD", "US$", "DOLAR", "DOLARES"]: clp = monto * tc_usd
+    elif moneda_origen in ["UF"]: clp = monto * tc_uf
+    elif moneda_origen in ["EUR", "EUROS", "EUR$"]: clp = monto * tc_eur
+    else: clp = monto
+    
+    usd = clp / tc_usd if tc_usd > 0 else 0.0
+    eur = clp / tc_eur if tc_eur > 0 else 0.0
+    return clp, usd, eur
+
+# =============================================================================
 # FUNCIONES DE EXPORTACIÓN Y FORMATO (EXCEL Y PDF)
 # =============================================================================
 def generar_excel_estilizado(df, moneda_vista, transporte_reporte="No Especificado"):
     buffer_excel = io.BytesIO()
     cols_export = [
         'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
-        'Precio Unitario', 'Moneda', 'Proveedor Visual', 'Transporte',
+        'Precio Unitario', 'Moneda', 'Subtotal Material', 'Costo Transporte', 'Moneda Transp.',
+        'Total Materiales', 'Total Envio', 'Proveedor Visual', 'Transporte',
         'Calendario de entrega', 'Días para Entrega', 'Monto Total Visualizado'
     ]
-    df_export = df[[c for c in cols_export if c in df.columns]].copy()
+    
+    df_temp = df.copy()
+    if f"Subtotal Material ({moneda_vista})" in df_temp.columns:
+        df_temp['Total Materiales'] = df_temp[f"Subtotal Material ({moneda_vista})"]
+    if f"Costo Transporte ({moneda_vista})" in df_temp.columns:
+        df_temp['Total Envio'] = df_temp[f"Costo Transporte ({moneda_vista})"]
+
+    df_export = df_temp[[c for c in cols_export if c in df_temp.columns]].copy()
     df_export.rename(columns={
         'Proveedor Visual': 'Proveedor', 
-        'Monto Total Visualizado': f'Total ({moneda_vista})'
+        'Monto Total Visualizado': f'Total Consolidado ({moneda_vista})',
+        'Total Materiales': f'Subtotal Mat ({moneda_vista})',
+        'Total Envio': f'Flete/Envio ({moneda_vista})'
     }, inplace=True)
     
     with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
@@ -144,13 +169,13 @@ def generar_excel_estilizado(df, moneda_vista, transporte_reporte="No Especifica
                     cell.fill = ZEBRA_FILL
                 
                 col_header = worksheet.cell(row=4, column=cell.column).value
-                if col_header in ['Precio Unitario', f'Total ({moneda_vista})']:
+                if col_header in ['Precio Unitario', 'Costo Transporte', f'Subtotal Mat ({moneda_vista})', f'Flete/Envio ({moneda_vista})', f'Total Consolidado ({moneda_vista})']:
                     cell.number_format = '$#,##0.00'
                     cell.alignment = Alignment(horizontal='right', vertical='center')
                 elif col_header in ['Cantidad', 'Pos', 'Días para Entrega']:
                     cell.number_format = '#,##0'
                     cell.alignment = Alignment(horizontal='center', vertical='center')
-                elif col_header in ['SOLPED', 'Moneda', 'UM', 'Centro', 'Transporte', 'Calendario de entrega']:
+                elif col_header in ['SOLPED', 'Moneda', 'Moneda Transp.', 'UM', 'Centro', 'Transporte', 'Calendario de entrega']:
                     cell.alignment = Alignment(horizontal='center', vertical='center')
                 else:
                     cell.alignment = Alignment(horizontal='left', vertical='center')
@@ -193,20 +218,23 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
         pdf.add_page()
         
         monto_total = df["Monto Total Visualizado"].sum() if "Monto Total Visualizado" in df.columns else 0.0
+        monto_mat = df[f"Subtotal Material ({moneda_vista})"].sum() if f"Subtotal Material ({moneda_vista})" in df.columns else 0.0
+        monto_trans = df[f"Costo Transporte ({moneda_vista})"].sum() if f"Costo Transporte ({moneda_vista})" in df.columns else 0.0
+        
         pdf.set_fill_color(243, 244, 246)
         pdf.rect(10, pdf.get_y(), 277, 10, style='F')
-        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_font('Helvetica', 'B', 8)
         pdf.set_text_color(30, 58, 138)
         
-        resumen_txt = f'  RESUMEN GENERAL: Total Ofertas Evaluadas: {len(df)}    |    Monto Acumulado ({moneda_vista}): ${monto_total:,.2f}'
+        resumen_txt = f'RESUMEN ({moneda_vista}): Materiales: ${monto_mat:,.2f} | Envios: ${monto_trans:,.2f} | Total Consolidado: ${monto_total:,.2f}'
         if transporte_reporte and transporte_reporte != "No Especificado":
-            resumen_txt += f'    |    Transporte General: {transporte_reporte}'
+            resumen_txt += f' | Transp. Gen: {transporte_reporte}'
             
         pdf.cell(0, 8, resumen_txt, ln=True)
         pdf.ln(4)
 
-        cols = [("SOLPED", 22), ("Material", 70), ("Proveedor", 42), ("Transporte", 20),
-                ("Cant.", 15), ("Mon", 15), (f"Total ({moneda_vista})", 35), ("Entrega", 30)]
+        cols = [("SOLPED", 20), ("Material", 55), ("Proveedor", 35), ("Incoterm", 18),
+                ("Cant.", 12), (f"Mat ({moneda_vista})", 32), (f"Envio ({moneda_vista})", 32), (f"Total ({moneda_vista})", 38), ("Entrega", 25)]
 
         pdf.set_font('Helvetica', 'B', 8)
         pdf.set_fill_color(30, 58, 138)
@@ -233,13 +261,15 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
             if fill: pdf.set_fill_color(249, 250, 251)
             else: pdf.set_fill_color(255, 255, 255)
 
-            solped = clean_str_pdf(row.get('SOLPED', ''))[:15]
-            material = clean_str_pdf(row.get('Material', ''))[:45]
-            proveedor = clean_str_pdf(row.get('Proveedor Visual', ''))[:28]
-            transporte = clean_str_pdf(row.get('Transporte', ''))[:12]
+            solped = clean_str_pdf(row.get('SOLPED', ''))[:12]
+            material = clean_str_pdf(row.get('Material', ''))[:35]
+            proveedor = clean_str_pdf(row.get('Proveedor Visual', ''))[:22]
+            transporte = clean_str_pdf(row.get('Transporte', ''))[:10]
             cant = f"{row.get('Cantidad', 0):,.0f}"
-            mon = clean_str_pdf(row.get('Moneda', 'CLP'))
-            monto = f"${row.get('Monto Total Visualizado', 0):,.2f}"
+            
+            m_mat = f"${row.get(f'Subtotal Material ({moneda_vista})', 0):,.2f}"
+            m_env = f"${row.get(f'Costo Transporte ({moneda_vista})', 0):,.2f}"
+            m_tot = f"${row.get('Monto Total Visualizado', 0):,.2f}"
             
             if pd.notna(row.get('Calendario de entrega')):
                 try:
@@ -256,9 +286,10 @@ def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
             pdf.cell(cols[2][1], 6, proveedor, border=1, align='L', fill=True)
             pdf.cell(cols[3][1], 6, transporte, border=1, align='C', fill=True)
             pdf.cell(cols[4][1], 6, cant, border=1, align='C', fill=True)
-            pdf.cell(cols[5][1], 6, mon, border=1, align='C', fill=True)
-            pdf.cell(cols[6][1], 6, monto, border=1, align='R', fill=True)
-            pdf.cell(cols[7][1], 6, fecha_str, border=1, align='C', fill=True)
+            pdf.cell(cols[5][1], 6, m_mat, border=1, align='R', fill=True)
+            pdf.cell(cols[6][1], 6, m_env, border=1, align='R', fill=True)
+            pdf.cell(cols[7][1], 6, m_tot, border=1, align='R', fill=True)
+            pdf.cell(cols[8][1], 6, fecha_str, border=1, align='C', fill=True)
             pdf.ln()
             fill = not fill
 
@@ -288,7 +319,7 @@ def procesar_y_reparar_planilla(df):
 
     df.columns = deduplicar_columnas(df.columns)
 
-    palabras_clave = ['solped', 'material', 'pos', 'texto', 'centro', 'cant', 'cantidad', 'proveedor', 'acreedor', 'vendor', 'documento', 'precio', 'moneda', 'solicitud', 'requerimiento', 'denominacion', 'descripcion']
+    palabras_clave = ['solped', 'material', 'pos', 'texto', 'centro', 'cant', 'cantidad', 'proveedor', 'acreedor', 'vendor', 'documento', 'precio', 'moneda', 'flete', 'transporte', 'envio', 'shipping']
     
     current_cols_lower = " ".join([str(c).lower() for c in df.columns])
     current_matches = sum(1 for kw in palabras_clave if kw in current_cols_lower)
@@ -427,6 +458,12 @@ def extraer_materiales_de_masivo(df, id_solped):
         cant_raw = clean_num(get_val(['cant', 'cantidad', 'ctd'], 1.0), 1.0)
         cant_clean = int(cant_raw) if float(cant_raw).is_integer() else cant_raw
 
+        moneda_mat = str(get_val(['moneda', 'curr', 'mon'], "CLP")).upper()
+        
+        # DETECCIÓN DE COSTO Y MONEDA DE TRANSPORTE
+        costo_envio = clean_num(get_val(['costo transporte', 'costo envio', 'costo de envio', 'flete', 'transporte monto', 'shipping', 'freight', 'monto transporte', 'valor flete', 'precio transporte'], 0.0), 0.0)
+        moneda_envio = str(get_val(['moneda transporte', 'moneda flete', 'moneda envio', 'moneda trans', 'curr trans'], moneda_mat)).upper()
+
         fecha_hist = get_val(['fecha', 'date', 'entrega', 'creacion', 'f.pedido'], None)
         fecha_parsed = date.today()
         if fecha_hist and fecha_hist != "":
@@ -441,24 +478,15 @@ def extraer_materiales_de_masivo(df, id_solped):
             "Cantidad": cant_clean,
             "UM": str(get_val(['um', 'unidad', 'unid', 'medida'], "C/U")).upper(),
             "Precio Unitario": clean_num(get_val(['precio', 'monto', 'val', 'costo', 'p.u', 'neto', 'p.unitario'], 0.0), 0.0),
-            "Moneda": str(get_val(['moneda', 'curr', 'mon'], "CLP")).upper(),
+            "Moneda": moneda_mat,
+            "Costo Transporte": costo_envio,
+            "Moneda Transp.": moneda_envio,
             "Proveedor": proveedor_sugerido,
             "Transporte": str(get_val(['transporte', 'incoterm', 'despacho'], "EXW")),
             "Calendario de entrega": fecha_parsed,
             "Observaciones": str(get_val(['obs', 'observacion', 'comentario', 'notas'], ""))
         })
     return posiciones
-
-def convertir_moneda(monto, moneda_origen, tc_usd, tc_uf, tc_eur):
-    monto, moneda_origen = float(monto or 0.0), str(moneda_origen).upper()
-    if moneda_origen == "CLP": clp = monto
-    elif moneda_origen == "USD": clp = monto * tc_usd
-    elif moneda_origen == "UF": clp = monto * tc_uf
-    elif moneda_origen == "EUR": clp = monto * tc_eur
-    else: clp = monto
-    usd = clp / tc_usd if tc_usd > 0 else 0.0
-    eur = clp / tc_eur if tc_eur > 0 else 0.0
-    return clp, usd, eur
 
 @st.cache_data(show_spinner="Procesando archivo inteligentemente...")
 def leer_archivo_cached(file_bytes, file_name):
@@ -470,7 +498,7 @@ def leer_archivo_cached(file_bytes, file_name):
             
             best_sheet = None
             best_score = -1
-            keywords_scoring = ['solped', 'material', 'pos', 'texto', 'centro', 'cant', 'cantidad', 'proveedor', 'acreedor', 'vendor', 'precio', 'monto', 'pr', 'requerimiento']
+            keywords_scoring = ['solped', 'material', 'pos', 'texto', 'centro', 'cant', 'cantidad', 'proveedor', 'acreedor', 'vendor', 'precio', 'monto', 'pr', 'requerimiento', 'flete', 'transporte']
             
             for sheet in xls.sheet_names:
                 try:
@@ -587,6 +615,41 @@ if st.session_state.df_masivo is not None:
 tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
 
 # =============================================================================
+# HELPER PARA GUARDAR ELEMENTOS DE FORMA SEGURA Y MULTIMONEDA
+# =============================================================================
+def guardar_lista_en_comparativo(lista_items, default_solped="N/A"):
+    for r in lista_items:
+        cant = float(r.get("Cantidad", 1.0))
+        pu = float(r.get("Precio Unitario", 0.0))
+        subtotal_mat = cant * pu
+        moneda_mat = r.get("Moneda", "CLP")
+        
+        costo_env = float(r.get("Costo Transporte", 0.0))
+        moneda_env = r.get("Moneda Transp.", moneda_mat)
+        
+        # Conversiones independientes
+        mat_clp, mat_usd, mat_eur = convertir_moneda(subtotal_mat, moneda_mat, tc_usd, tc_uf, tc_eur)
+        env_clp, env_usd, env_eur = convertir_moneda(costo_env, moneda_env, tc_usd, tc_uf, tc_eur)
+        
+        item_guardar = r.copy()
+        if not item_guardar.get("SOLPED") or item_guardar.get("SOLPED") in ["", "N/A", "None", "nan"]:
+            item_guardar["SOLPED"] = default_solped if default_solped else "N/A"
+            
+        item_guardar["Subtotal Material CLP"] = mat_clp
+        item_guardar["Subtotal Material USD"] = mat_usd
+        item_guardar["Subtotal Material EUR"] = mat_eur
+        
+        item_guardar["Costo Transporte CLP"] = env_clp
+        item_guardar["Costo Transporte USD"] = env_usd
+        item_guardar["Costo Transporte EUR"] = env_eur
+        
+        item_guardar["Total CLP"] = mat_clp + env_clp
+        item_guardar["Total USD"] = mat_usd + env_usd
+        item_guardar["Total EUR"] = mat_eur + env_eur
+        
+        st.session_state.ofertas_manuales.append(item_guardar)
+
+# =============================================================================
 # TAB 1: EVALUACIÓN POR SOLPED
 # =============================================================================
 with tabs[0]:
@@ -616,7 +679,7 @@ with tabs[0]:
     if key_lista not in st.session_state:
         st.session_state[key_lista] = [{
             "SOLPED": "PR151762", "Pos": 1, "Material": "PROYECTOR LED 50W DS1", "Centro": "E024", "Cantidad": 10, 
-            "UM": "CADA UNO", "Precio Unitario": 8190.0, "Moneda": "CLP", 
+            "UM": "CADA UNO", "Precio Unitario": 8190.0, "Moneda": "CLP", "Costo Transporte": 0.0, "Moneda Transp.": "CLP",
             "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": ""
         }]
 
@@ -628,18 +691,11 @@ with tabs[0]:
             st.write(f"**Materiales extraídos ({len(lista_materiales)} ítems):**")
         with col_m_save:
             if st.button("💾 Guardar Oferta en Cuadro Comparativo", type="primary", key="btn_save_top_t1", use_container_width=True):
-                for r in st.session_state[key_lista]:
-                    clp, usd, eur = convertir_moneda(float(r["Precio Unitario"]) * float(r["Cantidad"]), r["Moneda"], tc_usd, tc_uf, tc_eur)
-                    item_guardar = r.copy()
-                    if not item_guardar.get("SOLPED") or item_guardar.get("SOLPED") in ["", "N/A", "None", "nan"]:
-                        item_guardar["SOLPED"] = solped_id if solped_id else "N/A"
-                    item_guardar["Total CLP"] = clp
-                    item_guardar["Total USD"] = usd
-                    item_guardar["Total EUR"] = eur
-                    st.session_state.ofertas_manuales.append(item_guardar)
+                guardar_lista_en_comparativo(st.session_state[key_lista], solped_id)
                 st.success("¡Oferta guardada exitosamente en el Cuadro Comparativo!")
 
         idx_a_eliminar = None
+        moneda_opts = ["CLP", "USD", "EUR"]
         
         for idx, item in enumerate(lista_materiales):
             with st.container(border=True):
@@ -655,30 +711,39 @@ with tabs[0]:
                     if st.button("🗑️ Eliminar", key=f"btn_del_t1_{idx}", type="primary", use_container_width=True):
                         idx_a_eliminar = idx
 
-                c1, c2, c3, c4, c5, c6 = st.columns([1, 1.5, 1, 1.5, 1.5, 1.5])
+                c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([1, 1.3, 0.9, 1.3, 0.9, 1.5, 1.2, 1.3])
                 
                 cant_val = float(item.get("Cantidad", 1.0))
                 cant_val_clean = int(cant_val) if cant_val.is_integer() else cant_val
                 item["Cantidad"] = c1.number_input("Cantidad", value=cant_val_clean, format="%g", key=f"cant_{key_lista}_{idx}")
                 
-                item["Precio Unitario"] = c2.number_input("Precio Unitario", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"pu_{key_lista}_{idx}")
+                item["Precio Unitario"] = c2.number_input("P. Unit. Mat.", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"pu_{key_lista}_{idx}")
                 
-                moneda_opts = ["CLP", "USD", "EUR"]
                 m_idx = moneda_opts.index(item.get("Moneda", "CLP")) if item.get("Moneda") in moneda_opts else 0
-                item["Moneda"] = c3.selectbox("Moneda", moneda_opts, index=m_idx, key=f"mon_{key_lista}_{idx}")
+                item["Moneda"] = c3.selectbox("Mon. Mat", moneda_opts, index=m_idx, key=f"mon_{key_lista}_{idx}")
+
+                item["Costo Transporte"] = c4.number_input("Costo Envio", value=float(item.get("Costo Transporte", 0.0)), format="%.2f", key=f"ct_{key_lista}_{idx}")
                 
-                item["Proveedor"] = c4.text_input("Proveedor", value=str(item.get("Proveedor", "")), key=f"prov_{key_lista}_{idx}")
+                mt_idx = moneda_opts.index(item.get("Moneda Transp.", item["Moneda"])) if item.get("Moneda Transp.") in moneda_opts else m_idx
+                item["Moneda Transp."] = c5.selectbox("Mon. Env", moneda_opts, index=mt_idx, key=f"mont_{key_lista}_{idx}")
+
+                item["Proveedor"] = c6.text_input("Proveedor", value=str(item.get("Proveedor", "")), key=f"prov_{key_lista}_{idx}")
                 
                 trans_opts = OPCIONES_TRANSPORTE
                 t_idx = trans_opts.index(item.get("Transporte", "EXW")) if item.get("Transporte") in trans_opts else 4
-                item["Transporte"] = c5.selectbox("Transporte", trans_opts, index=t_idx, key=f"trans_{key_lista}_{idx}")
+                item["Transporte"] = c7.selectbox("Incoterm", trans_opts, index=t_idx, key=f"trans_{key_lista}_{idx}")
 
                 valor_fecha = item.get("Calendario de entrega", date.today())
                 if isinstance(valor_fecha, str):
                     try: valor_fecha = datetime.strptime(valor_fecha, "%Y-%m-%d").date()
                     except: valor_fecha = date.today()
                 
-                item["Calendario de entrega"] = c6.date_input("Fecha Entrega", value=valor_fecha, key=f"date_{key_lista}_{idx}")
+                item["Calendario de entrega"] = c8.date_input("Fecha Entrega", value=valor_fecha, key=f"date_{key_lista}_{idx}")
+
+                # Resumen Bruto explicativo
+                subtotal_bruto = (item["Cantidad"] * item["Precio Unitario"])
+                c_envio = item["Costo Transporte"]
+                st.caption(f"🔎 **Total bruto posición (sin convertir):** Material: {subtotal_bruto:,.2f} {item['Moneda']} | Envío: {c_envio:,.2f} {item['Moneda Transp.']}")
 
         if idx_a_eliminar is not None:
             st.session_state[key_lista].pop(idx_a_eliminar)
@@ -686,15 +751,7 @@ with tabs[0]:
 
         st.divider()
         if st.button("💾 Guardar Oferta en Cuadro Comparativo", type="primary", key="btn_save_bot_t1"):
-            for r in st.session_state[key_lista]:
-                clp, usd, eur = convertir_moneda(float(r["Precio Unitario"]) * float(r["Cantidad"]), r["Moneda"], tc_usd, tc_uf, tc_eur)
-                item_guardar = r.copy()
-                if not item_guardar.get("SOLPED") or item_guardar.get("SOLPED") in ["", "N/A", "None", "nan"]:
-                    item_guardar["SOLPED"] = solped_id if solped_id else "N/A"
-                item_guardar["Total CLP"] = clp
-                item_guardar["Total USD"] = usd
-                item_guardar["Total EUR"] = eur
-                st.session_state.ofertas_manuales.append(item_guardar)
+            guardar_lista_en_comparativo(st.session_state[key_lista], solped_id)
             st.success("¡Oferta guardada exitosamente en el Cuadro Comparativo!")
 
 # =============================================================================
@@ -722,8 +779,8 @@ with tabs[1]:
     if "manual_items_list" not in st.session_state:
         st.session_state["manual_items_list"] = [{
             "SOLPED": "MANUAL", "Pos": 1, "Material": "Ítem Manual 1", "Centro": "E001", "Cantidad": 1, "UM": "C/U",
-            "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", "Transporte": "EXW",
-            "Calendario de entrega": date.today(), "Observaciones": ""
+            "Precio Unitario": 0.0, "Moneda": "CLP", "Costo Transporte": 0.0, "Moneda Transp.": "CLP",
+            "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": ""
         }]
 
     lista_manual = st.session_state["manual_items_list"]
@@ -734,24 +791,18 @@ with tabs[1]:
             lista_manual.append({
                 "SOLPED": manual_solped if manual_solped else "MANUAL",
                 "Pos": len(lista_manual) + 1, "Material": "Nuevo Material", "Centro": "E001", "Cantidad": 1, "UM": "C/U",
-                "Precio Unitario": 0.0, "Moneda": "CLP", "Proveedor": "", "Transporte": "EXW",
-                "Calendario de entrega": date.today(), "Observaciones": ""
+                "Precio Unitario": 0.0, "Moneda": "CLP", "Costo Transporte": 0.0, "Moneda Transp.": "CLP",
+                "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": ""
             })
             st.rerun()
     with col_man_btn2:
         if st.button("💾 Guardar Cotización Manual Completa", type="primary", key="btn_save_top_t2", use_container_width=True):
-            for item in st.session_state["manual_items_list"]:
-                clp, usd, eur = convertir_moneda(float(item["Precio Unitario"]) * float(item["Cantidad"]), item["Moneda"], tc_usd, tc_uf, tc_eur)
-                item_guardar = item.copy()
-                if not item_guardar.get("SOLPED") or item_guardar.get("SOLPED") in ["", "N/A", "None", "nan"]:
-                    item_guardar["SOLPED"] = manual_solped if manual_solped else "MANUAL"
-                item_guardar["Total CLP"] = clp
-                item_guardar["Total USD"] = usd
-                item_guardar["Total EUR"] = eur
-                st.session_state.ofertas_manuales.append(item_guardar)
+            guardar_lista_en_comparativo(st.session_state["manual_items_list"], manual_solped)
             st.success("¡Cotización agregada al Cuadro Comparativo!")
 
     idx_del_manual = None
+    moneda_opts = ["CLP", "USD", "EUR"]
+
     for idx, item in enumerate(lista_manual):
         with st.container(border=True):
             col_m_title, col_m_del = st.columns([8, 2])
@@ -761,45 +812,41 @@ with tabs[1]:
                 if st.button("🗑️ Eliminar", key=f"btn_del_t2_{idx}", type="primary", use_container_width=True):
                     idx_del_manual = idx
 
-            c1, c2, c3, c4, c5, c6 = st.columns([1, 1.5, 1, 1.5, 1.5, 1.5])
+            c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([1, 1.3, 0.9, 1.3, 0.9, 1.5, 1.2, 1.3])
             
             man_cant_val = float(item.get("Cantidad", 1.0))
             man_cant_clean = int(man_cant_val) if man_cant_val.is_integer() else man_cant_val
             item["Cantidad"] = c1.number_input("Cantidad", value=man_cant_clean, format="%g", key=f"man_cant_{idx}")
             
-            item["Precio Unitario"] = c2.number_input("Precio Unitario", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"man_pu_{idx}")
+            item["Precio Unitario"] = c2.number_input("P. Unit. Mat.", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"man_pu_{idx}")
             
-            moneda_opts = ["CLP", "USD", "EUR"]
             m_idx = moneda_opts.index(item.get("Moneda", "CLP")) if item.get("Moneda") in moneda_opts else 0
-            item["Moneda"] = c3.selectbox("Moneda", moneda_opts, index=m_idx, key=f"man_mon_{idx}")
+            item["Moneda"] = c3.selectbox("Mon. Mat", moneda_opts, index=m_idx, key=f"man_mon_{idx}")
             
-            item["Proveedor"] = c4.text_input("Proveedor", value=str(item.get("Proveedor", "")), key=f"man_prov_{idx}")
+            item["Costo Transporte"] = c4.number_input("Costo Envio", value=float(item.get("Costo Transporte", 0.0)), format="%.2f", key=f"man_ct_{idx}")
+            
+            mt_idx = moneda_opts.index(item.get("Moneda Transp.", item["Moneda"])) if item.get("Moneda Transp.") in moneda_opts else m_idx
+            item["Moneda Transp."] = c5.selectbox("Mon. Env", moneda_opts, index=mt_idx, key=f"man_mont_{idx}")
+
+            item["Proveedor"] = c6.text_input("Proveedor", value=str(item.get("Proveedor", "")), key=f"man_prov_{idx}")
             
             trans_opts = OPCIONES_TRANSPORTE
             t_idx = trans_opts.index(item.get("Transporte", "EXW")) if item.get("Transporte") in trans_opts else 4
-            item["Transporte"] = c5.selectbox("Transporte", trans_opts, index=t_idx, key=f"man_trans_{idx}")
+            item["Transporte"] = c7.selectbox("Incoterm", trans_opts, index=t_idx, key=f"man_trans_{idx}")
 
             valor_fecha_man = item.get("Calendario de entrega", date.today())
             if isinstance(valor_fecha_man, str):
                 try: valor_fecha_man = datetime.strptime(valor_fecha_man, "%Y-%m-%d").date()
                 except: valor_fecha_man = date.today()
             
-            item["Calendario de entrega"] = c6.date_input("Fecha Entrega", value=valor_fecha_man, key=f"man_date_{idx}")
+            item["Calendario de entrega"] = c8.date_input("Fecha Entrega", value=valor_fecha_man, key=f"man_date_{idx}")
 
     if idx_del_manual is not None:
         st.session_state["manual_items_list"].pop(idx_del_manual)
         st.rerun()
 
     if st.button("💾 Guardar Cotización Manual Completa", type="primary", key="btn_save_bot_t2"):
-        for item in st.session_state["manual_items_list"]:
-            clp, usd, eur = convertir_moneda(float(item["Precio Unitario"]) * float(item["Cantidad"]), item["Moneda"], tc_usd, tc_uf, tc_eur)
-            item_guardar = item.copy()
-            if not item_guardar.get("SOLPED") or item_guardar.get("SOLPED") in ["", "N/A", "None", "nan"]:
-                item_guardar["SOLPED"] = manual_solped if manual_solped else "MANUAL"
-            item_guardar["Total CLP"] = clp
-            item_guardar["Total USD"] = usd
-            item_guardar["Total EUR"] = eur
-            st.session_state.ofertas_manuales.append(item_guardar)
+        guardar_lista_en_comparativo(st.session_state["manual_items_list"], manual_solped)
         st.success("¡Cotización agregada al Cuadro Comparativo!")
 
 # =============================================================================
@@ -820,25 +867,28 @@ with tabs[2]:
             lambda x: 'Sin Especificar' if x in ['', 'none', 'None', 'nan', 'NULL', 'null'] else x
         )
 
-        cols_orden = [
-            'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
-            'Precio Unitario', 'Moneda', 'Proveedor Visual', 'Transporte', 
-            'Calendario de entrega', 'Total CLP', 'Total USD', 'Total EUR', 'Observaciones'
-        ]
-        
-        existing_cols = [c for c in cols_orden if c in df_comp.columns]
-        other_cols = [c for c in df_comp.columns if c not in cols_orden and c not in ['Total CLP', 'Total USD', 'Total EUR']]
-        df_comp = df_comp[existing_cols + other_cols]
-
         col_opt1, col_opt2 = st.columns([1, 1])
         with col_opt1:
-            moneda_vista = st.radio("💱 Seleccionar Moneda de Visualización:", options=["CLP", "USD", "EUR"], horizontal=True)
+            moneda_vista = st.radio("💱 Seleccionar Moneda Consolidada de Visualización:", options=["CLP", "USD", "EUR"], horizontal=True)
         with col_opt2:
             transporte_reporte = st.selectbox("🚚 Transporte General (Cabecera reporte):", options=["No Especificado"] + OPCIONES_TRANSPORTE, index=0)
 
-        if moneda_vista == "CLP": df_comp["Monto Total Visualizado"] = df_comp["Total CLP"]
-        elif moneda_vista == "USD": df_comp["Monto Total Visualizado"] = df_comp["Total USD"]
-        elif moneda_vista == "EUR": df_comp["Monto Total Visualizado"] = df_comp["Total EUR"]
+        # ASIGNACIÓN DINÁMICA DE VALORES CONVERTIDOS
+        df_comp[f"Subtotal Material ({moneda_vista})"] = df_comp[f"Subtotal Material {moneda_vista}"]
+        df_comp[f"Costo Transporte ({moneda_vista})"] = df_comp[f"Costo Transporte {moneda_vista}"]
+        df_comp["Monto Total Visualizado"] = df_comp[f"Total {moneda_vista}"]
+
+        cols_orden = [
+            'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
+            'Precio Unitario', 'Moneda', f'Subtotal Material ({moneda_vista})', 
+            'Costo Transporte', 'Moneda Transp.', f'Costo Transporte ({moneda_vista})',
+            'Monto Total Visualizado', 'Proveedor Visual', 'Transporte', 
+            'Calendario de entrega', 'Observaciones'
+        ]
+        
+        existing_cols = [c for c in cols_orden if c in df_comp.columns]
+        other_cols = [c for c in df_comp.columns if c not in cols_orden and not c.startswith(('Subtotal Material ', 'Costo Transporte ', 'Total '))]
+        df_comp_display = df_comp[existing_cols + other_cols].copy()
 
         df_comp['Calendario de entrega'] = pd.to_datetime(df_comp['Calendario de entrega'], errors='coerce')
         hoy = pd.Timestamp(date.today())
@@ -846,6 +896,7 @@ with tabs[2]:
         df_comp['Días para Entrega'] = (df_comp['Calendario de entrega'] - hoy).dt.days
         df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: int(x) if pd.notna(x) and x > 0 else 0)
         df_comp['Calendario de entrega'] = df_comp['Calendario de entrega'].dt.strftime('%d/%m/%Y').fillna('N/A')
+        df_comp_display['Calendario de entrega'] = df_comp['Calendario de entrega']
 
         bytes_excel = generar_excel_estilizado(df_comp, moneda_vista, transporte_reporte)
         bytes_pdf = generar_pdf(df_comp, moneda_vista, transporte_reporte)
@@ -864,7 +915,7 @@ with tabs[2]:
 
         st.divider()
 
-        st.markdown("### 🏆 Motor de Recomendación")
+        st.markdown("### 🏆 Motor de Recomendación y Comparación")
         
         def highlight_best(df):
             styles = pd.DataFrame('', index=df.index, columns=df.columns)
@@ -878,21 +929,22 @@ with tabs[2]:
                             styles.loc[group['Días para Entrega'].idxmin(), 'Días para Entrega'] = 'background-color: #DBEAFE; color: #1E3A8A; font-weight: bold;'
             return styles
 
-        if not df_comp.empty:
-            styled_df_comp = df_comp.style.apply(highlight_best, axis=None).format({
+        if not df_comp_display.empty:
+            styled_df_comp = df_comp_display.style.apply(highlight_best, axis=None).format({
                 "Cantidad": lambda x: f"{int(x)}" if pd.notna(x) and float(x).is_integer() else (f"{x:,.2f}" if pd.notna(x) else ""),
                 "Monto Total Visualizado": "$ {:,.2f}", 
                 "Precio Unitario": "$ {:,.2f}",
-                "Total CLP": "$ {:,.2f}", 
-                "Total USD": "$ {:,.2f}", 
-                "Total EUR": "$ {:,.2f}"
+                "Costo Transporte": "$ {:,.2f}",
+                f"Subtotal Material ({moneda_vista})": "$ {:,.2f}",
+                f"Costo Transporte ({moneda_vista})": "$ {:,.2f}"
             })
 
-            st.dataframe(styled_df_comp, height=350, use_container_width=True)
+            st.dataframe(styled_df_comp, height=380, use_container_width=True)
 
-            col_c1, col_c2 = st.columns(2)
-            with col_c1: st.metric("Total Ofertas Registradas", len(df_comp))
-            with col_c2: st.metric(f"Monto Total Acumulado ({moneda_vista})", f"$ {df_comp['Monto Total Visualizado'].sum():,.2f}")
+            col_c1, col_c2, col_c3 = st.columns(3)
+            with col_c1: st.metric(f"Subtotal Materiales ({moneda_vista})", f"$ {df_comp[f'Subtotal Material ({moneda_vista})'].sum():,.2f}")
+            with col_c2: st.metric(f"Total Transporte/Flete ({moneda_vista})", f"$ {df_comp[f'Costo Transporte ({moneda_vista})'].sum():,.2f}")
+            with col_c3: st.metric(f"Monto Total Consolidado ({moneda_vista})", f"$ {df_comp['Monto Total Visualizado'].sum():,.2f}")
                 
             st.divider()
             st.subheader("📈 Gráficos Comparativos por SOLPED")
