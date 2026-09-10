@@ -14,7 +14,7 @@ from openpyxl.utils import get_column_letter
 from fpdf import FPDF
 
 # =============================================================================
-# CONFIGURACIÓN DE PÁGINA Y ESTILOS CSS CON SCROLL HABILITADO
+# CONFIGURACIÓN DE PÁGINA Y ESTILOS CSS CON SCROLL CORREGIDO
 # =============================================================================
 st.set_page_config(
     page_title="Sistema Integrado de Evaluación de Ofertas - Enaex",
@@ -24,15 +24,17 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    /* Forzar scroll vertical completo en la ventana y contenedores */
-    html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+    /* Habilitar scroll vertical nativo en la app y contenedores principales */
+    html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"], section.main {
         overflow-y: auto !important;
-        height: auto !important;
+        height: 100% !important;
+        max-height: none !important;
     }
     
-    /* Espacio inferior para evitar que el contenido final quede tapado por la barra del sistema */
+    /* Espacio inferior de margen para evitar cortes de contenido */
     [data-testid="stMainBlockContainer"] {
-        padding-bottom: 10rem !important;
+        padding-bottom: 12rem !important;
+        max-width: 100% !important;
     }
 
     .main-header { font-size: 1.8rem; font-weight: 700; color: #1E3A8A; margin-bottom: 0.5rem; }
@@ -460,7 +462,6 @@ def extraer_materiales_de_masivo(df, id_solped):
 
         moneda_mat = str(get_val(['moneda', 'curr', 'mon'], "CLP")).upper()
         
-        # DETECCIÓN DE COSTO Y MONEDA DE TRANSPORTE
         costo_envio = clean_num(get_val(['costo transporte', 'costo envio', 'costo de envio', 'flete', 'transporte monto', 'shipping', 'freight', 'monto transporte', 'valor flete', 'precio transporte'], 0.0), 0.0)
         moneda_envio = str(get_val(['moneda transporte', 'moneda flete', 'moneda envio', 'moneda trans', 'curr trans'], moneda_mat)).upper()
 
