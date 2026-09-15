@@ -25,6 +25,16 @@ except ImportError:
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
 # ==============================================================================
+# CONFIGURACIÓN DE ENLACES SHAREPOINT / ONEDRIVE
+# ==============================================================================
+URLS_SHAREPOINT = {
+    "me5a": "https://empresassk-my.sharepoint.com/:x:/r/personal/cristian_vasquez_enaex_com/Documents/Dashboard%20seguimiento%20MRO%202026%20-%20Capacitaci%C3%B3n/ME5A%20con%20ariba.xlsx?d=w1dbb1fd7d39748fb9b26bab115444c7c&csf=1&web=1&e=So8bkh",
+    "responsable_grupo": "https://empresassk-my.sharepoint.com/:x:/r/personal/cristian_vasquez_enaex_com/Documents/Dashboard%20seguimiento%20MRO%202026%20-%20Capacitaci%C3%B3n/Responsable_Grupo_Compras%202.xlsx?d=wb72cfdf64cbb41d5a7c531cf50c9b765&csf=1&web=1&e=EhBeCd",
+    "responsable_mrp": "https://empresassk-my.sharepoint.com/:x:/r/personal/cristian_vasquez_enaex_com/Documents/Dashboard%20seguimiento%20MRO%202026%20-%20Capacitaci%C3%B3n/Responsable%20de%20MRP%201.xlsx?d=w3c9fee076ee3460b90241bdcfaa24664&csf=1&web=1&e=8Z0M7G",
+    "centro_sociedad": "https://empresassk-my.sharepoint.com/:x:/r/personal/cristian_vasquez_enaex_com/Documents/Dashboard%20seguimiento%20MRO%202026%20-%20Capacitaci%C3%B3n/CENTRO_SOCIEDAD%20Compras%20MRO%201.xlsx?d=w044d908377b941ca970e2cf27aa3999f&csf=1&web=1&e=cZ81L2",
+}
+
+# ==============================================================================
 # FUNCIONES AUXILIARES PARA MANEJO DE ARCHIVOS DUPLICADOS
 # ==============================================================================
 def buscar_archivo_mas_reciente(patron_o_ruta: str) -> str:
@@ -32,7 +42,7 @@ def buscar_archivo_mas_reciente(patron_o_ruta: str) -> str:
     Busca archivos que coincidan con un patrón (ej: 'data/ME5A_con_Ariba*.parquet'
     o 'data/ME5A_con_Ariba (1).xlsx') y retorna la ruta del más recientemente modificado.
     """
-    if not isinstance(patron_o_ruta, str) or patron_o_ruta.startswith("onedrive:"):
+    if not isinstance(patron_o_ruta, str) or patron_o_ruta.startswith("onedrive:") or patron_o_ruta.startswith("http"):
         return patron_o_ruta
 
     nombre_base, ext = os.path.splitext(patron_o_ruta)
@@ -263,22 +273,15 @@ with tab_dx:
 
         archivo_data = archivo_resp_grupo = archivo_centro = archivo_mrp = None
         if modo == "OneDrive (automático)":
-            archivo_data = "onedrive:me5a_parquet"
-            archivo_resp_grupo = "onedrive:responsable_grupo_compras"
-            archivo_centro = "onedrive:centro_sociedad_mro"
-            archivo_mrp = "onedrive:responsable_mrp"
+            archivo_data = URLS_SHAREPOINT["me5a"]
+            archivo_resp_grupo = URLS_SHAREPOINT["responsable_grupo"]
+            archivo_centro = URLS_SHAREPOINT["centro_sociedad"]
+            archivo_mrp = URLS_SHAREPOINT["responsable_mrp"]
 
             if st.button("🔄 Forzar recarga desde OneDrive ahora"):
                 loaders._descargar_onedrive.clear()
                 st.session_state.pop("_clave_pipeline", None)
                 st.rerun()
-
-            if "onedrive" not in st.secrets:
-                st.error(
-                    "Falta configurar los Secrets de OneDrive (Settings → Secrets). "
-                    "Mientras tanto, usa 'Subir archivos'."
-                )
-                st.stop()
 
         elif modo == "Subir archivos":
             files_data = st.file_uploader(
@@ -373,13 +376,6 @@ with tab_dx:
 
             df_calculado["Tipo Ariba"] = df_calculado.apply(determinar_tipo_ariba, axis=1)
 
-            # Si la solicitud matcheó con Trazabilidad (mismo match que ya usa
-            # el reemplazo de fecha en transform.py), ese es un dato real de
-            # SAP — más confiable que la heurística de texto/prefijo de
-            # determinar_tipo_ariba. Se fuerza la etiqueta a "No Catalogada"
-            # para esas filas, sin importar qué haya devuelto la heurística
-            # (por ejemplo, si el rango de fechas subido a Trazabilidad no
-            # coincidía antes y la había dejado como Catalogada/Directa).
             df_calculado.loc[df_calculado["En_Trazabilidad"], "Tipo Ariba"] = "🔵 ARIBA NO CATALOGADA"
 
             # --- INICIO NUEVA LÓGICA DE NEGOCIO ---
@@ -446,10 +442,9 @@ with tab_dx:
 
     df_f = df.copy()
 
-    # Aplicación de exclusión de IDs
     if solpeds_excluir_raw.strip():
         ids_excluir = set(re.split(r'[,\s\n]+', solpeds_excluir_raw.strip()))
-        ids_excluir = {i for i in ids_excluir if i}  # Elimina valores vacíos
+        ids_excluir = {i for i in ids_excluir if i}
         
         if ids_excluir:
             solpeds_str = df_f["Solicitud de pedido"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
