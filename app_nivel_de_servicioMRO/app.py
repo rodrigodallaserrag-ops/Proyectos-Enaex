@@ -25,13 +25,13 @@ except ImportError:
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
 # ==============================================================================
-# CONFIGURACIÓN DE ENLACES SHAREPOINT / ONEDRIVE (URLs Modificadas para descarga directa)
+# CONFIGURACIÓN DE ENLACES SHAREPOINT / ONEDRIVE (Actualizado con vínculos públicos)
 # ==============================================================================
 URLS_SHAREPOINT = {
-    "me5a": "https://empresassk-my.sharepoint.com/personal/cristian_vasquez_enaex_com/Documents/Dashboard%20seguimiento%20MRO%202026%20-%20Capacitaci%C3%B3n/ME5A%20con%20ariba.xlsx?d=w1dbb1fd7d39748fb9b26bab115444c7c&csf=1&download=1&e=So8bkh",
-    "responsable_grupo": "https://empresassk-my.sharepoint.com/personal/cristian_vasquez_enaex_com/Documents/Dashboard%20seguimiento%20MRO%202026%20-%20Capacitaci%C3%B3n/Responsable_Grupo_Compras%202.xlsx?d=wb72cfdf64cbb41d5a7c531cf50c9b765&csf=1&download=1&e=EhBeCd",
-    "responsable_mrp": "https://empresassk-my.sharepoint.com/personal/cristian_vasquez_enaex_com/Documents/Dashboard%20seguimiento%20MRO%202026%20-%20Capacitaci%C3%B3n/Responsable%20de%20MRP%201.xlsx?d=w3c9fee076ee3460b90241bdcfaa24664&csf=1&download=1&e=8Z0M7G",
-    "centro_sociedad": "https://empresassk-my.sharepoint.com/personal/cristian_vasquez_enaex_com/Documents/Dashboard%20seguimiento%20MRO%202026%20-%20Capacitaci%C3%B3n/CENTRO_SOCIEDAD%20Compras%20MRO%201.xlsx?d=w044d908377b941ca970e2cf27aa3999f&csf=1&download=1&e=cZ81L2",
+    "me5a": "https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQDXH7sdl9P7SJsmurEVREx8AdaUM4nE7AlJilbaTUTcaBQ?e=Kl2vrP&download=1",
+    "responsable_grupo": "https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQD2_Sy3u0zVQafFMc9QybdlAamhW7o9erDNUwXCOOIa7v0?e=vRQdtV&download=1",
+    "responsable_mrp": "https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQAH7p88424LRpAkG9z6okZkASi1JfubHzWkgDpIIsTGqHg?e=p13YUS&download=1",
+    "centro_sociedad": "https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQCDkE0EuXfKQZcOLPJ6o5mfAf1vRDJ4MIq2GnVqyuFwaGI?e=uxee8T&download=1",
 }
 
 # ==============================================================================
