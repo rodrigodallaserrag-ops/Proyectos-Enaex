@@ -25,13 +25,13 @@ except ImportError:
 st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
 
 # ==============================================================================
-# CONFIGURACIÓN DE ENLACES SHAREPOINT / ONEDRIVE (Actualizado con vínculos públicos)
+# CONFIGURACIÓN DE ENLACES SHAREPOINT / ONEDRIVE (URLs de descarga directa)
 # ==============================================================================
 URLS_SHAREPOINT = {
-    "me5a": "https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQDXH7sdl9P7SJsmurEVREx8AdaUM4nE7AlJilbaTUTcaBQ?e=Kl2vrP&download=1",
-    "responsable_grupo": "https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQD2_Sy3u0zVQafFMc9QybdlAamhW7o9erDNUwXCOOIa7v0?e=vRQdtV&download=1",
-    "responsable_mrp": "https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQAH7p88424LRpAkG9z6okZkASi1JfubHzWkgDpIIsTGqHg?e=p13YUS&download=1",
-    "centro_sociedad": "https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQCDkE0EuXfKQZcOLPJ6o5mfAf1vRDJ4MIq2GnVqyuFwaGI?e=uxee8T&download=1",
+    "me5a": "https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQDXH7sdl9P7SJsmurEVREx8AdaUM4nE7AlJilbaTUTcaBQ?download=1",
+    "responsable_grupo": "https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQD2_Sy3u0zVQafFMc9QybdlAamhW7o9erDNUwXCOOIa7v0?download=1",
+    "responsable_mrp": "https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQAH7p88424LRpAkG9z6okZkASi1JfubHzWkgDpIIsTGqHg?download=1",
+    "centro_sociedad": "https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQCDkE0EuXfKQZcOLPJ6o5mfAf1vRDJ4MIq2GnVqyuFwaGI?download=1",
 }
 
 # ==============================================================================
@@ -400,7 +400,7 @@ with tab_dx:
             st.session_state["_clave_pipeline"] = clave_actual
 
         except Exception as e:
-            st.error(f"🚨 **No se pudieron cargar los datos.**\n\nDetalle técnico: `{e}`\n\n**Solución recomendada:** El archivo Parquet o Excel que intentas cargar está corrupto o es inválido. Vuelve a generar/subir el archivo.")
+            st.error(f"🚨 **No se pudieron cargar los datos.**\n\nDetalle técnico: `{e}`\n\n**Solución recomendada:** Si la política de la empresa bloquea el acceso público directo de la API a SharePoint, cambia la opción en el menú izquierdo a **'Subir archivos'** o coloca las bases en la carpeta **'data/'**.")
             st.stop()
 
     df = st.session_state["_df_pipeline"]
