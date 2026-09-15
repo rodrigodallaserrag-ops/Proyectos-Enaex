@@ -403,7 +403,15 @@ with tab_dx:
             st.error(f"🚨 **No se pudieron cargar los datos.**\n\nDetalle técnico: `{e}`\n\n**Solución recomendada:** Si la política de la empresa bloquea el acceso público directo de la API a SharePoint, cambia la opción en el menú izquierdo a **'Subir archivos'** o coloca las bases en la carpeta **'data/'**.")
             st.stop()
 
-    df = st.session_state["_df_pipeline"]
+    df = st.session_state["_df_pipeline"].copy()
+
+    # --- INICIO PERSISTENCIA DE COMENTARIOS ---
+    if "comentarios_guardados" not in st.session_state:
+        st.session_state["comentarios_guardados"] = {}
+
+    # Mapear los comentarios guardados a la base de datos principal cruzando por el número de Solped
+    df["Comentario"] = df["Solicitud de pedido"].astype(str).map(st.session_state["comentarios_guardados"]).fillna("")
+    # --- FIN PERSISTENCIA DE COMENTARIOS ---
 
     NS_MIN_GLOBAL = int(df["Nivel de Servicio"].min()) if len(df) and pd.notna(df["Nivel de Servicio"].min()) else 0
     NS_MAX_GLOBAL = int(df["Nivel de Servicio"].max()) if len(df) and pd.notna(df["Nivel de Servicio"].max()) else 100
@@ -424,13 +432,19 @@ with tab_dx:
 
     # ---- Filtros ----
     st.subheader("Filtros")
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         centros = st.multiselect("Centro", sorted(df["Centro"].dropna().unique()))
     with c2:
         aplica = st.multiselect("Aplica?", sorted(df["Aplica?"].dropna().unique()))
     with c3:
         tipos_ariba = st.multiselect("Origen / Tipo Solicitud", sorted(df["Tipo Ariba"].dropna().unique()))
+    with c4:
+        filtro_comentario = st.selectbox(
+            "Filtrado por Comentarios", 
+            ["Todos", "Con comentario", "Sin comentario"],
+            help="Permite buscar las filas que ya tengan observaciones cargadas."
+        )
 
     # ---- Filtro para Excluir IDs de Solped ----
     solpeds_excluir_raw = st.text_area(
@@ -463,7 +477,13 @@ with tab_dx:
         df_f = df_f[df_f["Tipo Ariba"].isin(tipos_ariba)]
     checkpoints.append(("2b. Tras filtro Origen / Tipo Solicitud", len(df_f)))
 
-    _snapshot("2. Tras Centro + Aplica? + Origen + Exclusiones", df_f)
+    if filtro_comentario == "Con comentario":
+        df_f = df_f[df_f["Comentario"].astype(str).str.strip() != ""]
+    elif filtro_comentario == "Sin comentario":
+        df_f = df_f[df_f["Comentario"].astype(str).str.strip() == ""]
+    checkpoints.append(("2c. Tras filtro Comentarios", len(df_f)))
+
+    _snapshot("2. Tras Centro + Aplica? + Origen + Comentarios + Exclusiones", df_f)
 
     # ---- Estado Solped ----
     st.caption("Estado Solped (el filtro de fecha de abajo solo aplica dentro de 'Pedido completo')")
@@ -510,8 +530,8 @@ with tab_dx:
     _snapshot("4. Tras jerarquía Año/Mes/Día", df_f)
 
     # ---- Solped MRP y Cumple ----
-    c4, c5 = st.columns(2)
-    with c4:
+    c4_b, c5 = st.columns(2)
+    with c4_b:
         solped_mrp = st.multiselect("Solped MRP", sorted(df_f["Solped MRP"].dropna().unique()))
     with c5:
         cumple = st.multiselect("Nivel de Servicio (Cumple)", sorted(df_f["Cumple"].dropna().unique()))
@@ -774,7 +794,7 @@ with tab_dx:
     detalle = preparar_detalle(df_f)
 
     with st.expander("Ver detalle de solicitudes", expanded=False):
-        st.caption("La columna **Comentario** es editable: escribe ahí y se incluirá en el Excel de registro.")
+        st.caption("La columna **Comentario** es editable. Los cambios se guardan automáticamente en memoria y no se perderán al forzar recargas.")
         detalle_editado = st.data_editor(
             detalle,
             use_container_width=True,
@@ -790,6 +810,23 @@ with tab_dx:
             },
             disabled=[c for c in detalle.columns if c != "Comentario"],
         )
+
+        # --- SINCRONIZACIÓN DE COMENTARIOS EDITADOS ---
+        if "Comentario" in detalle_editado.columns:
+            # 1. Identificar si el usuario borró algún comentario (para limpiarlo de la memoria)
+            comentarios_vacios = detalle_editado[detalle_editado["Comentario"].isna() | (detalle_editado["Comentario"].astype(str).str.strip() == "")]
+            for solped in comentarios_vacios["Solicitud de pedido"].astype(str).unique():
+                st.session_state["comentarios_guardados"].pop(solped, None)
+
+            # 2. Guardar o actualizar comentarios agregados a la memoria
+            comentarios_llenos = detalle_editado[~detalle_editado["Comentario"].isna() & (detalle_editado["Comentario"].astype(str).str.strip() != "")]
+            if not comentarios_llenos.empty:
+                nuevos_dict = dict(zip(
+                    comentarios_llenos["Solicitud de pedido"].astype(str),
+                    comentarios_llenos["Comentario"].astype(str).str.strip()
+                ))
+                st.session_state["comentarios_guardados"].update(nuevos_dict)
+        # ---------------------------------------------
 
     # ---- Exportación a Excel ----
     semana_ref = pd.Timestamp(fecha_corte) - pd.Timedelta(days=7)
