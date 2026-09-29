@@ -550,7 +550,7 @@ OPCIONES_TRANSPORTE = ["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA
 # =============================================================================
 # ENCABEZADO Y PARÁMETROS GLOBALES
 # =============================================================================
-st.markdown("<div class='main-header'>⚡ Sistema Integrado de Evaluación de Ofertas</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-header'>Sistema Integrado de Evaluación de Ofertas</div>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("⚙️ Parámetros de Cambio")
@@ -613,7 +613,7 @@ if st.session_state.df_masivo is not None:
     with st.expander("👀 Vista Previa de la Base Integrada", expanded=False):
         st.dataframe(st.session_state.df_masivo, use_container_width=True)
 
-tabs = st.tabs(["✏️ Evaluación por SOLPED", "➕ Carga Manual / Directa", "📊 Cuadro Comparativo Integrado"])
+tabs = st.tabs(["Evaluación por SOLPED", "Carga Manual / Directa", "Cuadro Comparativo Integrado"])
 
 # =============================================================================
 # HELPER PARA GUARDAR ELEMENTOS DE FORMA SEGURA Y MULTIMONEDA
@@ -654,7 +654,7 @@ def guardar_lista_en_comparativo(lista_items, default_solped="N/A"):
 # TAB 1: EVALUACIÓN POR SOLPED
 # =============================================================================
 with tabs[0]:
-    st.subheader("✏️ Evaluación por SOLPED")
+    st.subheader("Evaluación por SOLPED")
     
     col_input, col_btn = st.columns([3, 1])
     with col_input:
@@ -709,7 +709,7 @@ with tabs[0]:
                         unsafe_allow_html=True
                     )
                 with col_del:
-                    if st.button("🗑️ Eliminar", key=f"btn_del_t1_{idx}", type="primary", use_container_width=True):
+                    if st.button("Eliminar", key=f"btn_del_t1_{idx}", type="primary", use_container_width=True):
                         idx_a_eliminar = idx
 
                 c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([1, 1.3, 0.9, 1.3, 0.9, 1.5, 1.2, 1.3])
@@ -766,7 +766,7 @@ with tabs[1]:
     with col_s2:
         st.write("")
         st.write("")
-        btn_cargar_manual = st.button("📥 Cargar Requerimiento", use_container_width=True)
+        btn_cargar_manual = st.button("Cargar Requerimiento", use_container_width=True)
 
     if btn_cargar_manual and manual_solped:
         if st.session_state.df_masivo is not None:
@@ -854,7 +854,7 @@ with tabs[1]:
 # TAB 3: CUADRO COMPARATIVO INTEGRADO & DESCARGAS
 # =============================================================================
 with tabs[2]:
-    st.subheader("📊 Cuadro Comparativo Integrado")
+    st.subheader("Cuadro Comparativo Integrado")
     
     if st.session_state.ofertas_manuales:
         df_comp = pd.DataFrame(st.session_state.ofertas_manuales)
@@ -872,7 +872,7 @@ with tabs[2]:
         with col_opt1:
             moneda_vista = st.radio("💱 Seleccionar Moneda Consolidada de Visualización:", options=["CLP", "USD", "EUR"], horizontal=True)
         with col_opt2:
-            transporte_reporte = st.selectbox("🚚 Transporte General (Cabecera reporte):", options=["No Especificado"] + OPCIONES_TRANSPORTE, index=0)
+            transporte_reporte = st.selectbox("Transporte General (Cabecera reporte):", options=["No Especificado"] + OPCIONES_TRANSPORTE, index=0)
 
         # ASIGNACIÓN DINÁMICA DE VALORES CONVERTIDOS
         df_comp[f"Subtotal Material ({moneda_vista})"] = df_comp[f"Subtotal Material {moneda_vista}"]
@@ -948,15 +948,15 @@ with tabs[2]:
             with col_c3: st.metric(f"Monto Total Consolidado ({moneda_vista})", f"$ {df_comp['Monto Total Visualizado'].sum():,.2f}")
                 
             st.divider()
-            st.subheader("📈 Gráficos Comparativos por SOLPED")
+            st.subheader("Gráficos Comparativos por SOLPED")
             col_graf1, col_graf2 = st.columns(2)
             
             with col_graf1:
-                st.markdown(f"**💰 Comparativa de Monto Total por SOLPED ({moneda_vista})**")
+                st.markdown(f"**Comparativa de Monto Total por SOLPED ({moneda_vista})**")
                 st.bar_chart(df_comp.groupby("SOLPED")["Monto Total Visualizado"].sum().reset_index(), x="SOLPED", y="Monto Total Visualizado", height=250)
                 
             with col_graf2:
-                st.markdown("**⏳ Promedio Días de Entrega por SOLPED**")
+                st.markdown("**Promedio Días de Entrega por SOLPED**")
                 st.bar_chart(df_comp.groupby("SOLPED")["Días para Entrega"].mean().reset_index(), x="SOLPED", y="Días para Entrega", height=250)
 
             st.divider()
