@@ -14,11 +14,10 @@ from openpyxl.utils import get_column_letter
 from fpdf import FPDF
 
 # =============================================================================
-# CONFIGURACIÓN DE PÁGINA Y ESTILOS CSS CON SCROLL CORREGIDO
+# CONFIGURACIÓN DE PÁGINA Y ESTILOS CSS CON SCROLL Y BOTONES MINIMALISTAS
 # =============================================================================
 st.set_page_config(
     page_title="Sistema Integrado de Evaluación de Ofertas - Enaex",
-    page_icon="⚡",
     layout="wide"
 )
 
@@ -41,6 +40,56 @@ st.markdown("""
     .sub-header { font-size: 1rem; color: #4B5563; margin-bottom: 1.5rem; }
     .stTable { font-size: 0.85rem; }
     .metric-card { background-color: #F3F4F6; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #1E3A8A; }
+
+    /* ==========================================================================
+       ESTILOS MINIMALISTAS Y TÁCTILES PARA BOTONES (STBUTTON & STDOWNLOADBUTTON)
+       ========================================================================== */
+    div.stButton > button, div.stDownloadButton > button {
+        border-radius: 8px !important;
+        border: 1px solid #D1D5DB !important;
+        background-color: #FFFFFF !important;
+        color: #1F2937 !important;
+        font-weight: 500 !important;
+        font-size: 0.9rem !important;
+        padding: 0.55rem 1.1rem !important;
+        transition: all 0.2s ease-in-out !important;
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important;
+        cursor: pointer !important;
+        letter-spacing: 0.01em !important;
+    }
+
+    div.stButton > button:hover, div.stDownloadButton > button:hover {
+        background-color: #F9FAFB !important;
+        border-color: #9CA3AF !important;
+        color: #111827 !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04) !important;
+    }
+
+    div.stButton > button:active, div.stDownloadButton > button:active {
+        transform: translateY(0) scale(0.98) !important;
+        box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06) !important;
+    }
+
+    /* Estilo primario minimalista */
+    div.stButton > button[kind="primary"], 
+    div.stButton > button[data-testid="stBaseButton-primary"],
+    div.stDownloadButton > button[kind="primary"],
+    div.stDownloadButton > button[data-testid="stBaseButton-primary"] {
+        background-color: #1E3A8A !important;
+        color: #FFFFFF !important;
+        border: 1px solid #1E3A8A !important;
+    }
+
+    div.stButton > button[kind="primary"]:hover, 
+    div.stButton > button[data-testid="stBaseButton-primary"]:hover,
+    div.stDownloadButton > button[kind="primary"]:hover,
+    div.stDownloadButton > button[data-testid="stBaseButton-primary"]:hover {
+        background-color: #2563EB !important;
+        border-color: #2563EB !important;
+        color: #FFFFFF !important;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25) !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -553,13 +602,13 @@ OPCIONES_TRANSPORTE = ["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA
 st.markdown("<div class='main-header'>Sistema Integrado de Evaluación de Ofertas</div>", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("⚙️ Parámetros de Cambio")
+    st.header("Parámetros de Cambio")
     indicadores = obtener_indicadores_tiempo_real()
     
-    if indicadores["estado"]: st.success("🟢 Indicadores actualizados en vivo")
-    else: st.warning("⚠️ Usando valores por defecto (Sin conexión).")
+    if indicadores["estado"]: st.success("Indicadores actualizados en vivo")
+    else: st.warning("Usando valores por defecto (Sin conexión).")
         
-    if st.button("🔄 Actualizar Tasas API", use_container_width=True):
+    if st.button("Actualizar Tasas API", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
@@ -569,7 +618,7 @@ with st.sidebar:
     tc_eur = st.number_input("Tipo de Cambio EUR / CLP", value=indicadores["EUR"], step=1.0, format="%.2f")
     st.divider()
     
-    st.header("📂 Carga de Archivos Base")
+    st.header("Carga de Archivos Base")
     file_autogestion = st.file_uploader("1. Plantilla Autogestión (Estructura Base)", type=["xlsx", "xls", "csv", "xlsm"])
     file_cuadro = st.file_uploader("2. Cuadro Comparativo (Datos Brutos / Histórico)", type=["xlsx", "xls", "csv", "xlsm"])
     
@@ -605,12 +654,12 @@ with st.sidebar:
 
                 df_merged = pd.merge(st.session_state.df_masivo, df_hist_unique, left_on=col_mat_base, right_on=col_mat_hist, how='left', suffixes=('', '_Bruto'))
                 st.session_state.df_masivo = df_merged
-                st.success("✅ Datos brutos e histórico integrados.")
+                st.success("Datos brutos e histórico integrados.")
             else:
                 st.warning("No se encontró la columna 'Material' en ambas planillas para realizar el cruce.")
 
 if st.session_state.df_masivo is not None:
-    with st.expander("👀 Vista Previa de la Base Integrada", expanded=False):
+    with st.expander("Vista Previa de la Base Integrada", expanded=False):
         st.dataframe(st.session_state.df_masivo, use_container_width=True)
 
 tabs = st.tabs(["Evaluación por SOLPED", "Carga Manual / Directa", "Cuadro Comparativo Integrado"])
@@ -662,7 +711,7 @@ with tabs[0]:
     with col_btn:
         st.write("")
         st.write("")
-        btn_extraer = st.button("📤 Extraer Materiales", type="primary", use_container_width=True)
+        btn_extraer = st.button("Extraer Materiales", type="primary", use_container_width=True)
 
     if btn_extraer and solped_id.strip():
         if st.session_state.df_masivo is not None:
@@ -691,7 +740,7 @@ with tabs[0]:
         with col_m_head:
             st.write(f"**Materiales extraídos ({len(lista_materiales)} ítems):**")
         with col_m_save:
-            if st.button("💾 Guardar Oferta en Cuadro Comparativo", type="primary", key="btn_save_top_t1", use_container_width=True):
+            if st.button("Guardar Oferta en Cuadro Comparativo", type="primary", key="btn_save_top_t1", use_container_width=True):
                 guardar_lista_en_comparativo(st.session_state[key_lista], solped_id)
                 st.success("¡Oferta guardada exitosamente en el Cuadro Comparativo!")
 
@@ -709,7 +758,7 @@ with tabs[0]:
                         unsafe_allow_html=True
                     )
                 with col_del:
-                    if st.button("Eliminar", key=f"btn_del_t1_{idx}", type="primary", use_container_width=True):
+                    if st.button("Eliminar", key=f"btn_del_t1_{idx}", use_container_width=True):
                         idx_a_eliminar = idx
 
                 c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([1, 1.3, 0.9, 1.3, 0.9, 1.5, 1.2, 1.3])
@@ -744,14 +793,14 @@ with tabs[0]:
                 # Resumen Bruto explicativo
                 subtotal_bruto = (item["Cantidad"] * item["Precio Unitario"])
                 c_envio = item["Costo Transporte"]
-                st.caption(f"🔎 **Total bruto posición (sin convertir):** Material: {subtotal_bruto:,.2f} {item['Moneda']} | Envío: {c_envio:,.2f} {item['Moneda Transp.']}")
+                st.caption(f"**Total bruto posición (sin convertir):** Material: {subtotal_bruto:,.2f} {item['Moneda']} | Envío: {c_envio:,.2f} {item['Moneda Transp.']}")
 
         if idx_a_eliminar is not None:
             st.session_state[key_lista].pop(idx_a_eliminar)
             st.rerun()
 
         st.divider()
-        if st.button("💾 Guardar Oferta en Cuadro Comparativo", type="primary", key="btn_save_bot_t1"):
+        if st.button("Guardar Oferta en Cuadro Comparativo", type="primary", key="btn_save_bot_t1"):
             guardar_lista_en_comparativo(st.session_state[key_lista], solped_id)
             st.success("¡Oferta guardada exitosamente en el Cuadro Comparativo!")
 
@@ -759,7 +808,7 @@ with tabs[0]:
 # TAB 2: CARGA MANUAL DIRECTA
 # =============================================================================
 with tabs[1]:
-    st.subheader("➕ Carga Manual de Oferta Paso a Paso")
+    st.subheader("Carga Manual de Oferta Paso a Paso")
     
     col_s1, col_s2 = st.columns([3, 1])
     with col_s1: manual_solped = st.text_input("Ingresar N° SOLPED para Autocompletar:", placeholder="Ej: PR175798")
@@ -788,7 +837,7 @@ with tabs[1]:
     
     col_man_btn1, col_man_btn2 = st.columns([1, 1])
     with col_man_btn1:
-        if st.button("➕ Agregar Nuevo Material a la Lista", use_container_width=True):
+        if st.button("Agregar Nuevo Material a la Lista", use_container_width=True):
             lista_manual.append({
                 "SOLPED": manual_solped if manual_solped else "MANUAL",
                 "Pos": len(lista_manual) + 1, "Material": "Nuevo Material", "Centro": "E001", "Cantidad": 1, "UM": "C/U",
@@ -797,7 +846,7 @@ with tabs[1]:
             })
             st.rerun()
     with col_man_btn2:
-        if st.button("💾 Guardar Cotización Manual Completa", type="primary", key="btn_save_top_t2", use_container_width=True):
+        if st.button("Guardar Cotización Manual Completa", type="primary", key="btn_save_top_t2", use_container_width=True):
             guardar_lista_en_comparativo(st.session_state["manual_items_list"], manual_solped)
             st.success("¡Cotización agregada al Cuadro Comparativo!")
 
@@ -810,7 +859,7 @@ with tabs[1]:
             with col_m_title:
                 item["Material"] = st.text_input("Descripción / Material", value=item.get("Material", ""), key=f"man_mat_{idx}")
             with col_m_del:
-                if st.button("🗑️ Eliminar", key=f"btn_del_t2_{idx}", type="primary", use_container_width=True):
+                if st.button("Eliminar", key=f"btn_del_t2_{idx}", use_container_width=True):
                     idx_del_manual = idx
 
             c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([1, 1.3, 0.9, 1.3, 0.9, 1.5, 1.2, 1.3])
@@ -846,7 +895,7 @@ with tabs[1]:
         st.session_state["manual_items_list"].pop(idx_del_manual)
         st.rerun()
 
-    if st.button("💾 Guardar Cotización Manual Completa", type="primary", key="btn_save_bot_t2"):
+    if st.button("Guardar Cotización Manual Completa", type="primary", key="btn_save_bot_t2"):
         guardar_lista_en_comparativo(st.session_state["manual_items_list"], manual_solped)
         st.success("¡Cotización agregada al Cuadro Comparativo!")
 
@@ -870,7 +919,7 @@ with tabs[2]:
 
         col_opt1, col_opt2 = st.columns([1, 1])
         with col_opt1:
-            moneda_vista = st.radio("💱 Seleccionar Moneda Consolidada de Visualización:", options=["CLP", "USD", "EUR"], horizontal=True)
+            moneda_vista = st.radio("Seleccionar Moneda Consolidada de Visualización:", options=["CLP", "USD", "EUR"], horizontal=True)
         with col_opt2:
             transporte_reporte = st.selectbox("Transporte General (Cabecera reporte):", options=["No Especificado"] + OPCIONES_TRANSPORTE, index=0)
 
@@ -905,18 +954,18 @@ with tabs[2]:
         col_top_d1, col_top_d2, col_top_d3 = st.columns([1, 1, 1])
         with col_top_d1:
             if bytes_excel:
-                st.download_button(label="📊 Reporte Excel", data=bytes_excel, file_name=f"Reporte_Comparativo_{date.today()}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, type="primary", key="dl_excel_top")
+                st.download_button(label="Reporte Excel", data=bytes_excel, file_name=f"Reporte_Comparativo_{date.today()}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, type="primary", key="dl_excel_top")
         with col_top_d2:
             if bytes_pdf:
-                st.download_button(label="📄 Reporte PDF", data=bytes_pdf, file_name=f"Reporte_Comparativo_{date.today()}.pdf", mime="application/pdf", use_container_width=True, key="dl_pdf_top")
+                st.download_button(label="Reporte PDF", data=bytes_pdf, file_name=f"Reporte_Comparativo_{date.today()}.pdf", mime="application/pdf", use_container_width=True, key="dl_pdf_top")
         with col_top_d3:
-            if st.button("🗑️ Limpiar Todo", use_container_width=True, key="btn_clear_top"):
+            if st.button("Limpiar Todo", use_container_width=True, key="btn_clear_top"):
                 st.session_state.ofertas_manuales = []
                 st.rerun()
 
         st.divider()
 
-        st.markdown("### 🏆 Motor de Recomendación y Comparación")
+        st.markdown("### Motor de Recomendación y Comparación")
         
         def highlight_best(df):
             styles = pd.DataFrame('', index=df.index, columns=df.columns)
@@ -960,18 +1009,18 @@ with tabs[2]:
                 st.bar_chart(df_comp.groupby("SOLPED")["Días para Entrega"].mean().reset_index(), x="SOLPED", y="Días para Entrega", height=250)
 
             st.divider()
-            st.subheader("📥 Exportar Reportes")
+            st.subheader("Exportar Reportes")
             
             col_down1, col_down2, _ = st.columns([1, 1, 2])
             with col_down1:
                 if bytes_excel:
-                    st.download_button(label="📊 Reporte Excel", data=bytes_excel, file_name=f"Reporte_Comparativo_{date.today()}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, type="primary", key="dl_excel_bot")
+                    st.download_button(label="Reporte Excel", data=bytes_excel, file_name=f"Reporte_Comparativo_{date.today()}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, type="primary", key="dl_excel_bot")
             with col_down2:
                 if bytes_pdf:
-                    st.download_button(label="📄 Descargar Reporte PDF", data=bytes_pdf, file_name=f"Reporte_Comparativo_{date.today()}.pdf", mime="application/pdf", use_container_width=True, key="dl_pdf_bot")
+                    st.download_button(label="Descargar Reporte PDF", data=bytes_pdf, file_name=f"Reporte_Comparativo_{date.today()}.pdf", mime="application/pdf", use_container_width=True, key="dl_pdf_bot")
 
         st.write("")
-        if st.button("🗑️ Limpiar TODO el Cuadro Comparativo", key="btn_clear_bot"):
+        if st.button("Limpiar Cuadro Comparativo", key="btn_clear_bot"):
             st.session_state.ofertas_manuales = []
             st.rerun()
     else:
