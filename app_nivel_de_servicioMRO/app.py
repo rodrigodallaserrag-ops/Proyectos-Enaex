@@ -208,6 +208,219 @@ def determinar_tipo_ariba(row):
     sol = str(row.get("Solicitud de pedido", "")).strip()
     material = str(row.get("Material", "")).strip()
     tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0", "null"])
+    es_mrp_flag = str(row.get("Solped MRP", "")).strip().lower() in ["sí", "si", "true", "mrpEl ajuste reemplaza el límite inferior del filtro de días de gestión. En lugar de iniciar desde 0 como estaba configurado originalmente[cite: 1], el checkbox ahora establece el corte mínimo estrictamente desde el día 1, descartando valores en 0 o negativos para alinearse con la nueva regla de medición.
+
+```python
+"""
+Streamlit - Dx Compradores
+Réplica del pbix "Nivel_de_servicio_BI.pbix", página "Dx Compradores" y Trazabilidad.
+
+Correr local: streamlit run app.py
+"""
+import glob
+import os
+import re
+import pandas as pd
+import numpy as np
+import streamlit as st
+
+import config
+import loaders
+import transform
+
+# Importación del archivo ariba_trazabilidad.py con alias para mantener compatibilidad
+try:
+    import ariba_trazabilidad as trazabilidad
+    HAS_TRAZABILIDAD = True
+except ImportError:
+    HAS_TRAZABILIDAD = False
+
+st.set_page_config(page_title="Dx Compradores - Nivel de Servicio", layout="wide")
+
+# ==============================================================================
+# CONFIGURACIÓN DE ENLACES SHAREPOINT / ONEDRIVE (URLs de descarga directa)
+# ==============================================================================
+URLS_SHAREPOINT = {
+    "me5a": "[https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQDXH7sdl9P7SJsmurEVREx8AdaUM4nE7AlJilbaTUTcaBQ?download=1](https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQDXH7sdl9P7SJsmurEVREx8AdaUM4nE7AlJilbaTUTcaBQ?download=1)",
+    "responsable_grupo": "[https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQD2_Sy3u0zVQafFMc9QybdlAamhW7o9erDNUwXCOOIa7v0?download=1](https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQD2_Sy3u0zVQafFMc9QybdlAamhW7o9erDNUwXCOOIa7v0?download=1)",
+    "responsable_mrp": "[https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQAH7p88424LRpAkG9z6okZkASi1JfubHzWkgDpIIsTGqHg?download=1](https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQAH7p88424LRpAkG9z6okZkASi1JfubHzWkgDpIIsTGqHg?download=1)",
+    "centro_sociedad": "[https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQCDkE0EuXfKQZcOLPJ6o5mfAf1vRDJ4MIq2GnVqyuFwaGI?download=1](https://empresassk-my.sharepoint.com/:x:/g/personal/cristian_vasquez_enaex_com/IQCDkE0EuXfKQZcOLPJ6o5mfAf1vRDJ4MIq2GnVqyuFwaGI?download=1)",
+}
+
+# ==============================================================================
+# FUNCIONES AUXILIARES PARA MANEJO DE ARCHIVOS DUPLICADOS
+# ==============================================================================
+def buscar_archivo_mas_reciente(patron_o_ruta: str) -> str:
+    """
+    Busca archivos que coincidan con un patrón (ej: 'data/ME5A_con_Ariba*.parquet'
+    o 'data/ME5A_con_Ariba (1).xlsx') y retorna la ruta del más recientemente modificado.
+    """
+    if not isinstance(patron_o_ruta, str) or patron_o_ruta.startswith("onedrive:") or patron_o_ruta.startswith("http"):
+        return patron_o_ruta
+
+    nombre_base, ext = os.path.splitext(patron_o_ruta)
+    patron_busqueda = f"{nombre_base}*{ext}"
+    
+    coincidencias = glob.glob(patron_busqueda)
+    if coincidencias:
+        return max(coincidencias, key=os.path.getmtime)
+    
+    return patron_o_ruta
+
+def obtener_ultimo_subido(archivos):
+    if isinstance(archivos, list):
+        return archivos[-1] if len(archivos) > 0 else None
+    return archivos
+
+# ==============================================================================
+# OCULTAR NAVEGACIÓN GLOBAL (TRAZABILIDAD ARIBA)
+# ==============================================================================
+st.markdown("""
+    <style>
+    [data-testid="stSidebarNav"] a[href*="trazabilidad"],
+    [data-testid="stSidebarNav"] a[href*="Trazabilidad"],
+    [data-testid="stSidebarNav"] a[href*="ariba"],
+    [data-testid="stSidebarNav"] a[href*="Ariba"] {
+        display: none !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# ==============================================================================
+# CONFIGURACIÓN TEMA (CLARO PREDETERMINADO / OSCURO)
+# ==============================================================================
+if "tema" not in st.session_state:
+    st.session_state["tema"] = "claro"
+
+icono_tema = "🌙" if st.session_state["tema"] == "claro" else "☀️"
+if st.button(icono_tema, key="theme_toggle", help="Alternar Modo Claro/Oscuro"):
+    st.session_state["tema"] = "oscuro" if st.session_state["tema"] == "claro" else "claro"
+    st.rerun()
+
+if st.session_state["tema"] == "claro":
+    st.markdown("""
+        <style>
+        .st-key-theme_toggle {
+            position: fixed !important;
+            top: 65px !important;
+            right: 15px !important;
+            z-index: 999999 !important;
+            width: 45px !important;
+            height: 45px !important;
+            min-width: 0 !important; 
+        }
+        .st-key-theme_toggle button {
+            background: #FFFFFF !important;
+            border: 1px solid #E0E0E0 !important;
+            border-radius: 50% !important;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important;
+            font-size: 1.4rem !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            color: #111111 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            line-height: 1 !important;
+            width: 100% !important;
+            height: 100% !important;
+            min-height: unset !important;
+        }
+        .st-key-theme_toggle button p {
+            margin: 0 !important;
+            padding: 0 !important;
+            line-height: 1 !important;
+            font-size: 1.4rem !important;
+        }
+        .st-key-theme_toggle button:hover {
+            transform: scale(1.1) !important;
+            background: #F0F0F0 !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown("""
+        <style>
+        .st-key-theme_toggle {
+            position: fixed !important;
+            top: 65px !important;
+            right: 15px !important;
+            z-index: 999999 !important;
+            width: 45px !important;
+            height: 45px !important;
+            min-width: 0 !important;
+        }
+        .st-key-theme_toggle button {
+            background: #1E2329 !important;
+            border: 1px solid #444444 !important;
+            border-radius: 50% !important;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3) !important;
+            font-size: 1.4rem !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            color: #FF3333 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            line-height: 1 !important;
+            width: 100% !important;
+            height: 100% !important;
+            min-height: unset !important;
+        }
+        .st-key-theme_toggle button p {
+            margin: 0 !important;
+            padding: 0 !important;
+            line-height: 1 !important;
+            font-size: 1.4rem !important;
+        }
+        .st-key-theme_toggle button:hover {
+            transform: scale(1.1) !important;
+            background: #2C323A !important;
+            border-color: #FF3333 !important;
+        }
+
+        .stApp, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], html, body, [data-testid="stHeader"] {
+            background-color: #0E1117 !important;
+            color: #FF3333 !important;
+        }
+
+        p, span, label, h1, h2, h3, h4, h5, h6, div, td, th, caption, .stMarkdown {
+            color: #FF3333 !important;
+        }
+
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button) {
+            background-color: #CC0000 !important;
+            color: #FFFFFF !important;
+            border: 1px solid #FF4D4D !important;
+            font-weight: bold !important;
+        }
+        div[data-testid="stButton"] > button:not(.st-key-theme_toggle button):hover {
+            background-color: #FF0000 !important;
+            color: #FFFFFF !important;
+            border-color: #FF6666 !important;
+        }
+
+        input, select, textarea, div[data-baseweb="select"] {
+            background-color: #1E2329 !important;
+            color: #FF3333 !important;
+            border-color: #CC0000 !important;
+        }
+
+        [data-testid="stForm"], div[data-testid="stVerticalBlock"] > div:has(input[type="password"]) {
+            background-color: #1E2329 !important;
+            padding: 2rem !important;
+            border-radius: 12px !important;
+            border: 1px solid #CC0000 !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+
+# ---- 0. Función de Clasificación Corregida ----
+def determinar_tipo_ariba(row):
+    sol = str(row.get("Solicitud de pedido", "")).strip()
+    material = str(row.get("Material", "")).strip()
+    tiene_material = bool(material and material.lower() not in ["nan", "none", "n/a", "-", "0", "null"])
     es_mrp_flag = str(row.get("Solped MRP", "")).strip().lower() in ["sí", "si", "true", "mrp", "1"]
     en_trazabilidad = bool(row.get("En_Trazabilidad", False) or row.get("En Trazabilidad", False))
 
@@ -554,15 +767,15 @@ with tab_dx:
 
         f1, f2 = st.columns([1, 2])
         with f1:
-            excluir_negativos = st.checkbox(
-                "Excluir negativos (solo desde 0)",
+            aplicar_corte_dia_1 = st.checkbox(
+                "Corte desde el día 1 (Excluir <= 0)",
                 value=False,
-                help="Filas con días negativos por modificación posterior a la OC.",
+                help="Aplica el corte de medida para que empiece desde el día 1 en realidad, excluyendo días 0 y negativos.",
             )
         with f2:
-            if excluir_negativos:
-                rango_ns = (0, NS_MAX_GLOBAL)
-                st.caption(f"Rango aplicado: 0 a {NS_MAX_GLOBAL:,} días (negativos excluidos)")
+            if aplicar_corte_dia_1:
+                rango_ns = (1, NS_MAX_GLOBAL)
+                st.caption(f"Rango aplicado: 1 a {NS_MAX_GLOBAL:,} días (corte desde el día 1)")
             elif NS_MIN_GLOBAL < NS_MAX_GLOBAL:
                 rango_ns = st.slider(
                     "Rango de días de gestión",
@@ -677,379 +890,4 @@ with tab_dx:
             if es_total:
                 estilo_fila = f"background:{ENAEX_GRIS};color:#fff;font-weight:700;border-top:2px solid {ENAEX_ROJO};"
             else:
-                fondo = "#ffffff" if (i % 2 == 0 and st.session_state["tema"] == "claro") else ("#f4f5f7" if st.session_state["tema"] == "claro" else "#14181d")
-                estilo_fila = f"background:{fondo};color:{color_texto_tabla};"
-            celdas = []
-            for j, c in enumerate(cols):
-                align = "left" if j == 0 else "right"
-                celdas.append(
-                    f'<td style="padding:{pad};text-align:{align};'
-                    f'border-bottom:1px solid #d8dbdf;white-space:nowrap;">{_fmt(c, r[j])}</td>'
-                )
-            filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
-
-        abrev = {
-            "Promedio días de gestión": "Nivel Serv.",
-            "Promedio Lead Time Total": "LT Total",
-            "% Cumplimiento": "% Cumpl.",
-            "Pos. OC generadas": "Pos. OC",
-        }
-        encabezados = "".join(
-            f'<th style="padding:{pad_th};text-align:{"left" if j == 0 else "right"};'
-            f'background:{ENAEX_GRIS};color:#fff;font-weight:600;font-size:{fuente_th};'
-            f'letter-spacing:.02em;position:sticky;top:0;z-index:2;white-space:nowrap;">'
-            f"{abrev.get(c, c) if compacta else c}</th>"
-            for j, c in enumerate(cols)
-        )
-
-        cuerpo_tabla = "".join(filas)
-        ancho_min = "340px" if compacta else "auto"
-
-        tabla_html = (
-            f'<table style="width:100%;min-width:{ancho_min};border-collapse:collapse;font-size:{fuente};'
-            f'font-family:inherit;border:1px solid #d8dbdf;">'
-            f'<thead><tr>{encabezados}</tr></thead>'
-            f'<tbody>{cuerpo_tabla}</tbody>'
-            f'</table>'
-        )
-
-        alto = f"max-height:{max_height}px;overflow-y:auto;" if max_height else ""
-        return f'<div style="{alto}overflow-x:auto;border:1px solid #d8dbdf;border-radius:4px;">{tabla_html}</div>'
-
-    # ---- Tabla por Comprador ----
-    st.subheader("Por comprador")
-    st.caption(
-        "Asignación por **grupo de compras**: las líneas MRP se reparten entre los "
-        "compradores responsables de cada grupo, en vez de concentrarse en el responsable de MRP."
-    )
-    col_comprador = (
-        "Comprador (Grupo de compras)"
-        if "Comprador (Grupo de compras)" in df_f.columns
-        else "Comprador por Grupo Compras"
-    )
-    tabla_comprador = transform.calcular_metricas_por_grupo(df_f, [col_comprador])
-    tabla_comprador = transform.agregar_fila_total(tabla_comprador, df_f, [col_comprador])
-    tabla_comprador = tabla_comprador.drop(columns=["Promedio Lead Time Total"], errors="ignore")
-    st.markdown(tabla_enaex(tabla_comprador), unsafe_allow_html=True)
-
-    st.write("")
-
-    # ---- Dos vistas por centro en paralelo ----
-    vc1, vc2 = st.columns(2)
-
-    with vc1:
-        st.subheader("Por centro logístico")
-        st.caption("Vista fija — el total calza con la vista por comprador.")
-        tabla_fija = transform.tabla_centros_fija(df_f)
-        tabla_fija = tabla_fija.drop(columns=["Promedio Lead Time Total"], errors="ignore")
-        st.markdown(tabla_enaex(tabla_fija, compacta=True), unsafe_allow_html=True)
-
-    with vc2:
-        st.subheader("Detalle por centro")
-        st.caption("Centros activos según los filtros aplicados.")
-        cols_detalle = [c for c in ["Centro", "Nombre Centro 2"] if c in df_f.columns]
-        tabla_detalle = transform.calcular_metricas_por_grupo(df_f, cols_detalle)
-        tabla_detalle = tabla_detalle.sort_values("Pos. OC generadas", ascending=False)
-        tabla_detalle = transform.agregar_fila_total(tabla_detalle, df_f, cols_detalle)
-        tabla_detalle = tabla_detalle.drop(columns=["Promedio Lead Time Total"], errors="ignore")
-        st.markdown(tabla_enaex(tabla_detalle, max_height=300, compacta=True), unsafe_allow_html=True)
-
-    st.divider()
-
-    # ---- Detalle de solicitudes ----
-    COLUMNAS_DETALLE = [
-        "Centro",
-        "Material",
-        "Texto breve",
-        "Solicitud de pedido",
-        "Tipo Ariba",
-        "Fecha de solicitud",
-        "Fecha de liberación",
-        "Fecha modificación",
-        "Grupo de compras",
-        "Cantidad pedida",
-        "Pedido",
-        "Fecha de pedido",
-        "Posición de pedido",
-        "Comprador (Grupo de compras)",
-        "Solped MRP",
-        "Nombre Centro 2",
-        "Nombre Centro",
-        "Estado Solped",
-        "Nivel de Servicio",
-        "Lead Time Total",
-        "Comentario",
-        "Cumple",
-    ]
-
-    def preparar_detalle(d: pd.DataFrame) -> pd.DataFrame:
-        d = d.copy()
-        for col_fecha in ["Fecha de solicitud", "Fecha de liberación", "Fecha modificación", "Fecha de pedido"]:
-            if col_fecha in d.columns:
-                d[col_fecha] = pd.to_datetime(d[col_fecha], errors="coerce").dt.date
-        if "Comentario" not in d.columns:
-            d["Comentario"] = ""
-        return d[[c for c in COLUMNAS_DETALLE if c in d.columns]]
-
-    detalle = preparar_detalle(df_f)
-
-    with st.expander("Ver detalle de solicitudes", expanded=False):
-        st.caption("La columna **Comentario** es editable. Los cambios se guardan automáticamente en memoria y no se perderán al forzar recargas.")
-        detalle_editado = st.data_editor(
-            detalle,
-            use_container_width=True,
-            num_rows="fixed",
-            key="editor_detalle",
-            column_config={
-                "Tipo Ariba": st.column_config.TextColumn("Origen / Tipo Solicitud", width="medium"),
-                "Comentario": st.column_config.TextColumn(
-                    "Comentario", help="Anotación libre para el registro semanal", width="medium"
-                ),
-                "Nivel de Servicio": st.column_config.NumberColumn("Nivel de Servicio (días)"),
-                "Lead Time Total": None,
-            },
-            disabled=[c for c in detalle.columns if c != "Comentario"],
-        )
-
-        # --- SINCRONIZACIÓN DE COMENTARIOS EDITADOS ---
-        if "Comentario" in detalle_editado.columns:
-            # 1. Identificar si el usuario borró algún comentario (para limpiarlo de la memoria)
-            comentarios_vacios = detalle_editado[detalle_editado["Comentario"].isna() | (detalle_editado["Comentario"].astype(str).str.strip() == "")]
-            for solped in comentarios_vacios["Solicitud de pedido"].astype(str).unique():
-                st.session_state["comentarios_guardados"].pop(solped, None)
-
-            # 2. Guardar o actualizar comentarios agregados a la memoria
-            comentarios_llenos = detalle_editado[~detalle_editado["Comentario"].isna() & (detalle_editado["Comentario"].astype(str).str.strip() != "")]
-            if not comentarios_llenos.empty:
-                nuevos_dict = dict(zip(
-                    comentarios_llenos["Solicitud de pedido"].astype(str),
-                    comentarios_llenos["Comentario"].astype(str).str.strip()
-                ))
-                st.session_state["comentarios_guardados"].update(nuevos_dict)
-        # ---------------------------------------------
-
-    # ---- Exportación a Excel ----
-    semana_ref = pd.Timestamp(fecha_corte) - pd.Timedelta(days=7)
-    num_semana = semana_ref.isocalendar()[1]
-    nombre_archivo = f"Sem{num_semana:02d}-{semana_ref.year}.xlsx"
-
-    def generar_excel(detalle_df: pd.DataFrame) -> bytes:
-        from io import BytesIO
-        from openpyxl import Workbook
-        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-        from openpyxl.utils import get_column_letter
-
-        gris = "FF404B55"
-        rojo = "FFCC0000"
-        fuente_base = "Arial"
-
-        wb = Workbook()
-        borde = Border(bottom=Side(style="thin", color="FFD8DBDF"))
-
-        def escribir_hoja(ws, titulo, tabla, col_inicio=1, fila_inicio=1):
-            ws.cell(row=fila_inicio, column=col_inicio, value=titulo).font = Font(
-                name=fuente_base, bold=True, size=12, color=gris
-            )
-            fila = fila_inicio + 1
-            for j, col in enumerate(tabla.columns):
-                c = ws.cell(row=fila, column=col_inicio + j, value=str(col))
-                c.font = Font(name=fuente_base, bold=True, color="FFFFFFFF", size=10)
-                c.fill = PatternFill("solid", fgColor=gris)
-                c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-            for i, r in enumerate(tabla.itertuples(index=False, name=None)):
-                es_total = str(r[0]) == "TOTAL"
-                for j, col in enumerate(tabla.columns):
-                    val = r[j]
-                    if pd.isna(val):
-                        val = None
-                    elif isinstance(val, (int, float)) and col in (
-                        "Promedio días de gestión",
-                        "Promedio Lead Time Total",
-                        "% Cumplimiento",
-                        "Pos. OC generadas",
-                    ):
-                        val = round(float(val))
-                    elif hasattr(val, "item"):
-                        val = val.item()
-                    c = ws.cell(row=fila + 1 + i, column=col_inicio + j, value=val)
-                    c.font = Font(name=fuente_base, size=10, bold=es_total, color=gris)
-                    c.border = borde
-                    if es_total:
-                        c.fill = PatternFill("solid", fgColor="FFEFF0F2")
-                    if col == "% Cumplimiento" and val is not None:
-                        c.number_format = '0"%"'
-                    if col in ("Fecha de solicitud", "Fecha de liberación", "Fecha modificación", "Fecha de pedido"):
-                        c.number_format = "DD-MM-YYYY"
-            return fila + 1 + len(tabla)
-
-        def ajustar_ancho(ws, tabla, col_inicio=1, extra=3):
-            for j, col in enumerate(tabla.columns):
-                largos = [len(str(col))]
-                for v in tabla[col].head(200):
-                    largos.append(0 if pd.isna(v) else len(str(v)))
-                ws.column_dimensions[get_column_letter(col_inicio + j)].width = min(max(largos) + extra, 45)
-
-        ws = wb.active
-        ws.title = "Resumen"
-        ws["A1"] = f"Nivel de Servicio MRO — Registro semana {num_semana:02d}/{semana_ref.year}"
-        ws["A1"].font = Font(name=fuente_base, bold=True, size=14, color=gris)
-        ws["A2"] = f"Fecha de corte del reporte: {pd.Timestamp(fecha_corte).date()}"
-        ws["A2"].font = Font(name=fuente_base, size=10, italic=True, color=gris)
-        ws["A3"] = f"Generado: {pd.Timestamp.today().date()}"
-        ws["A3"].font = Font(name=fuente_base, size=10, italic=True, color=gris)
-
-        promedio_lt_val = round(promedio_lead_time) if pd.notna(promedio_lead_time) else None
-        resumen = pd.DataFrame(
-            {
-                "Indicador": [
-                    "Promedio Nivel de Servicio (días)",
-                    "Promedio Lead Time Total (días)",
-                    "% Cumplimiento SLA",
-                    "OC generadas",
-                    "Líneas consideradas",
-                ],
-                "Valor": [
-                    round(promedio_dias) if pd.notna(promedio_dias) else None,
-                    promedio_lt_val,
-                    round(pct_cumplimiento),
-                    pedidos_distintos,
-                    len(df_f),
-                ],
-            }
-        )
-        fila = escribir_hoja(ws, "Indicadores generales", resumen, fila_inicio=5)
-        ws.cell(row=5, column=1).font = Font(name=fuente_base, bold=True, size=12, color=rojo)
-        ajustar_ancho(ws, resumen)
-
-        fila = escribir_hoja(ws, "Por comprador", tabla_comprador, fila_inicio=fila + 2)
-        fila = escribir_hoja(ws, "Por centro logístico", tabla_fija, fila_inicio=fila + 2)
-        escribir_hoja(ws, "Detalle por centro", tabla_detalle, fila_inicio=fila + 2)
-
-        ws2 = wb.create_sheet("Detalle solicitudes")
-        escribir_hoja(ws2, "Detalle de solicitudes", detalle_df)
-        ajustar_ancho(ws2, detalle_df)
-        ws2.freeze_panes = "A3"
-
-        buffer = BytesIO()
-        wb.save(buffer)
-        return buffer.getvalue()
-
-    st.subheader("Registro semanal")
-    st.caption(f"Prepara el reporte completo (indicadores, tablas y detalle con comentarios) como **{nombre_archivo}**.")
-
-    clave_excel = (len(df_f), int(pd.util.hash_pandas_object(detalle_editado["Comentario"].fillna("")).sum()), pd.Timestamp(fecha_corte))
-
-    col_prep, col_desc = st.columns([1, 2])
-    with col_prep:
-        if st.button("📄 Preparar Excel"):
-            with st.spinner("Generando el Excel..."):
-                try:
-                    st.session_state["_excel_bytes"] = generar_excel(detalle_editado)
-                    st.session_state["_excel_clave"] = clave_excel
-                except Exception as e:
-                    st.error(f"No se pudo generar el Excel: {e}")
-
-    with col_desc:
-        excel_listo = st.session_state.get("_excel_bytes") is not None
-        excel_desactualizado = st.session_state.get("_excel_clave") != clave_excel
-        if excel_listo and excel_desactualizado:
-            st.caption("⚠️ Los filtros cambiaron desde que preparaste este Excel — vuelve a preparar para reflejar la selección actual.")
-        if excel_listo:
-            st.download_button(
-                f"⬇ Descargar {nombre_archivo}",
-                data=st.session_state["_excel_bytes"],
-                file_name=nombre_archivo,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=False,
-            )
-        else:
-            st.caption('Haz clic en "Preparar Excel" para generar el archivo de descarga.')
-
-
-# ==============================================================================
-# PESTAÑA 2: TRAZABILIDAD NO CATALOGADAS
-# ==============================================================================
-with tab_trazabilidad:
-    st.title("🔍 Trazabilidad PR No Catalogadas — Ariba")
-
-    if not HAS_TRAZABILIDAD:
-        st.warning(
-            "⚠️ **Módulo 'ariba_trazabilidad.py' no disponible.**\n\n"
-            "Asegúrate de que el archivo esté subido en GitHub en la misma carpeta raíz."
-        )
-    else:
-        st.markdown(
-            "Procesa el reporte de **Trazabilidad Ariba** sin consolidar para vincular "
-            "las solicitudes de compra iniciales, sus agregadas y su salida a SAP ERP (Solped 600)."
-        )
-
-        traz_col1, traz_col2 = st.columns([2, 1])
-        with traz_col1:
-            archivo_trazabilidad = st.file_uploader(
-                "Cargar Reporte PR No Catalogadas - Trazabilidad (.csv)",
-                type=["csv"],
-                key="uploader_trazabilidad",
-            )
-        with traz_col2:
-            empresa_id = st.text_input(
-                "Empresa compradora (ID)",
-                value=getattr(trazabilidad, "EMPRESA_POR_DEFECTO", "1000"),
-            )
-
-        if archivo_trazabilidad:
-            if st.button("🚀 Procesar Trazabilidad", key="btn_procesar_traz"):
-                with st.spinner("Procesando trazabilidad y reconstruyendo cadena de eventos..."):
-                    try:
-                        df_cadena, df_resumen = trazabilidad.procesar_trazabilidad_completa(
-                            archivo_trazabilidad, empresa=empresa_id
-                        )
-
-                        st.session_state["df_trazabilidad_cadena"] = df_cadena
-                        st.session_state["df_trazabilidad_limpio"] = df_resumen
-
-                        st.session_state.pop("_clave_pipeline", None)
-                        st.success("¡Trazabilidad procesada con éxito! La pestaña Dx Compradores ha sido actualizada.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al procesar el archivo: {e}")
-
-        if "df_trazabilidad_limpio" in st.session_state and "df_trazabilidad_cadena" in st.session_state:
-            df_cadena = st.session_state["df_trazabilidad_cadena"]
-            df_resumen = st.session_state["df_trazabilidad_limpio"]
-
-            kpi_t1, kpi_t2, kpi_t3 = st.columns(3)
-            with kpi_t1:
-                st.metric("Total PR Iniciales", f"{len(df_cadena):,}")
-            with kpi_t2:
-                completas = (df_cadena["Cadena completa"] == "Sí").sum() if "Cadena completa" in df_cadena.columns else 0
-                st.metric("Cadenas Completas (con SAP)", f"{completas:,}")
-            with kpi_t3:
-                st.metric("Solpeds 600 Identificadas", f"{len(df_resumen):,}")
-
-            st.divider()
-
-            tab_cad, tab_res = st.tabs(["📋 Cadena Detallada", "📊 Resumen por Solped (SAP 600)"])
-
-            with tab_cad:
-                st.subheader("Vista Cadena de Eventos")
-                st.dataframe(df_cadena, use_container_width=True)
-                csv_cadena = df_cadena.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    label="⬇ Descargar Cadena Completa (CSV)",
-                    data=csv_cadena,
-                    file_name="Trazabilidad_Cadena_Completa.csv",
-                    mime="text/csv",
-                )
-
-            with tab_res:
-                st.subheader("Vista Consolidada por Solped SAP 600")
-                st.caption("Esta información servirá de cruce directo con la base ME5A.")
-                st.dataframe(df_resumen, use_container_width=True)
-                csv_resumen = df_resumen.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    label="⬇ Descargar Resumen Solpeds 600 (CSV)",
-                    data=csv_resumen,
-                    file_name="Resumen_Solped_600_No_Catalogadas.csv",
-                    mime="text/csv",
-                )
+                fondo = "#ffffff" if (i % 2 == 0 and st.session_state["tema"] == "claro") else ("
