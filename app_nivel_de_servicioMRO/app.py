@@ -4,7 +4,6 @@ Réplica del pbix "Nivel_de_servicio_BI.pbix", página "Dx Compradores" y Trazab
 
 Correr local: streamlit run app.py
 """
-
 import glob
 import os
 import re
@@ -404,15 +403,7 @@ with tab_dx:
             st.error(f"🚨 **No se pudieron cargar los datos.**\n\nDetalle técnico: `{e}`\n\n**Solución recomendada:** Si la política de la empresa bloquea el acceso público directo de la API a SharePoint, cambia la opción en el menú izquierdo a **'Subir archivos'** o coloca las bases en la carpeta **'data/'**.")
             st.stop()
 
-    df = st.session_state["_df_pipeline"].copy()
-
-    # --- INICIO PERSISTENCIA DE COMENTARIOS ---
-    if "comentarios_guardados" not in st.session_state:
-        st.session_state["comentarios_guardados"] = {}
-
-    # Mapear los comentarios guardados a la base de datos principal cruzando por el número de Solped
-    df["Comentario"] = df["Solicitud de pedido"].astype(str).map(st.session_state["comentarios_guardados"]).fillna("")
-    # --- FIN PERSISTENCIA DE COMENTARIOS ---
+    df = st.session_state["_df_pipeline"]
 
     NS_MIN_GLOBAL = int(df["Nivel de Servicio"].min()) if len(df) and pd.notna(df["Nivel de Servicio"].min()) else 0
     NS_MAX_GLOBAL = int(df["Nivel de Servicio"].max()) if len(df) and pd.notna(df["Nivel de Servicio"].max()) else 100
@@ -433,19 +424,13 @@ with tab_dx:
 
     # ---- Filtros ----
     st.subheader("Filtros")
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     with c1:
         centros = st.multiselect("Centro", sorted(df["Centro"].dropna().unique()))
     with c2:
         aplica = st.multiselect("Aplica?", sorted(df["Aplica?"].dropna().unique()))
     with c3:
         tipos_ariba = st.multiselect("Origen / Tipo Solicitud", sorted(df["Tipo Ariba"].dropna().unique()))
-    with c4:
-        filtro_comentario = st.selectbox(
-            "Filtrado por Comentarios", 
-            ["Todos", "Con comentario", "Sin comentario"],
-            help="Permite buscar las filas que ya tengan observaciones cargadas."
-        )
 
     # ---- Filtro para Excluir IDs de Solped ----
     solpeds_excluir_raw = st.text_area(
@@ -478,13 +463,7 @@ with tab_dx:
         df_f = df_f[df_f["Tipo Ariba"].isin(tipos_ariba)]
     checkpoints.append(("2b. Tras filtro Origen / Tipo Solicitud", len(df_f)))
 
-    if filtro_comentario == "Con comentario":
-        df_f = df_f[df_f["Comentario"].astype(str).str.strip() != ""]
-    elif filtro_comentario == "Sin comentario":
-        df_f = df_f[df_f["Comentario"].astype(str).str.strip() == ""]
-    checkpoints.append(("2c. Tras filtro Comentarios", len(df_f)))
-
-    _snapshot("2. Tras Centro + Aplica? + Origen + Comentarios + Exclusiones", df_f)
+    _snapshot("2. Tras Centro + Aplica? + Origen + Exclusiones", df_f)
 
     # ---- Estado Solped ----
     st.caption("Estado Solped (el filtro de fecha de abajo solo aplica dentro de 'Pedido completo')")
@@ -531,8 +510,8 @@ with tab_dx:
     _snapshot("4. Tras jerarquía Año/Mes/Día", df_f)
 
     # ---- Solped MRP y Cumple ----
-    c4_b, c5 = st.columns(2)
-    with c4_b:
+    c4, c5 = st.columns(2)
+    with c4:
         solped_mrp = st.multiselect("Solped MRP", sorted(df_f["Solped MRP"].dropna().unique()))
     with c5:
         cumple = st.multiselect("Nivel de Servicio (Cumple)", sorted(df_f["Cumple"].dropna().unique()))
@@ -555,15 +534,15 @@ with tab_dx:
 
         f1, f2 = st.columns([1, 2])
         with f1:
-            aplicar_corte_dia_1 = st.checkbox(
-                "Corte desde el día 1 (Excluir <= 0)",
+            excluir_negativos = st.checkbox(
+                "Excluir negativos (solo desde 0)",
                 value=False,
-                help="Aplica el corte de medida para que empiece desde el día 1 en realidad, excluyendo días 0 y negativos.",
+                help="Filas con días negativos por modificación posterior a la OC.",
             )
         with f2:
-            if aplicar_corte_dia_1:
-                rango_ns = (1, NS_MAX_GLOBAL)
-                st.caption(f"Rango aplicado: 1 a {NS_MAX_GLOBAL:,} días (corte desde el día 1)")
+            if excluir_negativos:
+                rango_ns = (0, NS_MAX_GLOBAL)
+                st.caption(f"Rango aplicado: 0 a {NS_MAX_GLOBAL:,} días (negativos excluidos)")
             elif NS_MIN_GLOBAL < NS_MAX_GLOBAL:
                 rango_ns = st.slider(
                     "Rango de días de gestión",
@@ -671,7 +650,6 @@ with tab_dx:
         fuente_th = "0.66rem" if compacta else "0.82rem"
 
         color_texto_tabla = "#FF3333" if st.session_state["tema"] == "oscuro" else "#404B55"
-        fondo_oscuro = "#1E2329" if st.session_state["tema"] == "oscuro" else "#F9F9F9"
 
         filas = []
         for i, r in enumerate(tabla.itertuples(index=False)):
@@ -679,98 +657,362 @@ with tab_dx:
             if es_total:
                 estilo_fila = f"background:{ENAEX_GRIS};color:#fff;font-weight:700;border-top:2px solid {ENAEX_ROJO};"
             else:
-                fondo = "#ffffff" if (i % 2 == 0 and st.session_state["tema"] == "claro") else fondo_oscuro
+                fondo = "#ffffff" if (i % 2 == 0 and st.session_state["tema"] == "claro") else ("#f4f5f7" if st.session_state["tema"] == "claro" else "#14181d")
                 estilo_fila = f"background:{fondo};color:{color_texto_tabla};"
+            celdas = []
+            for j, c in enumerate(cols):
+                align = "left" if j == 0 else "right"
+                celdas.append(
+                    f'<td style="padding:{pad};text-align:{align};'
+                    f'border-bottom:1px solid #d8dbdf;white-space:nowrap;">{_fmt(c, r[j])}</td>'
+                )
+            filas.append(f'<tr style="{estilo_fila}">{"".join(celdas)}</tr>')
 
-            tds = "".join([
-                f'<td style="padding:{pad};font-size:{fuente};text-align:center;border-bottom:1px solid #E0E0E0;">{_fmt(cols[j], val)}</td>'
-                for j, val in enumerate(r)
-            ])
-            filas.append(f"<tr style='{estilo_fila}'>{tds}</tr>")
-
-        ths = "".join([
-            f'<th style="padding:{pad_th};font-size:{fuente_th};background:{ENAEX_GRIS};color:#fff;text-align:center;font-weight:600;">{c}</th>'
-            for c in cols
-        ])
-
-        html = (
-            f"<div style='overflow-x:auto;{f'max-height:{max_height}px;' if max_height else ''}'>"
-            f"<table style='width:100%;border-collapse:collapse;margin:8px 0;'><thead><tr>{ths}</tr></thead><tbody>{''.join(filas)}</tbody></table></div>"
+        abrev = {
+            "Promedio días de gestión": "Nivel Serv.",
+            "Promedio Lead Time Total": "LT Total",
+            "% Cumplimiento": "% Cumpl.",
+            "Pos. OC generadas": "Pos. OC",
+        }
+        encabezados = "".join(
+            f'<th style="padding:{pad_th};text-align:{"left" if j == 0 else "right"};'
+            f'background:{ENAEX_GRIS};color:#fff;font-weight:600;font-size:{fuente_th};'
+            f'letter-spacing:.02em;position:sticky;top:0;z-index:2;white-space:nowrap;">'
+            f"{abrev.get(c, c) if compacta else c}</th>"
+            for j, c in enumerate(cols)
         )
-        return html
 
-    # ---- Tablas Resumen ----
-    st.subheader("Resumen por Categoría")
-    col_res1, col_res2 = st.columns(2)
+        cuerpo_tabla = "".join(filas)
+        ancho_min = "340px" if compacta else "auto"
 
-    def agrupar_resumen(df_in, col_agrupacion):
-        if col_agrupacion not in df_in.columns or df_in.empty:
-            return pd.DataFrame()
-        res = (
-            df_in.groupby(col_agrupacion)
-            .agg(
-                Posiciones=("Solicitud de pedido", "count"),
-                Cumplimiento_Pct=("Cumple", lambda x: (x == "Cumple").sum() / max(len(x), 1) * 100),
-                Prom_Dias=("Nivel de Servicio", "mean"),
-                Pos_OC=("Pedido", lambda x: x.nunique() + (1 if x.isna().any() else 0)),
-            )
-            .reset_index()
+        tabla_html = (
+            f'<table style="width:100%;min-width:{ancho_min};border-collapse:collapse;font-size:{fuente};'
+            f'font-family:inherit;border:1px solid #d8dbdf;">'
+            f'<thead><tr>{encabezados}</tr></thead>'
+            f'<tbody>{cuerpo_tabla}</tbody>'
+            f'</table>'
         )
-        res.columns = [col_agrupacion, "Posiciones", "% Cumplimiento", "Promedio días de gestión", "Pos. OC generadas"]
 
-        total_row = pd.DataFrame([{
-            col_agrupacion: "TOTAL",
-            "Posiciones": len(df_in),
-            "% Cumplimiento": ((df_in["Cumple"] == "Cumple").sum() / max(len(df_in), 1) * 100),
-            "Promedio días de gestión": df_in["Nivel de Servicio"].mean(),
-            "Pos. OC generadas": df_in["Pedido"].nunique() + (1 if df_in["Pedido"].isna().any() else 0),
-        }])
-        return pd.concat([res, total_row], ignore_index=True)
+        alto = f"max-height:{max_height}px;overflow-y:auto;" if max_height else ""
+        return f'<div style="{alto}overflow-x:auto;border:1px solid #d8dbdf;border-radius:4px;">{tabla_html}</div>'
 
-    with col_res1:
-        st.markdown("**Resumen por Tipo / Origen Solicitud**")
-        df_res_tipo = agrupar_resumen(df_f, "Tipo Ariba")
-        if not df_res_tipo.empty:
-            st.markdown(tabla_enaex(df_res_tipo), unsafe_allow_html=True)
-
-    with col_res2:
-        st.markdown("**Resumen por Centro**")
-        df_res_centro = agrupar_resumen(df_f, "Centro")
-        if not df_res_centro.empty:
-            st.markdown(tabla_enaex(df_res_centro), unsafe_allow_html=True)
-
-    # ---- Tabla Detalle y Edición de Comentarios ----
-    st.divider()
-    st.subheader("📝 Detalle y Gestión de Comentarios")
-    st.caption("Modifica las observaciones directamente en la tabla. Los comentarios se mantendrán durante tu sesión.")
-
-    cols_mostrar = ["Solicitud de pedido", "Posición", "Centro", "Tipo Ariba", "Estado Solped", "Fecha de pedido", "Nivel de Servicio", "Cumple", "Comentario"]
-    cols_existentes = [c for c in cols_mostrar if c in df_f.columns]
-
-    df_editado = st.data_editor(
-        df_f[cols_existentes],
-        key="editor_comentarios",
-        disabled=[c for c in cols_existentes if c != "Comentario"],
-        use_container_width=True,
-        hide_index=True,
+    # ---- Tabla por Comprador ----
+    st.subheader("Por comprador")
+    st.caption(
+        "Asignación por **grupo de compras**: las líneas MRP se reparten entre los "
+        "compradores responsables de cada grupo, en vez de concentrarse en el responsable de MRP."
     )
+    col_comprador = (
+        "Comprador (Grupo de compras)"
+        if "Comprador (Grupo de compras)" in df_f.columns
+        else "Comprador por Grupo Compras"
+    )
+    tabla_comprador = transform.calcular_metricas_por_grupo(df_f, [col_comprador])
+    tabla_comprador = transform.agregar_fila_total(tabla_comprador, df_f, [col_comprador])
+    tabla_comprador = tabla_comprador.drop(columns=["Promedio Lead Time Total"], errors="ignore")
+    st.markdown(tabla_enaex(tabla_comprador), unsafe_allow_html=True)
 
-    if st.button("💾 Guardar Comentarios"):
-        for idx, row in df_editado.iterrows():
-            sol_id = str(row["Solicitud de pedido"])
-            st.session_state["comentarios_guardados"][sol_id] = row["Comentario"]
-        st.success("¡Comentarios guardados exitosamente!")
-        st.rerun()
+    st.write("")
+
+    # ---- Dos vistas por centro en paralelo ----
+    vc1, vc2 = st.columns(2)
+
+    with vc1:
+        st.subheader("Por centro logístico")
+        st.caption("Vista fija — el total calza con la vista por comprador.")
+        tabla_fija = transform.tabla_centros_fija(df_f)
+        tabla_fija = tabla_fija.drop(columns=["Promedio Lead Time Total"], errors="ignore")
+        st.markdown(tabla_enaex(tabla_fija, compacta=True), unsafe_allow_html=True)
+
+    with vc2:
+        st.subheader("Detalle por centro")
+        st.caption("Centros activos según los filtros aplicados.")
+        cols_detalle = [c for c in ["Centro", "Nombre Centro 2"] if c in df_f.columns]
+        tabla_detalle = transform.calcular_metricas_por_grupo(df_f, cols_detalle)
+        tabla_detalle = tabla_detalle.sort_values("Pos. OC generadas", ascending=False)
+        tabla_detalle = transform.agregar_fila_total(tabla_detalle, df_f, cols_detalle)
+        tabla_detalle = tabla_detalle.drop(columns=["Promedio Lead Time Total"], errors="ignore")
+        st.markdown(tabla_enaex(tabla_detalle, max_height=300, compacta=True), unsafe_allow_html=True)
+
+    st.divider()
+
+    # ---- Detalle de solicitudes ----
+    COLUMNAS_DETALLE = [
+        "Centro",
+        "Material",
+        "Texto breve",
+        "Solicitud de pedido",
+        "Tipo Ariba",
+        "Fecha de solicitud",
+        "Fecha de liberación",
+        "Fecha modificación",
+        "Grupo de compras",
+        "Cantidad pedida",
+        "Pedido",
+        "Fecha de pedido",
+        "Posición de pedido",
+        "Comprador (Grupo de compras)",
+        "Solped MRP",
+        "Nombre Centro 2",
+        "Nombre Centro",
+        "Estado Solped",
+        "Nivel de Servicio",
+        "Lead Time Total",
+        "Comentario",
+        "Cumple",
+    ]
+
+    def preparar_detalle(d: pd.DataFrame) -> pd.DataFrame:
+        d = d.copy()
+        for col_fecha in ["Fecha de solicitud", "Fecha de liberación", "Fecha modificación", "Fecha de pedido"]:
+            if col_fecha in d.columns:
+                d[col_fecha] = pd.to_datetime(d[col_fecha], errors="coerce").dt.date
+        if "Comentario" not in d.columns:
+            d["Comentario"] = ""
+        return d[[c for c in COLUMNAS_DETALLE if c in d.columns]]
+
+    detalle = preparar_detalle(df_f)
+
+    with st.expander("Ver detalle de solicitudes", expanded=False):
+        st.caption("La columna **Comentario** es editable: escribe ahí y se incluirá en el Excel de registro.")
+        detalle_editado = st.data_editor(
+            detalle,
+            use_container_width=True,
+            num_rows="fixed",
+            key="editor_detalle",
+            column_config={
+                "Tipo Ariba": st.column_config.TextColumn("Origen / Tipo Solicitud", width="medium"),
+                "Comentario": st.column_config.TextColumn(
+                    "Comentario", help="Anotación libre para el registro semanal", width="medium"
+                ),
+                "Nivel de Servicio": st.column_config.NumberColumn("Nivel de Servicio (días)"),
+                "Lead Time Total": None,
+            },
+            disabled=[c for c in detalle.columns if c != "Comentario"],
+        )
+
+    # ---- Exportación a Excel ----
+    semana_ref = pd.Timestamp(fecha_corte) - pd.Timedelta(days=7)
+    num_semana = semana_ref.isocalendar()[1]
+    nombre_archivo = f"Sem{num_semana:02d}-{semana_ref.year}.xlsx"
+
+    def generar_excel(detalle_df: pd.DataFrame) -> bytes:
+        from io import BytesIO
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        from openpyxl.utils import get_column_letter
+
+        gris = "FF404B55"
+        rojo = "FFCC0000"
+        fuente_base = "Arial"
+
+        wb = Workbook()
+        borde = Border(bottom=Side(style="thin", color="FFD8DBDF"))
+
+        def escribir_hoja(ws, titulo, tabla, col_inicio=1, fila_inicio=1):
+            ws.cell(row=fila_inicio, column=col_inicio, value=titulo).font = Font(
+                name=fuente_base, bold=True, size=12, color=gris
+            )
+            fila = fila_inicio + 1
+            for j, col in enumerate(tabla.columns):
+                c = ws.cell(row=fila, column=col_inicio + j, value=str(col))
+                c.font = Font(name=fuente_base, bold=True, color="FFFFFFFF", size=10)
+                c.fill = PatternFill("solid", fgColor=gris)
+                c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+            for i, r in enumerate(tabla.itertuples(index=False, name=None)):
+                es_total = str(r[0]) == "TOTAL"
+                for j, col in enumerate(tabla.columns):
+                    val = r[j]
+                    if pd.isna(val):
+                        val = None
+                    elif isinstance(val, (int, float)) and col in (
+                        "Promedio días de gestión",
+                        "Promedio Lead Time Total",
+                        "% Cumplimiento",
+                        "Pos. OC generadas",
+                    ):
+                        val = round(float(val))
+                    elif hasattr(val, "item"):
+                        val = val.item()
+                    c = ws.cell(row=fila + 1 + i, column=col_inicio + j, value=val)
+                    c.font = Font(name=fuente_base, size=10, bold=es_total, color=gris)
+                    c.border = borde
+                    if es_total:
+                        c.fill = PatternFill("solid", fgColor="FFEFF0F2")
+                    if col == "% Cumplimiento" and val is not None:
+                        c.number_format = '0"%"'
+                    if col in ("Fecha de solicitud", "Fecha de liberación", "Fecha modificación", "Fecha de pedido"):
+                        c.number_format = "DD-MM-YYYY"
+            return fila + 1 + len(tabla)
+
+        def ajustar_ancho(ws, tabla, col_inicio=1, extra=3):
+            for j, col in enumerate(tabla.columns):
+                largos = [len(str(col))]
+                for v in tabla[col].head(200):
+                    largos.append(0 if pd.isna(v) else len(str(v)))
+                ws.column_dimensions[get_column_letter(col_inicio + j)].width = min(max(largos) + extra, 45)
+
+        ws = wb.active
+        ws.title = "Resumen"
+        ws["A1"] = f"Nivel de Servicio MRO — Registro semana {num_semana:02d}/{semana_ref.year}"
+        ws["A1"].font = Font(name=fuente_base, bold=True, size=14, color=gris)
+        ws["A2"] = f"Fecha de corte del reporte: {pd.Timestamp(fecha_corte).date()}"
+        ws["A2"].font = Font(name=fuente_base, size=10, italic=True, color=gris)
+        ws["A3"] = f"Generado: {pd.Timestamp.today().date()}"
+        ws["A3"].font = Font(name=fuente_base, size=10, italic=True, color=gris)
+
+        promedio_lt_val = round(promedio_lead_time) if pd.notna(promedio_lead_time) else None
+        resumen = pd.DataFrame(
+            {
+                "Indicador": [
+                    "Promedio Nivel de Servicio (días)",
+                    "Promedio Lead Time Total (días)",
+                    "% Cumplimiento SLA",
+                    "OC generadas",
+                    "Líneas consideradas",
+                ],
+                "Valor": [
+                    round(promedio_dias) if pd.notna(promedio_dias) else None,
+                    promedio_lt_val,
+                    round(pct_cumplimiento),
+                    pedidos_distintos,
+                    len(df_f),
+                ],
+            }
+        )
+        fila = escribir_hoja(ws, "Indicadores generales", resumen, fila_inicio=5)
+        ws.cell(row=5, column=1).font = Font(name=fuente_base, bold=True, size=12, color=rojo)
+        ajustar_ancho(ws, resumen)
+
+        fila = escribir_hoja(ws, "Por comprador", tabla_comprador, fila_inicio=fila + 2)
+        fila = escribir_hoja(ws, "Por centro logístico", tabla_fija, fila_inicio=fila + 2)
+        escribir_hoja(ws, "Detalle por centro", tabla_detalle, fila_inicio=fila + 2)
+
+        ws2 = wb.create_sheet("Detalle solicitudes")
+        escribir_hoja(ws2, "Detalle de solicitudes", detalle_df)
+        ajustar_ancho(ws2, detalle_df)
+        ws2.freeze_panes = "A3"
+
+        buffer = BytesIO()
+        wb.save(buffer)
+        return buffer.getvalue()
+
+    st.subheader("Registro semanal")
+    st.caption(f"Prepara el reporte completo (indicadores, tablas y detalle con comentarios) como **{nombre_archivo}**.")
+
+    clave_excel = (len(df_f), int(pd.util.hash_pandas_object(detalle_editado["Comentario"].fillna("")).sum()), pd.Timestamp(fecha_corte))
+
+    col_prep, col_desc = st.columns([1, 2])
+    with col_prep:
+        if st.button("📄 Preparar Excel"):
+            with st.spinner("Generando el Excel..."):
+                try:
+                    st.session_state["_excel_bytes"] = generar_excel(detalle_editado)
+                    st.session_state["_excel_clave"] = clave_excel
+                except Exception as e:
+                    st.error(f"No se pudo generar el Excel: {e}")
+
+    with col_desc:
+        excel_listo = st.session_state.get("_excel_bytes") is not None
+        excel_desactualizado = st.session_state.get("_excel_clave") != clave_excel
+        if excel_listo and excel_desactualizado:
+            st.caption("⚠️ Los filtros cambiaron desde que preparaste este Excel — vuelve a preparar para reflejar la selección actual.")
+        if excel_listo:
+            st.download_button(
+                f"⬇ Descargar {nombre_archivo}",
+                data=st.session_state["_excel_bytes"],
+                file_name=nombre_archivo,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=False,
+            )
+        else:
+            st.caption('Haz clic en "Preparar Excel" para generar el archivo de descarga.')
+
 
 # ==============================================================================
 # PESTAÑA 2: TRAZABILIDAD NO CATALOGADAS
 # ==============================================================================
 with tab_trazabilidad:
-    st.title("🔗 Trazabilidad No Catalogadas (Ariba)")
-    if HAS_TRAZABILIDAD:
-        try:
-            trazabilidad.render_trazabilidad_page()
-        except Exception as e:
-            st.error(f"Error al cargar el módulo de Trazabilidad: {e}")
+    st.title("🔍 Trazabilidad PR No Catalogadas — Ariba")
+
+    if not HAS_TRAZABILIDAD:
+        st.warning(
+            "⚠️ **Módulo 'ariba_trazabilidad.py' no disponible.**\n\n"
+            "Asegúrate de que el archivo esté subido en GitHub en la misma carpeta raíz."
+        )
     else:
-        st.info("El módulo `ariba_trazabilidad.py` no está disponible o no se pudo importar.")
+        st.markdown(
+            "Procesa el reporte de **Trazabilidad Ariba** sin consolidar para vincular "
+            "las solicitudes de compra iniciales, sus agregadas y su salida a SAP ERP (Solped 600)."
+        )
+
+        traz_col1, traz_col2 = st.columns([2, 1])
+        with traz_col1:
+            archivo_trazabilidad = st.file_uploader(
+                "Cargar Reporte PR No Catalogadas - Trazabilidad (.csv)",
+                type=["csv"],
+                key="uploader_trazabilidad",
+            )
+        with traz_col2:
+            empresa_id = st.text_input(
+                "Empresa compradora (ID)",
+                value=getattr(trazabilidad, "EMPRESA_POR_DEFECTO", "1000"),
+            )
+
+        if archivo_trazabilidad:
+            if st.button("🚀 Procesar Trazabilidad", key="btn_procesar_traz"):
+                with st.spinner("Procesando trazabilidad y reconstruyendo cadena de eventos..."):
+                    try:
+                        df_cadena, df_resumen = trazabilidad.procesar_trazabilidad_completa(
+                            archivo_trazabilidad, empresa=empresa_id
+                        )
+
+                        st.session_state["df_trazabilidad_cadena"] = df_cadena
+                        st.session_state["df_trazabilidad_limpio"] = df_resumen
+
+                        st.session_state.pop("_clave_pipeline", None)
+                        st.success("¡Trazabilidad procesada con éxito! La pestaña Dx Compradores ha sido actualizada.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al procesar el archivo: {e}")
+
+        if "df_trazabilidad_limpio" in st.session_state and "df_trazabilidad_cadena" in st.session_state:
+            df_cadena = st.session_state["df_trazabilidad_cadena"]
+            df_resumen = st.session_state["df_trazabilidad_limpio"]
+
+            kpi_t1, kpi_t2, kpi_t3 = st.columns(3)
+            with kpi_t1:
+                st.metric("Total PR Iniciales", f"{len(df_cadena):,}")
+            with kpi_t2:
+                completas = (df_cadena["Cadena completa"] == "Sí").sum() if "Cadena completa" in df_cadena.columns else 0
+                st.metric("Cadenas Completas (con SAP)", f"{completas:,}")
+            with kpi_t3:
+                st.metric("Solpeds 600 Identificadas", f"{len(df_resumen):,}")
+
+            st.divider()
+
+            tab_cad, tab_res = st.tabs(["📋 Cadena Detallada", "📊 Resumen por Solped (SAP 600)"])
+
+            with tab_cad:
+                st.subheader("Vista Cadena de Eventos")
+                st.dataframe(df_cadena, use_container_width=True)
+                csv_cadena = df_cadena.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="⬇ Descargar Cadena Completa (CSV)",
+                    data=csv_cadena,
+                    file_name="Trazabilidad_Cadena_Completa.csv",
+                    mime="text/csv",
+                )
+
+            with tab_res:
+                st.subheader("Vista Consolidada por Solped SAP 600")
+                st.caption("Esta información servirá de cruce directo con la base ME5A.")
+                st.dataframe(df_resumen, use_container_width=True)
+                csv_resumen = df_resumen.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="⬇ Descargar Resumen Solpeds 600 (CSV)",
+                    data=csv_resumen,
+                    file_name="Resumen_Solped_600_No_Catalogadas.csv",
+                    mime="text/csv",
+                )
