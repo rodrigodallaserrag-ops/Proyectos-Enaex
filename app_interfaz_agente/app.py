@@ -1,1027 +1,982 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import re
-import requests
-from datetime import datetime, date
+# =============================================================================
+# CUADRO COMPARATIVO DE OFERTAS - ABASTECIMIENTO ENAEX  (v2)
+# -----------------------------------------------------------------------------
+# Flujo: Requerimiento (SOLPED) -> Histórico (última compra ME2M)
+#        -> Proveedores y ofertas -> Motor de comparación
+#        -> Adjudicación con aprobación humana -> Excel / PDF / Borrador JSON
+#
+# Requisitos (requirements.txt):
+#   streamlit>=1.35  pandas  numpy  openpyxl  requests  fpdf2
+#   python-calamine  (opcional, lee Excel ~10x más rápido)
+#   holidays         (opcional, feriados de Chile en fechas de entrega)
+# =============================================================================
 import io
+import json
+import re
+import unicodedata
+from datetime import date, datetime
 
-# Librerías para diseño de Excel
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+import numpy as np
+import pandas as pd
+import requests
+import streamlit as st
+from fpdf import FPDF
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-# Librería para generación de PDF
-from fpdf import FPDF
+try:
+    import python_calamine  # noqa: F401
+    EXCEL_ENGINE = "calamine"
+except ImportError:
+    EXCEL_ENGINE = "openpyxl"
+
+try:
+    import holidays as _holidays
+    FERIADOS = np.array(
+        sorted(_holidays.Chile(years=range(date.today().year - 1, date.today().year + 3)).keys()),
+        dtype="datetime64[D]",
+    )
+except Exception:
+    FERIADOS = np.array([], dtype="datetime64[D]")
 
 # =============================================================================
-# CONFIGURACIÓN DE PÁGINA Y ESTILOS CSS CON SCROLL Y BOTONES MINIMALISTAS
+# CONSTANTES DE NEGOCIO (tomadas de las planillas Cuadro MRO Rev3 y Autogestión)
 # =============================================================================
-st.set_page_config(
-    page_title="Sistema Integrado de Evaluación de Ofertas - Enaex",
-    layout="wide"
-)
+MONEDAS = ["CLP", "USD", "EUR", "UF"]
+TRANSPORTES = ["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA", "FOB",
+               "CFR", "CIF", "CPT", "CIP", "DAP", "DDP"]
+TIPOS_ADJUDICACION = ["Mejor Oferta Económica", "Proveedor único",
+                      "Aprobado Técnicamente", "Asignación Directa"]
+TIPOS_PLAZO = ["Días hábiles", "Días corridos", "Semanas"]
+TIPOS_COMPRA = ["Nacional", "Importación"]
+# Hoja "Fecha de entrega" de Autogestión: días adicionales según lugar de entrega
+LUGARES_ENTREGA = {
+    "EDP - Entrega directa en planta": 0,
+    "EBP - Entrega en bodega de proveedor": 0,
+    "EBC - Entrega bodega consolidación": 7,
+    "EXW A - Origen aéreo": 15,
+    "EXW M - Origen marítimo": 45,
+}
+DIAS_EMISION_OC = 2          # WORKDAY(hoy, 2) en la planilla
+DIAS_INTERNACION = 10        # IF(Tipo="Internación", 10, 0)
+DIAS_BODEGA_TRANSITO = 7     # Bodega tránsito Isaver / Bello
+UMBRAL_TC_CLP = 1_000_000    # Regla: >$1.000.000 CLP exige TC del día
+UMBRAL_ALZA = 0.15           # Alerta si el precio sube más de 15% vs última compra
+SIN_ADJ = "— Sin adjudicar —"
 
+# Sinónimos de columnas (comparación exacta tras normalizar; nunca subcadenas cortas)
+SIN_REQ = {
+    "solped": ["sp", "solped", "n solped", "solicitud de pedido", "sol pedido",
+               "id solicitud de compra original", "solicitud pedido", "pr"],
+    "pos": ["pos", "posicion", "pos solicitud pedido", "pos sol ped", "item"],
+    "material": ["material", "codigo sap", "codigo material", "cod material", "codigo de articulo"],
+    "texto": ["texto breve", "descripcion breve", "texto breve de material", "descripcion",
+              "denominacion", "texto breve material"],
+    "cantidad": ["cantidad", "ctd", "cantidad solicitada", "cant"],
+    "um": ["um", "unidad", "unidad de medida", "unidad medida pedido", "umb"],
+    "centro": ["centro", "planta"],
+    "precio": ["precio", "precio unitario", "valor unitario", "precio de valoracion"],
+    "moneda": ["moneda", "mon"],
+    "fecha_sol": ["f solicitud", "fecha de solicitud", "fecha solicitud"],
+    "dias": ["dias de tratamiento", "ns", "dias", "antiguedad"],
+    "urgencia": ["urgencia", "prioridad"],
+    "grupo": ["g compras", "grupo compras", "grupo de compras"],
+    "solicitante": ["solicitante", "creado por"],
+    "asignado": ["asignado a", "comprador"],
+    "contrato": ["contrato marco", "contrato"],
+}
+SIN_HIST = {
+    "material": ["material", "codigo sap", "codigo material"],
+    "texto": ["texto breve", "descripcion", "texto breve de material"],
+    "fecha": ["f documento", "fecha documento", "fecha de pedido", "fecha doc", "fecha"],
+    "proveedor": ["proveedor", "proveedor centro suministrador", "nombre proveedor", "acreedor"],
+    "precio": ["valor unitario", "precio unitario", "precio neto", "precio"],
+    "valor_neto": ["valor neto de pedido", "valor neto", "importe"],
+    "cantidad": ["cantidad de pedido", "cantidad", "ctd pedido"],
+    "moneda": ["moneda", "mon"],
+    "documento": ["documento", "documento compras", "pedido", "oc"],
+}
+REQ_OBLIGATORIAS = ["solped", "texto", "cantidad"]
+HIST_OBLIGATORIAS = ["material", "fecha", "precio"]
+
+# =============================================================================
+# PÁGINA Y ESTILOS
+# =============================================================================
+st.set_page_config(page_title="Cuadro Comparativo de Ofertas - Enaex", layout="wide")
 st.markdown("""
 <style>
-    /* Habilitar scroll vertical nativo en la app y contenedores principales */
-    html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"], section.main {
-        overflow-y: auto !important;
-        height: 100% !important;
-        max-height: none !important;
-    }
-    
-    /* Espacio inferior de margen para evitar cortes de contenido */
-    [data-testid="stMainBlockContainer"] {
-        padding-bottom: 12rem !important;
-        max-width: 100% !important;
-    }
-
-    .main-header { font-size: 1.8rem; font-weight: 700; color: #1E3A8A; margin-bottom: 0.5rem; }
-    .sub-header { font-size: 1rem; color: #4B5563; margin-bottom: 1.5rem; }
-    .stTable { font-size: 0.85rem; }
-    .metric-card { background-color: #F3F4F6; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #1E3A8A; }
-
-    /* ==========================================================================
-       ESTILOS MINIMALISTAS Y TÁCTILES PARA BOTONES (STBUTTON & STDOWNLOADBUTTON)
-       ========================================================================== */
-    div.stButton > button, div.stDownloadButton > button {
-        border-radius: 8px !important;
-        border: 1px solid #D1D5DB !important;
-        background-color: #FFFFFF !important;
-        color: #1F2937 !important;
-        font-weight: 500 !important;
-        font-size: 0.9rem !important;
-        padding: 0.55rem 1.1rem !important;
-        transition: all 0.2s ease-in-out !important;
-        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important;
-        cursor: pointer !important;
-        letter-spacing: 0.01em !important;
-    }
-
-    div.stButton > button:hover, div.stDownloadButton > button:hover {
-        background-color: #F9FAFB !important;
-        border-color: #9CA3AF !important;
-        color: #111827 !important;
-        transform: translateY(-1px) !important;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04) !important;
-    }
-
-    div.stButton > button:active, div.stDownloadButton > button:active {
-        transform: translateY(0) scale(0.98) !important;
-        box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06) !important;
-    }
-
-    /* Estilo primario minimalista */
-    div.stButton > button[kind="primary"], 
-    div.stButton > button[data-testid="stBaseButton-primary"],
-    div.stDownloadButton > button[kind="primary"],
-    div.stDownloadButton > button[data-testid="stBaseButton-primary"] {
-        background-color: #1E3A8A !important;
-        color: #FFFFFF !important;
-        border: 1px solid #1E3A8A !important;
-    }
-
-    div.stButton > button[kind="primary"]:hover, 
-    div.stButton > button[data-testid="stBaseButton-primary"]:hover,
-    div.stDownloadButton > button[kind="primary"]:hover,
-    div.stDownloadButton > button[data-testid="stBaseButton-primary"]:hover {
-        background-color: #2563EB !important;
-        border-color: #2563EB !important;
-        color: #FFFFFF !important;
-        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25) !important;
-    }
+  [data-testid="stMainBlockContainer"] { padding-bottom: 6rem; max-width: 100%; }
+  .titulo { font-size: 1.7rem; font-weight: 700; color: #1E3A8A; margin-bottom: .2rem; }
+  .subtitulo { color: #4B5563; margin-bottom: 1rem; }
+  div.stButton > button, div.stDownloadButton > button { border-radius: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
 # =============================================================================
-# OBTENCIÓN DE INDICADORES FINANCIEROS EN TIEMPO REAL 
+# UTILIDADES GENERALES
 # =============================================================================
-@st.cache_data(ttl=3600)
-def obtener_indicadores_tiempo_real():
-    valores_defecto = {"USD": 950.0, "EUR": 1020.0, "UF": 38000.0, "estado": False}
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+def norm(txt) -> str:
+    """Minúsculas, sin tildes, sin signos; para comparar encabezados y textos."""
+    s = unicodedata.normalize("NFKD", str(txt or "")).encode("ascii", "ignore").decode()
+    s = re.sub(r"[^a-z0-9]+", " ", s.lower())
+    return re.sub(r"\s+", " ", s).strip()
 
+
+def clave_material(v) -> str:
+    """'30006049', 30006049.0, ' 0030006049 ' -> '30006049'. Vacío si no es código."""
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return ""
+    s = str(v).strip()
+    if s.endswith(".0"):
+        s = s[:-2]
+    s = re.sub(r"\D", "", s).lstrip("0")
+    return s if len(s) >= 4 else ""
+
+
+def parse_monto(v):
+    """Convierte '$49.100CLP', '1.234,56', '389,00 USD', 59500 en (valor, moneda|None)."""
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return 0.0, None
+    if isinstance(v, (int, float, np.number)):
+        return float(v), None
+    s = str(v).strip().upper()
+    moneda = next((m for m in ["CLP", "USD", "EUR", "UF"] if m in s), None)
+    s = re.sub(r"[^\d.,-]", "", s)
+    if not s:
+        return 0.0, moneda
+    if "." in s and "," in s:
+        s = s.replace(".", "").replace(",", ".") if s.rfind(",") > s.rfind(".") else s.replace(",", "")
+    elif "," in s:
+        s = s.replace(",", ".") if len(s.split(",")[-1]) != 3 else s.replace(",", "")
+    elif s.count(".") > 1 or (s.count(".") == 1 and len(s.split(".")[-1]) == 3):
+        s = s.replace(".", "")  # punto como separador de miles (formato chileno)
     try:
-        response = requests.get("https://mindicador.cl/api", headers=headers, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            usd = float(data.get("dolar", {}).get("valor", 950.0))
-            eur = float(data.get("euro", {}).get("valor", 1020.0))
-            uf = float(data.get("uf", {}).get("valor", 38000.0))
-            if usd > 0 and eur > 0 and uf > 0:
-                return {"USD": usd, "EUR": eur, "UF": uf, "estado": True}
-    except Exception:
-        pass
+        return float(s), moneda
+    except ValueError:
+        return 0.0, moneda
 
-    try:
-        response_alt = requests.get("https://open.er-api.com/v6/latest/USD", headers=headers, timeout=5)
-        if response_alt.status_code == 200:
-            data_alt = response_alt.json()
-            rates = data_alt.get("rates", {})
-            if "CLP" in rates:
-                usd_clp = float(rates["CLP"])
-                eur_rate = float(rates.get("EUR", 0.92))
-                eur_clp = usd_clp / eur_rate if eur_rate > 0 else 1020.0
-                
-                return {
-                    "USD": round(usd_clp, 2),
-                    "EUR": round(eur_clp, 2),
-                    "UF": 38300.0,
-                    "estado": True
-                }
-    except Exception:
-        pass
 
-    return valores_defecto
+def a_num(v, defecto=0.0) -> float:
+    val, _ = parse_monto(v)
+    return val if val else defecto
 
-# =============================================================================
-# FUNCIONES DE CONVERSIÓN DE MONEDA MULTIVARIABLE
-# =============================================================================
-def convertir_moneda(monto, moneda_origen, tc_usd, tc_uf, tc_eur):
-    monto, moneda_origen = float(monto or 0.0), str(moneda_origen).upper().strip()
-    if moneda_origen in ["CLP", "PESO", "PESOS"]: clp = monto
-    elif moneda_origen in ["USD", "US$", "DOLAR", "DOLARES"]: clp = monto * tc_usd
-    elif moneda_origen in ["UF"]: clp = monto * tc_uf
-    elif moneda_origen in ["EUR", "EUROS", "EUR$"]: clp = monto * tc_eur
-    else: clp = monto
-    
-    usd = clp / tc_usd if tc_usd > 0 else 0.0
-    eur = clp / tc_eur if tc_eur > 0 else 0.0
-    return clp, usd, eur
 
-# =============================================================================
-# FUNCIONES DE EXPORTACIÓN Y FORMATO (EXCEL Y PDF)
-# =============================================================================
-def generar_excel_estilizado(df, moneda_vista, transporte_reporte="No Especificado"):
-    buffer_excel = io.BytesIO()
-    cols_export = [
-        'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
-        'Precio Unitario', 'Moneda', 'Subtotal Material', 'Costo Transporte', 'Moneda Transp.',
-        'Total Materiales', 'Total Envio', 'Proveedor Visual', 'Transporte',
-        'Calendario de entrega', 'Días para Entrega', 'Monto Total Visualizado'
-    ]
-    
-    df_temp = df.copy()
-    if f"Subtotal Material ({moneda_vista})" in df_temp.columns:
-        df_temp['Total Materiales'] = df_temp[f"Subtotal Material ({moneda_vista})"]
-    if f"Costo Transporte ({moneda_vista})" in df_temp.columns:
-        df_temp['Total Envio'] = df_temp[f"Costo Transporte ({moneda_vista})"]
-
-    df_export = df_temp[[c for c in cols_export if c in df_temp.columns]].copy()
-    df_export.rename(columns={
-        'Proveedor Visual': 'Proveedor', 
-        'Monto Total Visualizado': f'Total Consolidado ({moneda_vista})',
-        'Total Materiales': f'Subtotal Mat ({moneda_vista})',
-        'Total Envio': f'Flete/Envio ({moneda_vista})'
-    }, inplace=True)
-    
-    with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
-        df_export.to_excel(writer, index=False, sheet_name='Cuadro Comparativo', startrow=3)
-        workbook = writer.book
-        worksheet = writer.sheets['Cuadro Comparativo']
-        
-        HEADER_FILL = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
-        ZEBRA_FILL = PatternFill(start_color="F9FAFB", end_color="F9FAFB", fill_type="solid")
-        TITLE_FONT = Font(name="Calibri", size=15, bold=True, color="1E3A8A")
-        SUBTITLE_FONT = Font(name="Calibri", size=10, italic=True, color="6B7280")
-        HEADER_FONT = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-        DATA_FONT = Font(name="Calibri", size=10)
-        
-        THIN_BORDER = Border(
-            left=Side(style='thin', color='E5E7EB'), right=Side(style='thin', color='E5E7EB'),
-            top=Side(style='thin', color='E5E7EB'), bottom=Side(style='thin', color='E5E7EB')
-        )
-        
-        worksheet['A1'] = "ENAEX - CUADRO COMPARATIVO DE OFERTAS"
-        worksheet['A1'].font = TITLE_FONT
-        
-        subtitulo = f"Fecha de informe: {date.today().strftime('%d/%m/%Y')} | Moneda base: {moneda_vista}"
-        if transporte_reporte and transporte_reporte != "No Especificado":
-            subtitulo += f" | Transporte General: {transporte_reporte}"
-            
-        worksheet['A2'] = subtitulo
-        worksheet['A2'].font = SUBTITLE_FONT
-        
-        for col_num in range(1, len(df_export.columns) + 1):
-            cell = worksheet.cell(row=4, column=col_num)
-            cell.fill = HEADER_FILL
-            cell.font = HEADER_FONT
-            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-            cell.border = THIN_BORDER
-        
-        for row_idx, row in enumerate(worksheet.iter_rows(min_row=5, max_row=4 + len(df_export), min_col=1, max_col=len(df_export.columns)), start=5):
-            use_zebra = (row_idx % 2 == 0)
-            for cell in row:
-                cell.font = DATA_FONT
-                cell.border = THIN_BORDER
-                if use_zebra:
-                    cell.fill = ZEBRA_FILL
-                
-                col_header = worksheet.cell(row=4, column=cell.column).value
-                if col_header in ['Precio Unitario', 'Costo Transporte', f'Subtotal Mat ({moneda_vista})', f'Flete/Envio ({moneda_vista})', f'Total Consolidado ({moneda_vista})']:
-                    cell.number_format = '$#,##0.00'
-                    cell.alignment = Alignment(horizontal='right', vertical='center')
-                elif col_header in ['Cantidad', 'Pos', 'Días para Entrega']:
-                    cell.number_format = '#,##0'
-                    cell.alignment = Alignment(horizontal='center', vertical='center')
-                elif col_header in ['SOLPED', 'Moneda', 'Moneda Transp.', 'UM', 'Centro', 'Transporte', 'Calendario de entrega']:
-                    cell.alignment = Alignment(horizontal='center', vertical='center')
-                else:
-                    cell.alignment = Alignment(horizontal='left', vertical='center')
-
-        for col in worksheet.columns:
-            max_len = 0
-            col_letter = get_column_letter(col[0].column)
-            for cell in col:
-                if cell.row < 4: continue
-                if cell.value: max_len = max(max_len, len(str(cell.value)))
-            worksheet.column_dimensions[col_letter].width = max(max_len + 4, 12)
-
-    return buffer_excel.getvalue()
-
-def clean_str_pdf(txt):
-    s = str(txt or '')
-    reemplazos = {'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','á':'a','é':'e','í':'i','ó':'o','ú':'u','Ñ':'N','ñ':'n','°':''}
-    for k, v in reemplazos.items(): s = s.replace(k, v)
-    return s.encode('latin-1', 'ignore').decode('latin-1')
-
-class PDFReport(FPDF):
-    def header(self):
-        self.set_font('Helvetica', 'B', 14)
-        self.set_text_color(30, 58, 138)
-        self.cell(0, 8, 'ENAEX - EVALUACION COMPARATIVA DE OFERTAS', ln=True, align='C')
-        self.set_font('Helvetica', 'I', 9)
-        self.set_text_color(100, 100, 100)
-        self.cell(0, 5, f'Fecha de Emision: {date.today().strftime("%d/%m/%Y")}', ln=True, align='C')
-        self.ln(4)
-    def footer(self):
-        self.set_y(-12)
-        self.set_font('Helvetica', 'I', 8)
-        self.set_text_color(128, 128, 128)
-        self.cell(0, 10, f'Pagina {self.page_no()}/{{nb}} - Documento Generado Automaticamente', align='C')
-
-def generar_pdf(df, moneda_vista, transporte_reporte="No Especificado"):
-    try:
-        pdf = PDFReport(orientation='L', unit='mm', format='A4')
-        pdf.alias_nb_pages()
-        pdf.add_page()
-        
-        monto_total = df["Monto Total Visualizado"].sum() if "Monto Total Visualizado" in df.columns else 0.0
-        monto_mat = df[f"Subtotal Material ({moneda_vista})"].sum() if f"Subtotal Material ({moneda_vista})" in df.columns else 0.0
-        monto_trans = df[f"Costo Transporte ({moneda_vista})"].sum() if f"Costo Transporte ({moneda_vista})" in df.columns else 0.0
-        
-        pdf.set_fill_color(243, 244, 246)
-        pdf.rect(10, pdf.get_y(), 277, 10, style='F')
-        pdf.set_font('Helvetica', 'B', 8)
-        pdf.set_text_color(30, 58, 138)
-        
-        resumen_txt = f'RESUMEN ({moneda_vista}): Materiales: ${monto_mat:,.2f} | Envios: ${monto_trans:,.2f} | Total Consolidado: ${monto_total:,.2f}'
-        if transporte_reporte and transporte_reporte != "No Especificado":
-            resumen_txt += f' | Transp. Gen: {transporte_reporte}'
-            
-        pdf.cell(0, 8, resumen_txt, ln=True)
-        pdf.ln(4)
-
-        cols = [("SOLPED", 20), ("Material", 55), ("Proveedor", 35), ("Incoterm", 18),
-                ("Cant.", 12), (f"Mat ({moneda_vista})", 32), (f"Envio ({moneda_vista})", 32), (f"Total ({moneda_vista})", 38), ("Entrega", 25)]
-
-        pdf.set_font('Helvetica', 'B', 8)
-        pdf.set_fill_color(30, 58, 138)
-        pdf.set_text_color(255, 255, 255)
-
-        for name, width in cols: pdf.cell(width, 7, name, border=1, align='C', fill=True)
-        pdf.ln()
-
-        pdf.set_font('Helvetica', '', 8)
-        pdf.set_text_color(0, 0, 0)
-        
-        fill = False
-        for _, row in df.iterrows():
-            if pdf.get_y() > 180:
-                pdf.add_page()
-                pdf.set_font('Helvetica', 'B', 8)
-                pdf.set_fill_color(30, 58, 138)
-                pdf.set_text_color(255, 255, 255)
-                for name, width in cols: pdf.cell(width, 7, name, border=1, align='C', fill=True)
-                pdf.ln()
-                pdf.set_font('Helvetica', '', 8)
-                pdf.set_text_color(0, 0, 0)
-
-            if fill: pdf.set_fill_color(249, 250, 251)
-            else: pdf.set_fill_color(255, 255, 255)
-
-            solped = clean_str_pdf(row.get('SOLPED', ''))[:12]
-            material = clean_str_pdf(row.get('Material', ''))[:35]
-            proveedor = clean_str_pdf(row.get('Proveedor Visual', ''))[:22]
-            transporte = clean_str_pdf(row.get('Transporte', ''))[:10]
-            cant = f"{row.get('Cantidad', 0):,.0f}"
-            
-            m_mat = f"${row.get(f'Subtotal Material ({moneda_vista})', 0):,.2f}"
-            m_env = f"${row.get(f'Costo Transporte ({moneda_vista})', 0):,.2f}"
-            m_tot = f"${row.get('Monto Total Visualizado', 0):,.2f}"
-            
-            if pd.notna(row.get('Calendario de entrega')):
-                try:
-                    fecha_str = pd.to_datetime(row['Calendario de entrega']).strftime('%d/%m/%Y')
-                except:
-                    dias_val = row.get('Días para Entrega', 0)
-                    fecha_str = f"{0 if pd.isna(dias_val) else int(dias_val)} dias"
-            else:
-                dias_val = row.get('Días para Entrega', 0)
-                fecha_str = f"{0 if pd.isna(dias_val) else int(dias_val)} dias"
-
-            pdf.cell(cols[0][1], 6, solped, border=1, align='C', fill=True)
-            pdf.cell(cols[1][1], 6, material, border=1, align='L', fill=True)
-            pdf.cell(cols[2][1], 6, proveedor, border=1, align='L', fill=True)
-            pdf.cell(cols[3][1], 6, transporte, border=1, align='C', fill=True)
-            pdf.cell(cols[4][1], 6, cant, border=1, align='C', fill=True)
-            pdf.cell(cols[5][1], 6, m_mat, border=1, align='R', fill=True)
-            pdf.cell(cols[6][1], 6, m_env, border=1, align='R', fill=True)
-            pdf.cell(cols[7][1], 6, m_tot, border=1, align='R', fill=True)
-            pdf.cell(cols[8][1], 6, fecha_str, border=1, align='C', fill=True)
-            pdf.ln()
-            fill = not fill
-
-        out = pdf.output(dest='S') if hasattr(pdf, 'output') else b""
-        if isinstance(out, str): return out.encode('latin-1')
-        return bytes(out)
-    except Exception: return b""
-
-# =============================================================================
-# FUNCIONES AUXILIARES Y LECTURA DE PLANILLAS (OPTIMIZADAS)
-# =============================================================================
-def deduplicar_columnas(columnas):
-    vistos = {}
-    columnas_unicas = []
-    for c in columnas:
-        c_str = str(c).strip()
-        if c_str in vistos:
-            vistos[c_str] += 1
-            columnas_unicas.append(f"{c_str}_{vistos[c_str]}")
-        else:
-            vistos[c_str] = 0
-            columnas_unicas.append(c_str)
-    return columnas_unicas
-
-def procesar_y_reparar_planilla(df):
-    if df is None or df.empty: return df
-
-    df.columns = deduplicar_columnas(df.columns)
-
-    palabras_clave = ['solped', 'material', 'pos', 'texto', 'centro', 'cant', 'cantidad', 'proveedor', 'acreedor', 'vendor', 'documento', 'precio', 'moneda', 'flete', 'transporte', 'envio', 'shipping']
-    
-    current_cols_lower = " ".join([str(c).lower() for c in df.columns])
-    current_matches = sum(1 for kw in palabras_clave if kw in current_cols_lower)
-    
-    header_idx = -1
-    best_matches = current_matches
-    
-    for idx in range(min(25, len(df))):
-        row_str = " ".join([str(val).lower() for val in df.iloc[idx]])
-        matches = sum(1 for kw in palabras_clave if kw in row_str)
-        if matches > best_matches:
-            header_idx = idx
-            best_matches = matches
-
-    if header_idx != -1:
-        nuevas_columnas = []
-        for i, val in enumerate(df.iloc[header_idx]):
-            val_str = str(val).strip()
-            if val_str.lower() in ['nan', 'none', '']:
-                col_orig = str(df.columns[i])
-                nuevas_columnas.append(col_orig if not col_orig.startswith("Unnamed") else f"Col_Vacia_{i}")
-            else: nuevas_columnas.append(val_str)
-        
-        df.columns = deduplicar_columnas(nuevas_columnas)
-        df = df.iloc[header_idx + 1:].reset_index(drop=True)
-        if not df.empty:
-            col_0_series = df.iloc[:, 0].astype(str).str.strip()
-            col_0_nombre = str(df.columns[0]).strip()
-            df = df[col_0_series != col_0_nombre].reset_index(drop=True)
-
-    nuevos_nombres = {}
-    for idx, col in enumerate(df.columns):
-        col_str = str(col).strip()
-        if col_str.startswith("Col_Vacia_") or col_str.startswith("Unnamed:"):
-            series_clean = df.iloc[:, idx].dropna().astype(str).str.strip()
-            series_clean = series_clean[~series_clean.str.lower().isin(['nan', 'none', ''])]
-            if not series_clean.empty:
-                nuevos_nombres[col] = series_clean.iloc[0]
-
-    if nuevos_nombres: 
-        df = df.rename(columns=nuevos_nombres)
-
-    df.columns = deduplicar_columnas(df.columns)
-
-    cols = list(df.columns)
-    id_col = None
-    for c in cols:
-        c_low = str(c).lower().strip()
-        if c_low in ['sp', 'solped', 'solicitud', 'n° solped', 'num solped', 'solped/pos', 'sol.pedido']:
-            id_col = c
-            break
-            
-    if not id_col:
-        for c in cols:
-            c_low = str(c).lower().strip()
-            if any(kw in c_low for kw in ['solped', 'solicitud', 'requerimiento', 'pr', 'pedido']):
-                id_col = c
+def mapear_columnas(columnas, sinonimos) -> dict:
+    """Asigna cada campo canónico a una columna real: primero igualdad exacta, luego prefijo."""
+    normalizadas = {c: norm(c) for c in columnas}
+    usadas, mapa = set(), {}
+    for campo, sins in sinonimos.items():
+        encontrada = None
+        for sin in sins:
+            encontrada = next((c for c, n in normalizadas.items() if n == sin and c not in usadas), None)
+            if encontrada:
                 break
-                
-    if id_col and id_col in cols:
-        df = df.rename(columns={id_col: 'SOLPED'})
-        cols = list(df.columns)
-        cols.remove('SOLPED')
-        cols.insert(0, 'SOLPED')
-        df = df[cols]
+        if not encontrada:
+            for sin in sins:
+                if len(sin) >= 5:
+                    encontrada = next((c for c, n in normalizadas.items()
+                                       if n.startswith(sin) and c not in usadas), None)
+                    if encontrada:
+                        break
+        if encontrada:
+            mapa[campo] = encontrada
+            usadas.add(encontrada)
+    return mapa
 
-    return df.dropna(how='all')
 
-def extraer_materiales_de_masivo(df, id_solped):
-    if df is None or df.empty: return []
-        
-    raw_search = str(id_solped).strip()
-    if not raw_search or raw_search.lower() in ["(id solped)", "none", "nan", "", "n/a"]: return []
-        
-    digits_search = re.sub(r'\D', '', raw_search)
-    clean_search = re.sub(r'[^a-zA-Z0-9]', '', raw_search).lower()
-
-    sp_cols = [c for c in df.columns if any(kw in str(c).lower() for kw in ['solped', 'solicitud', 'sp', 'requerimiento', 'pedido', 'pr'])]
-    if not sp_cols:
-        sp_cols = [df.columns[0]]
-
-    df_filtrado = pd.DataFrame()
-    for col in sp_cols:
-        col_series = df[col].astype(str).str.strip()
-        col_series_clean = col_series.apply(lambda x: re.sub(r'[^a-zA-Z0-9]', '', str(x)).lower())
-        
-        mask = col_series_clean == clean_search
-        
-        if not mask.any() and len(digits_search) >= 3:
-            col_digits = col_series.str.replace(r'\D', '', regex=True)
-            mask = col_digits == digits_search
-            
-        if not mask.any() and len(clean_search) >= 4:
-            mask = col_series_clean.str.contains(clean_search, regex=False)
-            
-        if mask.any():
-            df_filtrado = df[mask]
-            break
-
-    if df_filtrado.empty: return []
-
-    posiciones = []
-    for idx, row in enumerate(df_filtrado.to_dict('records')):
-        def get_val(keys, default):
-            candidates = []
-            for k in keys:
-                for col, val in row.items():
-                    if k in str(col).lower() and pd.notna(val):
-                        val_str = str(val).strip()
-                        if val_str != "" and val_str.lower() not in ["nan", "none", "null"]:
-                            candidates.append(val_str)
-            if not candidates: return default
-            sin_truncar = [c for c in candidates if '...' not in c and '…' not in c]
-            if sin_truncar: return max(sin_truncar, key=len)
-            return max(candidates, key=len)
-
-        def clean_num(val, default=0.0):
-            try:
-                if isinstance(val, (int, float)): return float(val)
-                s = re.sub(r'[^\d.,-]', '', str(val).strip())
-                if '.' in s and ',' in s: s = s.replace('.', '').replace(',', '.')
-                elif '.' in s and len(s.split('.')[-1]) == 3: s = s.replace('.', '')
-                elif ',' in s: s = s.replace(',', '.')
-                return float(s)
-            except: return default
-
-        solped_real = get_val(['solped', 'solicitud', 'sp', 'requerimiento', 'pedido'], raw_search)
-        mat_desc = get_val(['texto breve de material', 'texto breve', 'denominación del material', 'denominacion del material', 'descripción del material', 'descripcion del material', 'descripción', 'descripcion', 'denominacion', 'denominación', 'material', 'texto', 'item', 'artículo', 'articulo', 'breve'], f"Material {idx+1}")
-        centro_desc = get_val(['nombre centro', 'nombre del centro', 'denominación centro', 'denominacion centro', 'descripción centro', 'descripcion centro', 'texto centro', 'centro', 'plant', 'almacen', 'alm'], "E001")
-        proveedor_sugerido = str(get_val(['proveedor', 'vendor', 'prov', 'nam', 'razon social', 'acreedor', 'nombre proveedor', 'nombre_proveedor', 'nom_prov', 'lifnr', 'nombre del proveedor', 'supplier', 'nombre', 'distribuidor'], ""))
-        
-        pos_val = get_val(['pos', 'posicion', 'posición', 'item', 'linea'], idx + 1)
-        try: pos_num = int(clean_num(pos_val, idx + 1))
-        except: pos_num = idx + 1
-
-        cant_raw = clean_num(get_val(['cant', 'cantidad', 'ctd'], 1.0), 1.0)
-        cant_clean = int(cant_raw) if float(cant_raw).is_integer() else cant_raw
-
-        moneda_mat = str(get_val(['moneda', 'curr', 'mon'], "CLP")).upper()
-        
-        costo_envio = clean_num(get_val(['costo transporte', 'costo envio', 'costo de envio', 'flete', 'transporte monto', 'shipping', 'freight', 'monto transporte', 'valor flete', 'precio transporte'], 0.0), 0.0)
-        moneda_envio = str(get_val(['moneda transporte', 'moneda flete', 'moneda envio', 'moneda trans', 'curr trans'], moneda_mat)).upper()
-
-        fecha_hist = get_val(['fecha', 'date', 'entrega', 'creacion', 'f.pedido'], None)
-        fecha_parsed = date.today()
-        if fecha_hist and fecha_hist != "":
-            try: fecha_parsed = pd.to_datetime(fecha_hist).date()
-            except: fecha_parsed = date.today()
-
-        posiciones.append({
-            "SOLPED": str(solped_real),
-            "Pos": pos_num,
-            "Material": str(mat_desc),
-            "Centro": str(centro_desc),
-            "Cantidad": cant_clean,
-            "UM": str(get_val(['um', 'unidad', 'unid', 'medida'], "C/U")).upper(),
-            "Precio Unitario": clean_num(get_val(['precio', 'monto', 'val', 'costo', 'p.u', 'neto', 'p.unitario'], 0.0), 0.0),
-            "Moneda": moneda_mat,
-            "Costo Transporte": costo_envio,
-            "Moneda Transp.": moneda_envio,
-            "Proveedor": proveedor_sugerido,
-            "Transporte": str(get_val(['transporte', 'incoterm', 'despacho'], "EXW")),
-            "Calendario de entrega": fecha_parsed,
-            "Observaciones": str(get_val(['obs', 'observacion', 'comentario', 'notas'], ""))
-        })
-    return posiciones
-
-@st.cache_data(show_spinner="Procesando archivo inteligentemente...")
-def leer_archivo_cached(file_bytes, file_name):
-    try:
-        if file_name.endswith(".csv"): 
-            df_raw = pd.read_csv(io.BytesIO(file_bytes))
+def deduplicar(columnas):
+    vistos, salida = {}, []
+    for c in columnas:
+        c = str(c).strip() if c is not None and str(c).strip() not in ("", "nan", "None") else "Col"
+        if c in vistos:
+            vistos[c] += 1
+            salida.append(f"{c}_{vistos[c]}")
         else:
-            xls = pd.ExcelFile(io.BytesIO(file_bytes), engine='openpyxl')
-            
-            best_sheet = None
-            best_score = -1
-            keywords_scoring = ['solped', 'material', 'pos', 'texto', 'centro', 'cant', 'cantidad', 'proveedor', 'acreedor', 'vendor', 'precio', 'monto', 'pr', 'requerimiento', 'flete', 'transporte']
-            
-            for sheet in xls.sheet_names:
-                try:
-                    df_tmp = pd.read_excel(xls, sheet_name=sheet, nrows=30)
-                    if df_tmp.empty: continue
-                    
-                    sheet_text = " ".join(df_tmp.columns.astype(str).str.lower()) + " " + " ".join(df_tmp.fillna('').astype(str).values.flatten()[:200]).lower()
-                    score = sum(1 for kw in keywords_scoring if kw in sheet_text)
-                    
-                    if any(k in sheet.lower() for k in ['base', 'dato', 'solped', 'detalle', 'cuadro', 'mat', 'reporte', 'pr']):
-                        score += 3
-                        
-                    if score > best_score:
-                        best_score = score
-                        best_sheet = sheet
-                except Exception:
-                    continue
-            
-            df_raw = pd.read_excel(xls, sheet_name=best_sheet if best_sheet else xls.sheet_names[0])
-            
-        df_clean = df_raw.dropna(axis=1, how='all').dropna(axis=0, how='all')
-        df_clean.columns = deduplicar_columnas(df_clean.columns)
-        df_procesado = procesar_y_reparar_planilla(df_clean)
-        
-        if df_procesado is not None and not df_procesado.empty:
-            df_procesado.columns = deduplicar_columnas(df_procesado.columns)
-            df_procesado['cantidad_nulos'] = df_procesado.isnull().sum(axis=1)
-            df_procesado = df_procesado.sort_values(by='cantidad_nulos').drop(columns=['cantidad_nulos']).reset_index(drop=True)
-            
-        return df_procesado
-    except Exception as e:
-        st.error(f"Error al leer el archivo {file_name}: {e}")
-        return None
-
-def leer_archivo(file_uploader):
-    if file_uploader is None: return None
-    return leer_archivo_cached(file_uploader.getvalue(), file_uploader.name)
+            vistos[c] = 0
+            salida.append(c)
+    return salida
 
 # =============================================================================
-# INICIALIZACIÓN DE ESTADO
+# LECTURA DE ARCHIVOS (con caché y detección de encabezado)
 # =============================================================================
-if "df_masivo" not in st.session_state: st.session_state.df_masivo = None
-if "df_historico" not in st.session_state: st.session_state.df_historico = None
-if "ofertas_manuales" not in st.session_state: st.session_state.ofertas_manuales = []
+@st.cache_data(show_spinner=False)
+def listar_hojas(file_bytes: bytes, nombre: str):
+    if nombre.lower().endswith(".csv"):
+        return ["CSV"]
+    return pd.ExcelFile(io.BytesIO(file_bytes), engine=EXCEL_ENGINE).sheet_names
 
-OPCIONES_TRANSPORTE = ["T. Gil", "T. Bello", "Pullman", "Retiramos", "EXW", "FCA", "FOB", "CFR", "CIF", "CPT", "CIP", "DAT", "DDP"]
+
+def puntaje_hoja(nombre_hoja: str, preferidas) -> int:
+    n = norm(nombre_hoja)
+    for i, p in enumerate(preferidas):
+        if n == norm(p):
+            return 100 - i
+    return 0
+
+
+@st.cache_data(show_spinner="Leyendo planilla…")
+def leer_hoja(file_bytes: bytes, nombre: str, hoja: str, sinonimos_json: str) -> pd.DataFrame:
+    """Lee la hoja completa y ubica la fila de encabezados en las primeras 40 filas."""
+    sinonimos = json.loads(sinonimos_json)
+    if nombre.lower().endswith(".csv"):
+        raw = pd.read_csv(io.BytesIO(file_bytes), header=None, dtype=object, sep=None, engine="python")
+    else:
+        raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name=hoja, header=None,
+                            dtype=object, engine=EXCEL_ENGINE)
+    raw = raw.dropna(how="all").dropna(axis=1, how="all").reset_index(drop=True)
+    if raw.empty:
+        return raw
+    todos = {s for sins in sinonimos.values() for s in sins}
+    mejor_fila, mejor_puntaje = 0, -1
+    for i in range(min(40, len(raw))):
+        celdas = {norm(v) for v in raw.iloc[i].tolist() if pd.notna(v)}
+        puntaje = len(celdas & todos)
+        if puntaje > mejor_puntaje:
+            mejor_fila, mejor_puntaje = i, puntaje
+    df = raw.iloc[mejor_fila + 1:].copy()
+    df.columns = deduplicar(raw.iloc[mejor_fila].tolist())
+    df = df.loc[:, [c for c in df.columns if not c.startswith("Col")]]
+    return df.dropna(how="all").reset_index(drop=True)
+
+
+def normalizar_requerimientos(df: pd.DataFrame, mapa: dict) -> pd.DataFrame:
+    """Lleva la planilla de carga (ME5A o Ariba) a columnas estándar."""
+    g = lambda campo: df[mapa[campo]] if campo in mapa else pd.Series([None] * len(df), index=df.index)
+    out = pd.DataFrame({
+        "SOLPED": g("solped").astype(str).str.strip().str.replace(r"\.0$", "", regex=True),
+        "Pos": g("pos"),
+        "Material": g("material").apply(clave_material),
+        "Texto": g("texto").astype(str).str.strip().str.strip('"').replace({"None": "", "nan": ""}),
+        "Cantidad": g("cantidad").apply(lambda v: a_num(v, 1.0)),
+        "UM": g("um").fillna("C/U").astype(str),
+        "Centro": g("centro").fillna("").astype(str),
+        "Precio ref.": g("precio").apply(lambda v: parse_monto(v)[0]),
+        "F. solicitud": pd.to_datetime(g("fecha_sol"), errors="coerce", dayfirst=True),
+        "Días": pd.to_numeric(g("dias"), errors="coerce"),
+        "Urgencia": g("urgencia").fillna("").astype(str),
+        "G. compras": g("grupo").fillna("").astype(str),
+        "Asignado a": g("asignado").fillna("").astype(str),
+        "Contrato marco": g("contrato").fillna("").astype(str),
+    })
+    out = out[~out["SOLPED"].isin(["", "None", "nan"]) & (out["Texto"] != "")]
+    # Ariba no trae posición: se numera 10, 20, 30… dentro de cada SOLPED (como SAP)
+    sin_pos = out["Pos"].isna() | (out["Pos"].astype(str).str.strip().isin(["", "None", "nan"]))
+    out.loc[sin_pos, "Pos"] = out[sin_pos].groupby("SOLPED").cumcount().add(1).mul(10)
+    out["Pos"] = out["Pos"].apply(lambda v: int(a_num(v, 0)))
+    if out["Días"].isna().all() and out["F. solicitud"].notna().any():
+        out["Días"] = (pd.Timestamp(date.today()) - out["F. solicitud"]).dt.days
+    return out.drop_duplicates(subset=["SOLPED", "Pos"]).reset_index(drop=True)
+
+
+@st.cache_data(show_spinner="Indexando histórico de compras…")
+def construir_historico(df: pd.DataFrame, mapa: dict) -> pd.DataFrame:
+    """Una fila por material con la última compra y estadísticas simples."""
+    g = lambda campo: df[mapa[campo]] if campo in mapa else pd.Series([None] * len(df), index=df.index)
+    h = pd.DataFrame({
+        "mat_key": g("material").apply(clave_material),
+        "txt_key": g("texto").apply(norm),
+        "Fecha": pd.to_datetime(g("fecha"), errors="coerce", dayfirst=True),
+        "Proveedor": g("proveedor").fillna("").astype(str).str.replace(r"^\d+\s+", "", regex=True).str.strip(),
+        "Precio": g("precio").apply(lambda v: parse_monto(v)[0]),
+        "Moneda": g("moneda").fillna("CLP").astype(str).str.upper().str.strip(),
+        "OC": g("documento").fillna("").astype(str),
+    })
+    if "precio" not in mapa and {"valor_neto", "cantidad"} <= set(mapa):
+        cant = g("cantidad").apply(lambda v: a_num(v, 0))
+        h["Precio"] = np.where(cant > 0, g("valor_neto").apply(lambda v: a_num(v, 0)) / cant.replace(0, np.nan), 0)
+    h = h[(h["Precio"] > 0) & h["Fecha"].notna()].sort_values("Fecha", ascending=False)
+    stats = h.groupby("mat_key").agg(**{"N° compras": ("Precio", "size")})
+    ult = h.drop_duplicates("mat_key").set_index("mat_key")
+    ult = ult.join(stats)
+    return ult.reset_index()
+
+
+def buscar_historico(hist: pd.DataFrame, material: str, texto: str):
+    """Busca por código SAP; si no hay código (Ariba), intenta por descripción exacta."""
+    if hist is None or hist.empty:
+        return None, ""
+    if material:
+        fila = hist[hist["mat_key"] == material]
+        if not fila.empty:
+            return fila.iloc[0], "Código"
+    t = norm(texto)
+    if t:
+        fila = hist[hist["txt_key"] == t]
+        if not fila.empty:
+            return fila.iloc[0], "Descripción"
+    return None, ""
 
 # =============================================================================
-# ENCABEZADO Y PARÁMETROS GLOBALES
+# TIPOS DE CAMBIO
 # =============================================================================
-st.markdown("<div class='main-header'>Sistema Integrado de Evaluación de Ofertas</div>", unsafe_allow_html=True)
+@st.cache_data(ttl=3600, show_spinner=False)
+def obtener_indicadores():
+    try:
+        r = requests.get("https://mindicador.cl/api", timeout=6)
+        if r.ok:
+            d = r.json()
+            return {
+                "USD": float(d["dolar"]["valor"]), "EUR": float(d["euro"]["valor"]),
+                "UF": float(d["uf"]["valor"]), "fecha": str(d["dolar"]["fecha"])[:10],
+                "fuente": "mindicador.cl (Banco Central)", "ok": True,
+            }
+    except Exception:
+        pass
+    return {"USD": 0.0, "EUR": 0.0, "UF": 0.0, "fecha": "", "fuente": "Sin conexión", "ok": False}
+
+
+def a_clp(monto, moneda, tc) -> float:
+    moneda = str(moneda or "CLP").upper().strip()
+    factor = {"CLP": 1.0, "USD": tc["USD"], "EUR": tc["EUR"], "UF": tc["UF"]}.get(moneda, 1.0)
+    return float(monto or 0) * factor
+
+# =============================================================================
+# FECHAS DE ENTREGA (réplica de la hoja "Fecha de entrega" de Autogestión)
+# =============================================================================
+def sumar_habiles(f: np.datetime64, n: int) -> np.datetime64:
+    return np.busday_offset(f, int(n), roll="forward", holidays=FERIADOS)
+
+
+def calcular_fecha_planta(plazo, tipo_plazo, tipo_compra, lugar, bodega_transito, hoy=None):
+    hoy = np.datetime64(hoy or date.today(), "D")
+    plazo = int(a_num(plazo, 0))
+    emision = sumar_habiles(hoy, DIAS_EMISION_OC)
+    if tipo_plazo == "Días hábiles":
+        f_prov = sumar_habiles(emision, plazo)
+    elif tipo_plazo == "Semanas":
+        f_prov = emision + np.timedelta64(7 * plazo, "D")
+    else:
+        f_prov = emision + np.timedelta64(plazo, "D")
+    extra = (DIAS_INTERNACION if tipo_compra == "Importación" else 0) \
+        + LUGARES_ENTREGA.get(lugar, 0) + (DIAS_BODEGA_TRANSITO if bodega_transito else 0)
+    f_planta = sumar_habiles(sumar_habiles(f_prov, 2) + np.timedelta64(extra, "D"), 1)
+    return pd.Timestamp(f_prov).date(), pd.Timestamp(f_planta).date(), int((f_planta - hoy).astype(int))
+
+# =============================================================================
+# MOTOR DE COMPARACIÓN
+# =============================================================================
+def calcular_comparativo(pos: pd.DataFrame, prov: pd.DataFrame, ofertas: pd.DataFrame, tc: dict):
+    """Devuelve (detalle por oferta, resumen por posición con sugerencia)."""
+    prov = prov.set_index("Proveedor")
+    det = ofertas.merge(pos[["Pos", "Cantidad", "Últ. precio CLP"]], on="Pos", how="left")
+    det["Precio mejorado"] = det["Precio mejorado"].where(det["Precio mejorado"].fillna(0) > 0,
+                                                          det["Precio inicial"])
+    det = det[det["Proveedor"].isin(prov.index)].copy()
+    det["Moneda"] = det["Proveedor"].map(prov["Moneda"])
+    det["Cotiza"] = det["Precio mejorado"].fillna(0) > 0
+    det["Subtotal inicial"] = det["Cantidad"] * det["Precio inicial"].fillna(0)
+    det["Subtotal mejorado"] = det["Cantidad"] * det["Precio mejorado"].fillna(0)
+    det["Subtotal CLP"] = [a_clp(m, mo, tc) for m, mo in zip(det["Subtotal mejorado"], det["Moneda"])]
+    det["Ahorro spot CLP"] = [a_clp(i - m, mo, tc) if i > 0 else 0.0
+                              for i, m, mo in zip(det["Subtotal inicial"], det["Subtotal mejorado"], det["Moneda"])]
+    # Flete total del proveedor prorrateado según el valor de cada posición cotizada
+    det["Flete CLP"] = 0.0
+    for p, fila in prov.iterrows():
+        flete_clp = a_clp(fila.get("Flete total", 0), fila.get("Moneda flete", "CLP"), tc)
+        m = (det["Proveedor"] == p) & det["Cotiza"]
+        base = det.loc[m, "Subtotal CLP"].sum()
+        if flete_clp > 0 and base > 0:
+            det.loc[m, "Flete CLP"] = flete_clp * det.loc[m, "Subtotal CLP"] / base
+    det["Total CLP"] = det["Subtotal CLP"] + det["Flete CLP"]
+    det["Precio unit. CLP"] = det["Subtotal CLP"] / det["Cantidad"].replace(0, np.nan)
+    ult = det["Últ. precio CLP"].where(det["Últ. precio CLP"] > 0)
+    det["Var. vs últ. compra"] = (det["Precio unit. CLP"] - ult) / ult
+    # Fecha de entrega en planta por oferta
+    fechas = []
+    for _, r in det.iterrows():
+        cfg = prov.loc[r["Proveedor"]]
+        plazo = r["Plazo"] if pd.notna(r.get("Plazo")) and a_num(r.get("Plazo")) > 0 else cfg.get("Plazo", 0)
+        _, f_planta, dias = calcular_fecha_planta(plazo, cfg.get("Tipo plazo"), cfg.get("Tipo compra"),
+                                                  cfg.get("Lugar entrega"), bool(cfg.get("Bodega tránsito")))
+        fechas.append((f_planta, dias))
+    det["Entrega planta"] = [f for f, _ in fechas]
+    det["Días a planta"] = [d for _, d in fechas]
+    det["Válida"] = det["Cotiza"] & det["Cumple técnico"].fillna(False).astype(bool)
+
+    filas = []
+    for _, p in pos.iterrows():
+        d = det[(det["Pos"] == p["Pos"]) & det["Válida"]].sort_values(["Total CLP", "Días a planta"])
+        n_validas = len(d)
+        mejor = d.iloc[0] if n_validas else None
+        alertas = []
+        if n_validas == 0:
+            alertas.append("Sin ofertas válidas")
+        if not p["Con historial"]:
+            alertas.append("Sin historial: requiere validación técnica")
+        if mejor is not None and pd.notna(mejor["Var. vs últ. compra"]) and mejor["Var. vs últ. compra"] > UMBRAL_ALZA:
+            alertas.append(f"Alza {mejor['Var. vs últ. compra']:.0%} vs última compra")
+        filas.append({
+            "Pos": p["Pos"],
+            "Sugerido": mejor["Proveedor"] if mejor is not None else SIN_ADJ,
+            "Tipo sugerido": ("Proveedor único" if n_validas == 1 else "Mejor Oferta Económica") if n_validas else "",
+            "Mejor total CLP": mejor["Total CLP"] if mejor is not None else np.nan,
+            "Ofertas válidas": n_validas,
+            "Alertas": "; ".join(alertas),
+        })
+    return det, pd.DataFrame(filas)
+
+# =============================================================================
+# EXPORTACIÓN
+# =============================================================================
+AZUL, VERDE, GRIS = "1E3A8A", "D1FAE5", "F9FAFB"
+BORDE = Border(*(Side(style="thin", color="E5E7EB"),) * 4)
+
+
+def estilo_hoja(ws, fila_header, cols_monto=(), cols_pct=(), cols_fecha=()):
+    for c in ws[fila_header]:
+        c.fill = PatternFill("solid", start_color=AZUL)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = BORDE
+    headers = {c.column: str(c.value) for c in ws[fila_header]}
+    for fila in ws.iter_rows(min_row=fila_header + 1, max_row=ws.max_row):
+        for c in fila:
+            c.border = BORDE
+            h = headers.get(c.column, "")
+            if h in cols_monto:
+                c.number_format = '#,##0.00'
+            elif h in cols_pct:
+                c.number_format = '0.0%'
+            elif h in cols_fecha:
+                c.number_format = 'DD/MM/YYYY'
+    for col in ws.columns:
+        largo = max((len(str(c.value)) for c in col if c.value is not None and c.row >= fila_header), default=8)
+        ws.column_dimensions[get_column_letter(col[0].column)].width = min(max(largo + 2, 10), 48)
+    ws.freeze_panes = ws.cell(row=fila_header + 1, column=1)
+
+
+def generar_excel(sp, pos, prov, det, adj, tc, aprobacion) -> bytes:
+    buf = io.BytesIO()
+    proveedores = list(prov["Proveedor"])
+    # Hoja 1: matriz como el Cuadro MRO (posiciones en filas, proveedores en columnas)
+    base = pos[["Pos", "Material", "Texto", "Cantidad", "UM", "Últ. compra", "Últ. proveedor",
+                "Últ. precio", "Últ. moneda"]].copy()
+    for p in proveedores:
+        d = det[det["Proveedor"] == p].set_index("Pos")
+        base[f"{p} | P. inicial"] = base["Pos"].map(d["Precio inicial"])
+        base[f"{p} | P. mejorado"] = base["Pos"].map(d["Precio mejorado"])
+        base[f"{p} | Total CLP"] = base["Pos"].map(d["Total CLP"]).where(base["Pos"].map(d["Válida"]).fillna(False))
+        base[f"{p} | Entrega"] = base["Pos"].map(d["Entrega planta"])
+    base = base.merge(adj[["Pos", "Sugerido", "Proveedor adjudicado", "Tipo adjudicación",
+                           "Monto adjudicado CLP", "Ahorro spot CLP", "Ahorro vs histórico CLP",
+                           "Var. vs últ. compra", "Comentario", "Alertas"]], on="Pos", how="left")
+    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+        base.to_excel(xw, sheet_name="Cuadro comparativo", index=False, startrow=5)
+        det_out = det[["Pos", "Proveedor", "Moneda", "Precio inicial", "Precio mejorado", "Cantidad",
+                       "Subtotal CLP", "Flete CLP", "Total CLP", "Ahorro spot CLP", "Var. vs últ. compra",
+                       "Plazo", "Entrega planta", "Días a planta", "Cumple técnico", "Observación"]]
+        det_out.to_excel(xw, sheet_name="Detalle ofertas", index=False)
+        prov.to_excel(xw, sheet_name="Proveedores", index=False)
+        pd.DataFrame({
+            "Parámetro": ["SOLPED", "Fecha", "USD/CLP", "EUR/CLP", "UF/CLP", "Fecha TC", "Fuente TC",
+                          "Aprobado por", "Fecha aprobación", "Estado"],
+            "Valor": [sp, date.today().strftime("%d/%m/%Y"), tc["USD"], tc["EUR"], tc["UF"], tc["fecha"],
+                      tc["fuente"], aprobacion.get("nombre", ""), aprobacion.get("fecha", ""),
+                      "APROBADO" if aprobacion.get("ok") else "BORRADOR - pendiente de aprobación"],
+        }).to_excel(xw, sheet_name="Parámetros", index=False)
+
+        ws = xw.sheets["Cuadro comparativo"]
+        ws["A1"] = f"ENAEX - CUADRO COMPARATIVO DE OFERTAS | SOLPED {sp}"
+        ws["A1"].font = Font(size=15, bold=True, color=AZUL)
+        ws["A2"] = (f"Fecha: {date.today():%d/%m/%Y} | USD {tc['USD']:,.2f} | EUR {tc['EUR']:,.2f} | "
+                    f"UF {tc['UF']:,.2f} (TC al {tc['fecha'] or 'ingreso manual'})")
+        ws["A3"] = ("APROBADO por " + aprobacion.get("nombre", "") + " el " + aprobacion.get("fecha", "")
+                    if aprobacion.get("ok") else "BORRADOR - pendiente de aprobación del comprador")
+        ws["A3"].font = Font(bold=True, color="065F46" if aprobacion.get("ok") else "B45309")
+        ws["A4"] = (f"Monto adjudicado: $ {adj['Monto adjudicado CLP'].sum():,.0f} CLP | "
+                    f"Ahorro spot: $ {adj['Ahorro spot CLP'].sum():,.0f} CLP")
+        montos = [c for c in base.columns if any(k in c for k in ["precio", "P. inicial", "P. mejorado",
+                                                                    "Total CLP", "Monto", "Ahorro"])]
+        estilo_hoja(ws, 6, cols_monto=montos, cols_pct=["Var. vs últ. compra"],
+                    cols_fecha=["Últ. compra"] + [c for c in base.columns if c.endswith("| Entrega")])
+        # Resalta en verde el total adjudicado de cada fila
+        col_idx = {c.value: c.column for c in ws[6]}
+        for r, (_, fila) in enumerate(base.iterrows(), start=7):
+            p = fila.get("Proveedor adjudicado")
+            if p and f"{p} | Total CLP" in col_idx:
+                ws.cell(row=r, column=col_idx[f"{p} | Total CLP"]).fill = PatternFill("solid", start_color=VERDE)
+        estilo_hoja(xw.sheets["Detalle ofertas"], 1,
+                    cols_monto=["Precio inicial", "Precio mejorado", "Subtotal CLP", "Flete CLP",
+                                "Total CLP", "Ahorro spot CLP"],
+                    cols_pct=["Var. vs últ. compra"], cols_fecha=["Entrega planta"])
+        estilo_hoja(xw.sheets["Proveedores"], 1, cols_monto=["Flete total"])
+        estilo_hoja(xw.sheets["Parámetros"], 1)
+    return buf.getvalue()
+
+
+def txt_pdf(s) -> str:
+    return unicodedata.normalize("NFKD", str(s if s is not None else "")).encode("latin-1", "ignore").decode("latin-1")
+
+
+def generar_pdf(sp, adj, tc, aprobacion) -> bytes:
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.set_auto_page_break(True, margin=12)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(30, 58, 138)
+    pdf.cell(0, 8, txt_pdf(f"ENAEX - Cuadro comparativo SOLPED {sp}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(80, 80, 80)
+    pdf.cell(0, 5, txt_pdf(f"Fecha {date.today():%d/%m/%Y} | USD {tc['USD']:,.2f} | EUR {tc['EUR']:,.2f} | "
+                           f"UF {tc['UF']:,.2f} | TC al {tc['fecha'] or 'ingreso manual'}"),
+             new_x="LMARGIN", new_y="NEXT")
+    estado = (f"APROBADO por {aprobacion.get('nombre', '')} el {aprobacion.get('fecha', '')}"
+              if aprobacion.get("ok") else "BORRADOR - pendiente de aprobacion del comprador")
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 6, txt_pdf(estado), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+    cols = [("Pos", 12), ("Descripcion", 70), ("Cant.", 14), ("Adjudicado", 48), ("Tipo", 38),
+            ("Monto CLP", 30), ("Ahorro spot", 26), ("Var. hist.", 18), ("Entrega", 20)]
+    pdf.set_fill_color(30, 58, 138)
+    pdf.set_text_color(255, 255, 255)
+    for n, w in cols:
+        pdf.cell(w, 7, n, border=1, align="C", fill=True)
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(0, 0, 0)
+    for i, (_, r) in enumerate(adj.iterrows()):
+        pdf.set_fill_color(*((249, 250, 251) if i % 2 else (255, 255, 255)))
+        var = f"{r['Var. vs últ. compra']:.0%}" if pd.notna(r["Var. vs últ. compra"]) else "-"
+        ent = r["Entrega planta"].strftime("%d/%m/%Y") if pd.notna(r.get("Entrega planta")) else "-"
+        vals = [str(r["Pos"]), str(r["Texto"])[:45], f"{r['Cantidad']:g}", str(r["Proveedor adjudicado"])[:28],
+                str(r["Tipo adjudicación"])[:24], f"{r['Monto adjudicado CLP']:,.0f}",
+                f"{r['Ahorro spot CLP']:,.0f}", var, ent]
+        for (n, w), v in zip(cols, vals):
+            pdf.cell(w, 6, txt_pdf(v), border=1, fill=True,
+                     align="R" if n in ("Monto CLP", "Ahorro spot", "Cant.") else "L")
+        pdf.ln()
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 6, txt_pdf(f"Total adjudicado: $ {adj['Monto adjudicado CLP'].sum():,.0f} CLP   |   "
+                           f"Ahorro spot: $ {adj['Ahorro spot CLP'].sum():,.0f} CLP"), new_x="LMARGIN", new_y="NEXT")
+    com = adj[adj["Comentario"].astype(str).str.strip() != ""]
+    if not com.empty:
+        pdf.set_font("Helvetica", "", 8)
+        for _, r in com.iterrows():
+            pdf.multi_cell(0, 5, txt_pdf(f"Pos {r['Pos']}: {r['Comentario']}"), new_x="LMARGIN", new_y="NEXT")
+    return bytes(pdf.output())
+
+# =============================================================================
+# ESTADO DE SESIÓN
+# =============================================================================
+ss = st.session_state
+ss.setdefault("proyectos", {})       # SOLPED -> datos del cuadro
+ss.setdefault("req", None)           # requerimientos normalizados
+ss.setdefault("hist", None)          # histórico indexado por material
+
+
+def nuevo_proyecto(sp: str, posiciones: pd.DataFrame):
+    pos = posiciones.copy().reset_index(drop=True)
+    hist = ss.hist
+    filas = []
+    for _, r in pos.iterrows():
+        h, via = buscar_historico(hist, r.get("Material", ""), r.get("Texto", ""))
+        filas.append({
+            "Con historial": h is not None,
+            "Historial por": via,
+            "Últ. compra": h["Fecha"].date() if h is not None else None,
+            "Últ. proveedor": h["Proveedor"] if h is not None else "",
+            "Últ. precio": h["Precio"] if h is not None else np.nan,
+            "Últ. moneda": h["Moneda"] if h is not None else "",
+            "Últ. OC": h["OC"] if h is not None else "",
+            "N° compras": int(h["N° compras"]) if h is not None else 0,
+        })
+    pos = pd.concat([pos, pd.DataFrame(filas)], axis=1)
+    # Proveedores sugeridos: los que ya vendieron estos materiales (scouting por historial)
+    sugeridos = [p for p in pos["Últ. proveedor"].dropna().unique() if p][:3] or ["Proveedor 1"]
+    prov = pd.DataFrame({
+        "Proveedor": sugeridos, "Moneda": "CLP", "Transporte": "T. Gil", "Flete total": 0.0,
+        "Moneda flete": "CLP", "Plazo": 10, "Tipo plazo": "Días hábiles", "Tipo compra": "Nacional",
+        "Lugar entrega": list(LUGARES_ENTREGA)[0], "Bodega tránsito": False,
+    })
+    ss.proyectos[sp] = {"pos": pos, "prov_src": prov, "prov_v": 0, "prov_names": None,
+                        "of_src": None, "of_v": 0, "of_last": None, "adj_override": {},
+                        "aprobacion": {"ok": False, "nombre": "", "fecha": ""}}
+
+
+def armar_ofertas(pos, nombres, previas):
+    """Grilla Pos x Proveedor, conservando lo que ya se había digitado."""
+    base = pd.DataFrame([(p, t, n) for p, t in zip(pos["Pos"], pos["Texto"]) for n in nombres],
+                        columns=["Pos", "Texto", "Proveedor"])
+    for c, v in [("Precio inicial", np.nan), ("Precio mejorado", np.nan), ("Plazo", np.nan),
+                 ("Cumple técnico", True), ("Observación", "")]:
+        base[c] = v
+    if previas is not None and not previas.empty:
+        prev = previas.drop(columns=["Texto"], errors="ignore").drop_duplicates(["Pos", "Proveedor"])
+        base = base[["Pos", "Texto", "Proveedor"]].merge(prev, on=["Pos", "Proveedor"], how="left")
+        base["Cumple técnico"] = base["Cumple técnico"].fillna(True).astype(bool)
+        base["Observación"] = base["Observación"].fillna("")
+    return base
+
+
+def proyecto_a_json(sp, P) -> str:
+    def df_json(df):
+        return None if df is None else df.to_json(orient="records", date_format="iso", force_ascii=False)
+    return json.dumps({"solped": sp, "pos": df_json(P["pos"]), "prov": df_json(P["prov_src"]),
+                       "ofertas": df_json(P["of_last"]), "adj_override": P["adj_override"],
+                       "aprobacion": P["aprobacion"]}, ensure_ascii=False)
+
+
+def json_a_proyecto(texto: str):
+    d = json.loads(texto)
+    leer = lambda s: pd.read_json(io.StringIO(s), orient="records") if s else None
+    pos = leer(d["pos"])
+    if "Últ. compra" in pos:
+        pos["Últ. compra"] = pd.to_datetime(pos["Últ. compra"], errors="coerce").dt.date
+    ss.proyectos[d["solped"]] = {
+        "pos": pos, "prov_src": leer(d["prov"]), "prov_v": 1, "prov_names": None,
+        "of_src": None, "of_v": 1, "of_last": leer(d["ofertas"]),
+        "adj_override": {int(k): v for k, v in d.get("adj_override", {}).items()},
+        "aprobacion": d.get("aprobacion", {"ok": False, "nombre": "", "fecha": ""}),
+    }
+    return d["solped"]
+
+# =============================================================================
+# BARRA LATERAL: TIPOS DE CAMBIO Y ARCHIVOS
+# =============================================================================
+st.markdown("<div class='titulo'>Cuadro Comparativo de Ofertas</div>"
+            "<div class='subtitulo'>SOLPED → histórico de compras → ofertas → adjudicación con aprobación del comprador</div>",
+            unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("Parámetros de Cambio")
-    indicadores = obtener_indicadores_tiempo_real()
-    
-    if indicadores["estado"]: st.success("Indicadores actualizados en vivo")
-    else: st.warning("Usando valores por defecto (Sin conexión).")
-        
-    if st.button("Actualizar Tasas API", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
-
-    st.divider()
-    tc_usd = st.number_input("Tipo de Cambio USD / CLP", value=indicadores["USD"], step=1.0, format="%.2f")
-    tc_uf = st.number_input("Tipo de Cambio UF / CLP", value=indicadores["UF"], step=100.0, format="%.2f")
-    tc_eur = st.number_input("Tipo de Cambio EUR / CLP", value=indicadores["EUR"], step=1.0, format="%.2f")
-    st.divider()
-    
-    st.header("Carga de Archivos Base")
-    file_autogestion = st.file_uploader("1. Plantilla Autogestión (Estructura Base)", type=["xlsx", "xls", "csv", "xlsm"])
-    file_cuadro = st.file_uploader("2. Cuadro Comparativo (Datos Brutos / Histórico)", type=["xlsx", "xls", "csv", "xlsm"])
-    
-    if st.button("Procesar y Unir Archivos", type="primary", use_container_width=True):
-        if file_autogestion:
-            df_base = leer_archivo(file_autogestion)
-            st.session_state.df_masivo = df_base
-            if df_base is not None:
-                st.success(f"Plantilla Base cargada ({len(df_base)} filas).")
-            
-        if file_cuadro:
-            df_raw_hist = leer_archivo(file_cuadro)
-            st.session_state.df_historico = df_raw_hist
-            if df_raw_hist is not None:
-                st.success(f"Cuadro Bruto / Histórico cargado ({len(df_raw_hist)} filas).")
-
-        if st.session_state.df_masivo is not None and st.session_state.df_historico is not None:
-            col_mat_base = next((c for c in st.session_state.df_masivo.columns if 'material' in str(c).lower()), None)
-            col_mat_hist = next((c for c in st.session_state.df_historico.columns if 'material' in str(c).lower()), None)
-            
-            if col_mat_base and col_mat_hist:
-                st.session_state.df_masivo[col_mat_base] = st.session_state.df_masivo[col_mat_base].astype(str).str.strip()
-                st.session_state.df_historico[col_mat_hist] = st.session_state.df_historico[col_mat_hist].astype(str).str.strip()
-
-                col_fecha_hist = next((c for c in st.session_state.df_historico.columns if any(k in str(c).lower() for k in ['fecha', 'date', 'ano', 'año', 'creacion'])), None)
-                if col_fecha_hist:
-                    st.session_state.df_historico['_fecha_tmp'] = pd.to_datetime(st.session_state.df_historico[col_fecha_hist], errors='coerce')
-                    st.session_state.df_historico = st.session_state.df_historico.sort_values(by='_fecha_tmp', ascending=False)
-
-                df_hist_unique = st.session_state.df_historico.drop_duplicates(subset=[col_mat_hist], keep='first')
-                if '_fecha_tmp' in df_hist_unique.columns:
-                    df_hist_unique = df_hist_unique.drop(columns=['_fecha_tmp'])
-
-                df_merged = pd.merge(st.session_state.df_masivo, df_hist_unique, left_on=col_mat_base, right_on=col_mat_hist, how='left', suffixes=('', '_Bruto'))
-                st.session_state.df_masivo = df_merged
-                st.success("Datos brutos e histórico integrados.")
-            else:
-                st.warning("No se encontró la columna 'Material' en ambas planillas para realizar el cruce.")
-
-if st.session_state.df_masivo is not None:
-    with st.expander("Vista Previa de la Base Integrada", expanded=False):
-        st.dataframe(st.session_state.df_masivo, use_container_width=True)
-
-tabs = st.tabs(["Evaluación por SOLPED", "Carga Manual / Directa", "Cuadro Comparativo Integrado"])
-
-# =============================================================================
-# HELPER PARA GUARDAR ELEMENTOS DE FORMA SEGURA Y MULTIMONEDA
-# =============================================================================
-def guardar_lista_en_comparativo(lista_items, default_solped="N/A"):
-    for r in lista_items:
-        cant = float(r.get("Cantidad", 1.0))
-        pu = float(r.get("Precio Unitario", 0.0))
-        subtotal_mat = cant * pu
-        moneda_mat = r.get("Moneda", "CLP")
-        
-        costo_env = float(r.get("Costo Transporte", 0.0))
-        moneda_env = r.get("Moneda Transp.", moneda_mat)
-        
-        # Conversiones independientes
-        mat_clp, mat_usd, mat_eur = convertir_moneda(subtotal_mat, moneda_mat, tc_usd, tc_uf, tc_eur)
-        env_clp, env_usd, env_eur = convertir_moneda(costo_env, moneda_env, tc_usd, tc_uf, tc_eur)
-        
-        item_guardar = r.copy()
-        if not item_guardar.get("SOLPED") or item_guardar.get("SOLPED") in ["", "N/A", "None", "nan"]:
-            item_guardar["SOLPED"] = default_solped if default_solped else "N/A"
-            
-        item_guardar["Subtotal Material CLP"] = mat_clp
-        item_guardar["Subtotal Material USD"] = mat_usd
-        item_guardar["Subtotal Material EUR"] = mat_eur
-        
-        item_guardar["Costo Transporte CLP"] = env_clp
-        item_guardar["Costo Transporte USD"] = env_usd
-        item_guardar["Costo Transporte EUR"] = env_eur
-        
-        item_guardar["Total CLP"] = mat_clp + env_clp
-        item_guardar["Total USD"] = mat_usd + env_usd
-        item_guardar["Total EUR"] = mat_eur + env_eur
-        
-        st.session_state.ofertas_manuales.append(item_guardar)
-
-# =============================================================================
-# TAB 1: EVALUACIÓN POR SOLPED
-# =============================================================================
-with tabs[0]:
-    st.subheader("Evaluación por SOLPED")
-    
-    col_input, col_btn = st.columns([3, 1])
-    with col_input:
-        solped_id = st.text_input("Buscar ID SOLPED en la plantilla:", placeholder="Ej: PR151762")
-    with col_btn:
-        st.write("")
-        st.write("")
-        btn_extraer = st.button("Extraer Materiales", type="primary", use_container_width=True)
-
-    if btn_extraer and solped_id.strip():
-        if st.session_state.df_masivo is not None:
-            mats = extraer_materiales_de_masivo(st.session_state.df_masivo, solped_id)
-            if mats:
-                st.session_state[f"lista_solped_{solped_id}"] = mats
-                st.success(f"Se encontraron {len(mats)} posiciones para la SOLPED **{solped_id}**")
-            else:
-                st.warning(f"No se encontraron registros exactos para la SOLPED '{solped_id}'.")
-        else:
-            st.info("Carga las planillas en el menú lateral y haz clic en Procesar.")
-
-    key_lista = f"lista_solped_{solped_id}" if (solped_id and f"lista_solped_{solped_id}" in st.session_state) else "lista_solped_default"
-
-    if key_lista not in st.session_state:
-        st.session_state[key_lista] = [{
-            "SOLPED": "PR151762", "Pos": 1, "Material": "PROYECTOR LED 50W DS1", "Centro": "E024", "Cantidad": 10, 
-            "UM": "CADA UNO", "Precio Unitario": 8190.0, "Moneda": "CLP", "Costo Transporte": 0.0, "Moneda Transp.": "CLP",
-            "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": ""
-        }]
-
-    lista_materiales = st.session_state[key_lista]
-
-    if lista_materiales:
-        col_m_head, col_m_save = st.columns([2, 1])
-        with col_m_head:
-            st.write(f"**Materiales extraídos ({len(lista_materiales)} ítems):**")
-        with col_m_save:
-            if st.button("Guardar Oferta en Cuadro Comparativo", type="primary", key="btn_save_top_t1", use_container_width=True):
-                guardar_lista_en_comparativo(st.session_state[key_lista], solped_id)
-                st.success("¡Oferta guardada exitosamente en el Cuadro Comparativo!")
-
-        idx_a_eliminar = None
-        moneda_opts = ["CLP", "USD", "EUR"]
-        
-        for idx, item in enumerate(lista_materiales):
-            with st.container(border=True):
-                col_title, col_del = st.columns([8, 2])
-                with col_title:
-                    st.markdown(f"### SOLPED: {item.get('SOLPED', solped_id)} | Pos {item['Pos']}: {item['Material']}")
-                    st.markdown(
-                        f"<div style='color: #8C8C8C; font-size: 0.9em; padding-bottom: 10px;'>"
-                        f"<b>Centro:</b> {item['Centro']} | <b>UM Original:</b> {item['UM']}</div>", 
-                        unsafe_allow_html=True
-                    )
-                with col_del:
-                    if st.button("Eliminar", key=f"btn_del_t1_{idx}", use_container_width=True):
-                        idx_a_eliminar = idx
-
-                c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([1, 1.3, 0.9, 1.3, 0.9, 1.5, 1.2, 1.3])
-                
-                cant_val = float(item.get("Cantidad", 1.0))
-                cant_val_clean = int(cant_val) if cant_val.is_integer() else cant_val
-                item["Cantidad"] = c1.number_input("Cantidad", value=cant_val_clean, format="%g", key=f"cant_{key_lista}_{idx}")
-                
-                item["Precio Unitario"] = c2.number_input("P. Unit. Mat.", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"pu_{key_lista}_{idx}")
-                
-                m_idx = moneda_opts.index(item.get("Moneda", "CLP")) if item.get("Moneda") in moneda_opts else 0
-                item["Moneda"] = c3.selectbox("Mon. Mat", moneda_opts, index=m_idx, key=f"mon_{key_lista}_{idx}")
-
-                item["Costo Transporte"] = c4.number_input("Costo Envio", value=float(item.get("Costo Transporte", 0.0)), format="%.2f", key=f"ct_{key_lista}_{idx}")
-                
-                mt_idx = moneda_opts.index(item.get("Moneda Transp.", item["Moneda"])) if item.get("Moneda Transp.") in moneda_opts else m_idx
-                item["Moneda Transp."] = c5.selectbox("Mon. Env", moneda_opts, index=mt_idx, key=f"mont_{key_lista}_{idx}")
-
-                item["Proveedor"] = c6.text_input("Proveedor", value=str(item.get("Proveedor", "")), key=f"prov_{key_lista}_{idx}")
-                
-                trans_opts = OPCIONES_TRANSPORTE
-                t_idx = trans_opts.index(item.get("Transporte", "EXW")) if item.get("Transporte") in trans_opts else 4
-                item["Transporte"] = c7.selectbox("Incoterm", trans_opts, index=t_idx, key=f"trans_{key_lista}_{idx}")
-
-                valor_fecha = item.get("Calendario de entrega", date.today())
-                if isinstance(valor_fecha, str):
-                    try: valor_fecha = datetime.strptime(valor_fecha, "%Y-%m-%d").date()
-                    except: valor_fecha = date.today()
-                
-                item["Calendario de entrega"] = c8.date_input("Fecha Entrega", value=valor_fecha, key=f"date_{key_lista}_{idx}")
-
-                # Resumen Bruto explicativo
-                subtotal_bruto = (item["Cantidad"] * item["Precio Unitario"])
-                c_envio = item["Costo Transporte"]
-                st.caption(f"**Total bruto posición (sin convertir):** Material: {subtotal_bruto:,.2f} {item['Moneda']} | Envío: {c_envio:,.2f} {item['Moneda Transp.']}")
-
-        if idx_a_eliminar is not None:
-            st.session_state[key_lista].pop(idx_a_eliminar)
-            st.rerun()
-
-        st.divider()
-        if st.button("Guardar Oferta en Cuadro Comparativo", type="primary", key="btn_save_bot_t1"):
-            guardar_lista_en_comparativo(st.session_state[key_lista], solped_id)
-            st.success("¡Oferta guardada exitosamente en el Cuadro Comparativo!")
-
-# =============================================================================
-# TAB 2: CARGA MANUAL DIRECTA
-# =============================================================================
-with tabs[1]:
-    st.subheader("Carga Manual de Oferta Paso a Paso")
-    
-    col_s1, col_s2 = st.columns([3, 1])
-    with col_s1: manual_solped = st.text_input("Ingresar N° SOLPED para Autocompletar:", placeholder="Ej: PR175798")
-    with col_s2:
-        st.write("")
-        st.write("")
-        btn_cargar_manual = st.button("Cargar Requerimiento", use_container_width=True)
-
-    if btn_cargar_manual and manual_solped:
-        if st.session_state.df_masivo is not None:
-            mats = extraer_materiales_de_masivo(st.session_state.df_masivo, manual_solped)
-            if mats:
-                st.session_state["manual_items_list"] = mats
-                st.success(f"Materiales cargados automáticamente desde la SOLPED {manual_solped}")
-            else: st.warning(f"No se encontró la SOLPED {manual_solped}.")
-        else: st.info("Sube las planillas en la barra lateral.")
-
-    if "manual_items_list" not in st.session_state:
-        st.session_state["manual_items_list"] = [{
-            "SOLPED": "MANUAL", "Pos": 1, "Material": "Ítem Manual 1", "Centro": "E001", "Cantidad": 1, "UM": "C/U",
-            "Precio Unitario": 0.0, "Moneda": "CLP", "Costo Transporte": 0.0, "Moneda Transp.": "CLP",
-            "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": ""
-        }]
-
-    lista_manual = st.session_state["manual_items_list"]
-    
-    col_man_btn1, col_man_btn2 = st.columns([1, 1])
-    with col_man_btn1:
-        if st.button("Agregar Nuevo Material a la Lista", use_container_width=True):
-            lista_manual.append({
-                "SOLPED": manual_solped if manual_solped else "MANUAL",
-                "Pos": len(lista_manual) + 1, "Material": "Nuevo Material", "Centro": "E001", "Cantidad": 1, "UM": "C/U",
-                "Precio Unitario": 0.0, "Moneda": "CLP", "Costo Transporte": 0.0, "Moneda Transp.": "CLP",
-                "Proveedor": "", "Transporte": "EXW", "Calendario de entrega": date.today(), "Observaciones": ""
-            })
-            st.rerun()
-    with col_man_btn2:
-        if st.button("Guardar Cotización Manual Completa", type="primary", key="btn_save_top_t2", use_container_width=True):
-            guardar_lista_en_comparativo(st.session_state["manual_items_list"], manual_solped)
-            st.success("¡Cotización agregada al Cuadro Comparativo!")
-
-    idx_del_manual = None
-    moneda_opts = ["CLP", "USD", "EUR"]
-
-    for idx, item in enumerate(lista_manual):
-        with st.container(border=True):
-            col_m_title, col_m_del = st.columns([8, 2])
-            with col_m_title:
-                item["Material"] = st.text_input("Descripción / Material", value=item.get("Material", ""), key=f"man_mat_{idx}")
-            with col_m_del:
-                if st.button("Eliminar", key=f"btn_del_t2_{idx}", use_container_width=True):
-                    idx_del_manual = idx
-
-            c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([1, 1.3, 0.9, 1.3, 0.9, 1.5, 1.2, 1.3])
-            
-            man_cant_val = float(item.get("Cantidad", 1.0))
-            man_cant_clean = int(man_cant_val) if man_cant_val.is_integer() else man_cant_val
-            item["Cantidad"] = c1.number_input("Cantidad", value=man_cant_clean, format="%g", key=f"man_cant_{idx}")
-            
-            item["Precio Unitario"] = c2.number_input("P. Unit. Mat.", value=float(item.get("Precio Unitario", 0.0)), format="%.2f", key=f"man_pu_{idx}")
-            
-            m_idx = moneda_opts.index(item.get("Moneda", "CLP")) if item.get("Moneda") in moneda_opts else 0
-            item["Moneda"] = c3.selectbox("Mon. Mat", moneda_opts, index=m_idx, key=f"man_mon_{idx}")
-            
-            item["Costo Transporte"] = c4.number_input("Costo Envio", value=float(item.get("Costo Transporte", 0.0)), format="%.2f", key=f"man_ct_{idx}")
-            
-            mt_idx = moneda_opts.index(item.get("Moneda Transp.", item["Moneda"])) if item.get("Moneda Transp.") in moneda_opts else m_idx
-            item["Moneda Transp."] = c5.selectbox("Mon. Env", moneda_opts, index=mt_idx, key=f"man_mont_{idx}")
-
-            item["Proveedor"] = c6.text_input("Proveedor", value=str(item.get("Proveedor", "")), key=f"man_prov_{idx}")
-            
-            trans_opts = OPCIONES_TRANSPORTE
-            t_idx = trans_opts.index(item.get("Transporte", "EXW")) if item.get("Transporte") in trans_opts else 4
-            item["Transporte"] = c7.selectbox("Incoterm", trans_opts, index=t_idx, key=f"man_trans_{idx}")
-
-            valor_fecha_man = item.get("Calendario de entrega", date.today())
-            if isinstance(valor_fecha_man, str):
-                try: valor_fecha_man = datetime.strptime(valor_fecha_man, "%Y-%m-%d").date()
-                except: valor_fecha_man = date.today()
-            
-            item["Calendario de entrega"] = c8.date_input("Fecha Entrega", value=valor_fecha_man, key=f"man_date_{idx}")
-
-    if idx_del_manual is not None:
-        st.session_state["manual_items_list"].pop(idx_del_manual)
-        st.rerun()
-
-    if st.button("Guardar Cotización Manual Completa", type="primary", key="btn_save_bot_t2"):
-        guardar_lista_en_comparativo(st.session_state["manual_items_list"], manual_solped)
-        st.success("¡Cotización agregada al Cuadro Comparativo!")
-
-# =============================================================================
-# TAB 3: CUADRO COMPARATIVO INTEGRADO & DESCARGAS
-# =============================================================================
-with tabs[2]:
-    st.subheader("Cuadro Comparativo Integrado")
-    
-    if st.session_state.ofertas_manuales:
-        df_comp = pd.DataFrame(st.session_state.ofertas_manuales)
-        
-        if 'SOLPED' not in df_comp.columns:
-            df_comp['SOLPED'] = 'N/A'
-        df_comp['SOLPED'] = df_comp['SOLPED'].fillna('N/A').astype(str).replace({'': 'N/A', 'none': 'N/A', 'None': 'N/A', 'nan': 'N/A'})
-        
-        df_comp['Proveedor'] = df_comp['Proveedor'].fillna('Sin Especificar').astype(str).str.strip()
-        df_comp['Proveedor Visual'] = df_comp['Proveedor'].apply(
-            lambda x: 'Sin Especificar' if x in ['', 'none', 'None', 'nan', 'NULL', 'null'] else x
-        )
-
-        col_opt1, col_opt2 = st.columns([1, 1])
-        with col_opt1:
-            moneda_vista = st.radio("Seleccionar Moneda Consolidada de Visualización:", options=["CLP", "USD", "EUR"], horizontal=True)
-        with col_opt2:
-            transporte_reporte = st.selectbox("Transporte General (Cabecera reporte):", options=["No Especificado"] + OPCIONES_TRANSPORTE, index=0)
-
-        # ASIGNACIÓN DINÁMICA DE VALORES CONVERTIDOS
-        df_comp[f"Subtotal Material ({moneda_vista})"] = df_comp[f"Subtotal Material {moneda_vista}"]
-        df_comp[f"Costo Transporte ({moneda_vista})"] = df_comp[f"Costo Transporte {moneda_vista}"]
-        df_comp["Monto Total Visualizado"] = df_comp[f"Total {moneda_vista}"]
-
-        cols_orden = [
-            'SOLPED', 'Pos', 'Material', 'Centro', 'Cantidad', 'UM', 
-            'Precio Unitario', 'Moneda', f'Subtotal Material ({moneda_vista})', 
-            'Costo Transporte', 'Moneda Transp.', f'Costo Transporte ({moneda_vista})',
-            'Monto Total Visualizado', 'Proveedor Visual', 'Transporte', 
-            'Calendario de entrega', 'Observaciones'
-        ]
-        
-        existing_cols = [c for c in cols_orden if c in df_comp.columns]
-        other_cols = [c for c in df_comp.columns if c not in cols_orden and not c.startswith(('Subtotal Material ', 'Costo Transporte ', 'Total '))]
-        df_comp_display = df_comp[existing_cols + other_cols].copy()
-
-        df_comp['Calendario de entrega'] = pd.to_datetime(df_comp['Calendario de entrega'], errors='coerce')
-        hoy = pd.Timestamp(date.today())
-        
-        df_comp['Días para Entrega'] = (df_comp['Calendario de entrega'] - hoy).dt.days
-        df_comp['Días para Entrega'] = df_comp['Días para Entrega'].apply(lambda x: int(x) if pd.notna(x) and x > 0 else 0)
-        df_comp['Calendario de entrega'] = df_comp['Calendario de entrega'].dt.strftime('%d/%m/%Y').fillna('N/A')
-        df_comp_display['Calendario de entrega'] = df_comp['Calendario de entrega']
-
-        bytes_excel = generar_excel_estilizado(df_comp, moneda_vista, transporte_reporte)
-        bytes_pdf = generar_pdf(df_comp, moneda_vista, transporte_reporte)
-        
-        col_top_d1, col_top_d2, col_top_d3 = st.columns([1, 1, 1])
-        with col_top_d1:
-            if bytes_excel:
-                st.download_button(label="Reporte Excel", data=bytes_excel, file_name=f"Reporte_Comparativo_{date.today()}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, type="primary", key="dl_excel_top")
-        with col_top_d2:
-            if bytes_pdf:
-                st.download_button(label="Reporte PDF", data=bytes_pdf, file_name=f"Reporte_Comparativo_{date.today()}.pdf", mime="application/pdf", use_container_width=True, key="dl_pdf_top")
-        with col_top_d3:
-            if st.button("Limpiar Todo", use_container_width=True, key="btn_clear_top"):
-                st.session_state.ofertas_manuales = []
-                st.rerun()
-
-        st.divider()
-
-        st.markdown("### Motor de Recomendación y Comparación")
-        
-        def highlight_best(df):
-            styles = pd.DataFrame('', index=df.index, columns=df.columns)
-            group_cols = [c for c in ['SOLPED', 'Material'] if c in df.columns]
-            if group_cols:
-                for name, group in df.groupby(group_cols):
-                    if len(group) > 1:
-                        if 'Monto Total Visualizado' in df.columns:
-                            styles.loc[group['Monto Total Visualizado'].idxmin(), 'Monto Total Visualizado'] = 'background-color: #D1FAE5; color: #065F46; font-weight: bold;'
-                        if 'Días para Entrega' in df.columns:
-                            styles.loc[group['Días para Entrega'].idxmin(), 'Días para Entrega'] = 'background-color: #DBEAFE; color: #1E3A8A; font-weight: bold;'
-            return styles
-
-        if not df_comp_display.empty:
-            styled_df_comp = df_comp_display.style.apply(highlight_best, axis=None).format({
-                "Cantidad": lambda x: f"{int(x)}" if pd.notna(x) and float(x).is_integer() else (f"{x:,.2f}" if pd.notna(x) else ""),
-                "Monto Total Visualizado": "$ {:,.2f}", 
-                "Precio Unitario": "$ {:,.2f}",
-                "Costo Transporte": "$ {:,.2f}",
-                f"Subtotal Material ({moneda_vista})": "$ {:,.2f}",
-                f"Costo Transporte ({moneda_vista})": "$ {:,.2f}"
-            })
-
-            st.dataframe(styled_df_comp, height=380, use_container_width=True)
-
-            col_c1, col_c2, col_c3 = st.columns(3)
-            with col_c1: st.metric(f"Subtotal Materiales ({moneda_vista})", f"$ {df_comp[f'Subtotal Material ({moneda_vista})'].sum():,.2f}")
-            with col_c2: st.metric(f"Total Transporte/Flete ({moneda_vista})", f"$ {df_comp[f'Costo Transporte ({moneda_vista})'].sum():,.2f}")
-            with col_c3: st.metric(f"Monto Total Consolidado ({moneda_vista})", f"$ {df_comp['Monto Total Visualizado'].sum():,.2f}")
-                
-            st.divider()
-            st.subheader("Gráficos Comparativos por SOLPED")
-            col_graf1, col_graf2 = st.columns(2)
-            
-            with col_graf1:
-                st.markdown(f"**Comparativa de Monto Total por SOLPED ({moneda_vista})**")
-                st.bar_chart(df_comp.groupby("SOLPED")["Monto Total Visualizado"].sum().reset_index(), x="SOLPED", y="Monto Total Visualizado", height=250)
-                
-            with col_graf2:
-                st.markdown("**Promedio Días de Entrega por SOLPED**")
-                st.bar_chart(df_comp.groupby("SOLPED")["Días para Entrega"].mean().reset_index(), x="SOLPED", y="Días para Entrega", height=250)
-
-            st.divider()
-            st.subheader("Exportar Reportes")
-            
-            col_down1, col_down2, _ = st.columns([1, 1, 2])
-            with col_down1:
-                if bytes_excel:
-                    st.download_button(label="Reporte Excel", data=bytes_excel, file_name=f"Reporte_Comparativo_{date.today()}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, type="primary", key="dl_excel_bot")
-            with col_down2:
-                if bytes_pdf:
-                    st.download_button(label="Descargar Reporte PDF", data=bytes_pdf, file_name=f"Reporte_Comparativo_{date.today()}.pdf", mime="application/pdf", use_container_width=True, key="dl_pdf_bot")
-
-        st.write("")
-        if st.button("Limpiar Cuadro Comparativo", key="btn_clear_bot"):
-            st.session_state.ofertas_manuales = []
-            st.rerun()
+    st.header("Tipos de cambio")
+    ind = obtener_indicadores()
+    if ind["ok"]:
+        st.success(f"TC al {ind['fecha']} · {ind['fuente']}")
     else:
-        st.info("Aún no hay ofertas registradas en el Cuadro Comparativo.")
+        st.error("Sin conexión a mindicador.cl: ingresa el TC del día manualmente.")
+    if st.button("Actualizar tasas", use_container_width=True):
+        obtener_indicadores.clear()   # limpia solo esta caché, no la de archivos
+        st.rerun()
+    tc = {
+        "USD": st.number_input("USD / CLP", value=ind["USD"] or 0.0, step=1.0, format="%.2f"),
+        "EUR": st.number_input("EUR / CLP", value=ind["EUR"] or 0.0, step=1.0, format="%.2f"),
+        "UF": st.number_input("UF / CLP", value=ind["UF"] or 0.0, step=10.0, format="%.2f"),
+        "fecha": ind["fecha"], "fuente": ind["fuente"],
+    }
+    manual = (tc["USD"], tc["EUR"], tc["UF"]) != (ind["USD"], ind["EUR"], ind["UF"])
+    if manual:
+        tc["fecha"], tc["fuente"] = date.today().isoformat(), "Ingreso manual"
+    tc_hoy = tc["fecha"] == date.today().isoformat()
+    if min(tc["USD"], tc["EUR"], tc["UF"]) <= 0:
+        st.warning("Completa los tres tipos de cambio para convertir monedas.")
+
+    st.divider()
+    st.header("Archivos")
+    f_req = st.file_uploader("1. Carga de SOLPED (Autogestión, ME5A o Ariba)", type=["xlsx", "xlsm", "xls", "csv"])
+    if f_req:
+        hojas = listar_hojas(f_req.getvalue(), f_req.name)
+        pref = ["Carga ARIBA", "Carga", "ME5A", "Planilla anterior"]
+        hoja_req = st.selectbox("Hoja de requerimientos", hojas,
+                                index=int(np.argmax([puntaje_hoja(h, pref) for h in hojas])))
+    f_hist = st.file_uploader("2. Histórico de compras (Cuadro MRO, ME2M o CSV)", type=["xlsx", "xlsm", "xls", "csv"])
+    if f_hist:
+        hojas_h = listar_hojas(f_hist.getvalue(), f_hist.name)
+        pref_h = ["Ultima COMPRA", "BASE OC", "ME2M", "Data"]
+        hoja_hist = st.selectbox("Hoja de histórico", hojas_h,
+                                 index=int(np.argmax([puntaje_hoja(h, pref_h) for h in hojas_h])))
+        st.caption("Tip: exportar el histórico a CSV acelera mucho la carga.")
+    if st.button("Procesar archivos", type="primary", use_container_width=True):
+        if f_req:
+            df = leer_hoja(f_req.getvalue(), f_req.name, hoja_req, json.dumps(SIN_REQ))
+            ss.req_raw, ss.req_map = df, mapear_columnas(df.columns, SIN_REQ)
+        if f_hist:
+            dfh = leer_hoja(f_hist.getvalue(), f_hist.name, hoja_hist, json.dumps(SIN_HIST))
+            ss.hist_raw, ss.hist_map = dfh, mapear_columnas(dfh.columns, SIN_HIST)
+        ss.req = ss.hist = None   # se reconstruyen abajo con el mapeo confirmado
+
+    # Mapeo de columnas revisable (evita que una columna mal detectada contamine el cuadro)
+    for etiqueta, raw_k, map_k, sins, oblig in [("requerimientos", "req_raw", "req_map", SIN_REQ, REQ_OBLIGATORIAS),
+                                                ("histórico", "hist_raw", "hist_map", SIN_HIST, HIST_OBLIGATORIAS)]:
+        if ss.get(raw_k) is not None:
+            faltan = [c for c in oblig if c not in ss[map_k]]
+            with st.expander(f"Columnas de {etiqueta}" + (" ⚠" if faltan else " ✓"), expanded=bool(faltan)):
+                opciones = ["(no usar)"] + list(ss[raw_k].columns)
+                for campo in sins:
+                    actual = ss[map_k].get(campo)
+                    elegido = st.selectbox(campo, opciones, key=f"map_{map_k}_{campo}",
+                                           index=opciones.index(actual) if actual in opciones else 0)
+                    if elegido == "(no usar)":
+                        ss[map_k].pop(campo, None)
+                    else:
+                        ss[map_k][campo] = elegido
+
+    if ss.get("req_raw") is not None and all(c in ss.req_map for c in REQ_OBLIGATORIAS):
+        ss.req = normalizar_requerimientos(ss.req_raw, ss.req_map)
+    if ss.get("hist_raw") is not None and all(c in ss.hist_map for c in HIST_OBLIGATORIAS):
+        ss.hist = construir_historico(ss.hist_raw, ss.hist_map)
+    if ss.req is not None:
+        st.caption(f"{ss.req['SOLPED'].nunique()} SOLPED · {len(ss.req)} posiciones")
+    if ss.hist is not None:
+        st.caption(f"Histórico: {len(ss.hist):,} materiales con última compra")
+
+    st.divider()
+    st.header("Borradores")
+    f_json = st.file_uploader("Retomar borrador (.json)", type=["json"])
+    if f_json and st.button("Cargar borrador", use_container_width=True):
+        sp_cargada = json_a_proyecto(f_json.getvalue().decode("utf-8"))
+        ss.sp_activa = sp_cargada
+        st.success(f"Borrador de SOLPED {sp_cargada} cargado.")
+
+# =============================================================================
+# PESTAÑAS
+# =============================================================================
+tab_bandeja, tab_ofertas, tab_adj = st.tabs(["1. Bandeja de SOLPED", "2. Proveedores y ofertas",
+                                              "3. Adjudicación y reportes"])
+
+# ---------------------------------------------------------------- TAB 1
+with tab_bandeja:
+    if ss.req is not None and not ss.req.empty:
+        req = ss.req
+        compradores = sorted([c for c in req["Asignado a"].unique() if c])
+        c1, c2 = st.columns([2, 3])
+        filtro_comp = c1.multiselect("Comprador", compradores) if compradores else []
+        texto_busca = c2.text_input("Buscar por SOLPED, material o descripción")
+        vista = req if not filtro_comp else req[req["Asignado a"].isin(filtro_comp)]
+        if texto_busca:
+            t = norm(texto_busca)
+            vista = vista[vista.apply(lambda r: t in norm(f"{r['SOLPED']} {r['Material']} {r['Texto']}"), axis=1)]
+        bandeja = (vista.groupby("SOLPED")
+                   .agg(Posiciones=("Pos", "size"), Días=("Días", "max"), Centro=("Centro", "first"),
+                        Comprador=("Asignado a", "first"), Urgencia=("Urgencia", "first"),
+                        Ejemplo=("Texto", "first"))
+                   .reset_index().sort_values("Días", ascending=False))
+        bandeja["Tramo"] = pd.cut(bandeja["Días"], [-1, 5, 15, 30, 10_000],
+                                  labels=["0-5 días", "6-15 días", "16-30 días", "30+ días"]).astype(str)
+        k1, k2, k3 = st.columns(3)
+        k1.metric("SOLPED pendientes", len(bandeja))
+        k2.metric("Sobre 15 días", int((bandeja["Días"] > 15).sum()))
+        k3.metric("Sobre 30 días", int((bandeja["Días"] > 30).sum()))
+        st.caption("Ordenadas por antigüedad. Selecciona una fila para abrir su cuadro comparativo.")
+        sel = st.dataframe(bandeja, use_container_width=True, hide_index=True, height=320,
+                           on_select="rerun", selection_mode="single-row",
+                           column_config={"Días": st.column_config.NumberColumn(format="%d")})
+        if sel.selection.rows:
+            sp = str(bandeja.iloc[sel.selection.rows[0]]["SOLPED"])
+            if st.button(f"Trabajar SOLPED {sp}", type="primary"):
+                if sp not in ss.proyectos:
+                    nuevo_proyecto(sp, req[req["SOLPED"] == sp])
+                ss.sp_activa = sp
+                st.success(f"SOLPED {sp} lista. Continúa en la pestaña 2.")
+    else:
+        st.info("Carga la planilla de SOLPED en la barra lateral, o crea un cuadro manual aquí abajo.")
+
+    with st.expander("Crear cuadro manual (sin planilla)", expanded=ss.req is None):
+        sp_man = st.text_input("N° SOLPED", key="sp_manual")
+        plantilla = pd.DataFrame({"Pos": [10], "Material": [""], "Texto": [""], "Cantidad": [1.0],
+                                  "UM": ["C/U"], "Centro": [""]})
+        pos_man = st.data_editor(plantilla, num_rows="dynamic", use_container_width=True, key="pos_manual")
+        if st.button("Crear cuadro manual") and sp_man.strip():
+            pm = pos_man.dropna(subset=["Texto"])
+            pm = pm[pm["Texto"].astype(str).str.strip() != ""].copy()
+            pm["Material"] = pm["Material"].apply(clave_material)
+            nuevo_proyecto(sp_man.strip(), pm)
+            ss.sp_activa = sp_man.strip()
+            st.success("Cuadro creado. Continúa en la pestaña 2.")
+
+    if ss.proyectos:
+        st.caption("Cuadros abiertos en esta sesión: " + ", ".join(ss.proyectos))
+
+# ---------------------------------------------------------------- SOLPED ACTIVA
+sp = ss.get("sp_activa")
+P = ss.proyectos.get(sp) if sp else None
+
+# ---------------------------------------------------------------- TAB 2
+with tab_ofertas:
+    if P is None:
+        st.info("Elige una SOLPED en la pestaña 1.")
+    else:
+        if len(ss.proyectos) > 1:
+            sp = st.selectbox("SOLPED activa", list(ss.proyectos), index=list(ss.proyectos).index(sp))
+            ss.sp_activa, P = sp, ss.proyectos[sp]
+        pos = P["pos"]
+        tc_ok = min(tc["USD"], tc["EUR"], tc["UF"]) > 0
+        pos["Últ. precio CLP"] = [a_clp(p, m, tc) if pd.notna(p) else np.nan
+                                  for p, m in zip(pos["Últ. precio"], pos["Últ. moneda"])]
+        pos["Últ. precio CLP"] = pos["Últ. precio CLP"].where(pos["Últ. precio CLP"] > 0)
+
+        st.subheader(f"SOLPED {sp} · {len(pos)} posiciones")
+        st.dataframe(
+            pos[["Pos", "Material", "Texto", "Cantidad", "UM", "Centro", "Últ. compra", "Últ. proveedor",
+                 "Últ. precio", "Últ. moneda", "N° compras", "Historial por"]],
+            hide_index=True, use_container_width=True,
+            column_config={"Últ. precio": st.column_config.NumberColumn(format="%.2f"),
+                           "Últ. compra": st.column_config.DateColumn(format="DD/MM/YYYY")})
+        sin_hist = int((~pos["Con historial"]).sum())
+        if sin_hist:
+            st.warning(f"{sin_hist} posición(es) sin historial de compra: requieren validación técnica del especialista.")
+        if ss.hist is None:
+            st.caption("Sin histórico cargado: no se calcula variación vs última compra ni bypass técnico.")
+
+        st.markdown("#### Proveedores")
+        st.caption("Agrega una fila por proveedor que cotizó. El flete se prorratea entre sus posiciones según valor.")
+        prov_edit = st.data_editor(
+            P["prov_src"], key=f"prov_{sp}_{P['prov_v']}", num_rows="dynamic", use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Proveedor": st.column_config.TextColumn(required=True),
+                "Moneda": st.column_config.SelectboxColumn(options=MONEDAS, required=True, default="CLP"),
+                "Transporte": st.column_config.SelectboxColumn(options=TRANSPORTES, default="T. Gil"),
+                "Flete total": st.column_config.NumberColumn(min_value=0.0, format="%.2f", default=0.0),
+                "Moneda flete": st.column_config.SelectboxColumn(options=MONEDAS, default="CLP"),
+                "Plazo": st.column_config.NumberColumn("Plazo por defecto", min_value=0, step=1, default=10),
+                "Tipo plazo": st.column_config.SelectboxColumn(options=TIPOS_PLAZO, default="Días hábiles"),
+                "Tipo compra": st.column_config.SelectboxColumn(options=TIPOS_COMPRA, default="Nacional"),
+                "Lugar entrega": st.column_config.SelectboxColumn(options=list(LUGARES_ENTREGA),
+                                                                  default=list(LUGARES_ENTREGA)[0]),
+                "Bodega tránsito": st.column_config.CheckboxColumn(default=False),
+            })
+        prov = prov_edit.dropna(subset=["Proveedor"]).copy()
+        prov["Proveedor"] = prov["Proveedor"].astype(str).str.strip()
+        prov = prov[prov["Proveedor"] != ""].drop_duplicates("Proveedor")
+        for c, v in [("Moneda", "CLP"), ("Moneda flete", "CLP"), ("Flete total", 0.0), ("Plazo", 0),
+                     ("Tipo plazo", "Días hábiles"), ("Tipo compra", "Nacional"),
+                     ("Lugar entrega", list(LUGARES_ENTREGA)[0]), ("Bodega tránsito", False)]:
+            prov[c] = prov[c].fillna(v) if c in prov else v
+        nombres = tuple(prov["Proveedor"])
+
+        if nombres != P["prov_names"] or P["of_src"] is None:
+            P["of_src"] = armar_ofertas(pos, nombres, P["of_last"])
+            P["of_v"] += 1
+            P["prov_names"] = nombres
+
+        st.markdown("#### Ofertas por posición")
+        st.caption("Precio mejorado vacío = se usa el inicial. Desmarca 'Cumple técnico' si la oferta no cumple la ficha. "
+                   "Plazo vacío = plazo por defecto del proveedor.")
+        of_edit = st.data_editor(
+            P["of_src"], key=f"of_{sp}_{P['of_v']}", use_container_width=True, hide_index=True,
+            height=min(80 + 35 * len(P["of_src"]), 600),
+            disabled=["Pos", "Texto", "Proveedor"],
+            column_config={
+                "Texto": st.column_config.TextColumn(width="large"),
+                "Precio inicial": st.column_config.NumberColumn(min_value=0.0, format="%.2f"),
+                "Precio mejorado": st.column_config.NumberColumn(min_value=0.0, format="%.2f"),
+                "Plazo": st.column_config.NumberColumn(min_value=0, step=1),
+                "Cumple técnico": st.column_config.CheckboxColumn(),
+            })
+        P["of_last"] = of_edit
+        P["prov_actual"] = prov
+
+        if not tc_ok:
+            st.error("Faltan tipos de cambio: no se puede comparar entre monedas.")
+        elif of_edit["Precio inicial"].fillna(0).gt(0).any():
+            det, res = calcular_comparativo(pos, prov, of_edit, tc)
+            P["det"], P["res"] = det, res
+            st.markdown("#### Comparación (total puesto en planta, CLP)")
+            matriz = det.pivot_table(index="Pos", columns="Proveedor", values="Total CLP", aggfunc="first")
+            validas = det.pivot_table(index="Pos", columns="Proveedor", values="Válida", aggfunc="first")
+            matriz = matriz.where(validas.fillna(False).astype(bool))
+
+            def verde_min(fila):
+                if fila.notna().sum() == 0:
+                    return [""] * len(fila)
+                return ["background-color:#D1FAE5;font-weight:600" if v == fila.min() else "" for v in fila]
+
+            st.dataframe(matriz.style.apply(verde_min, axis=1).format("$ {:,.0f}", na_rep="—"),
+                         use_container_width=True)
+            st.caption("Verde = menor total válido (incluye flete prorrateado). '—' = no cotiza o no cumple técnico.")
+        else:
+            st.info("Ingresa precios en la grilla de ofertas para ver la comparación.")
+
+# ---------------------------------------------------------------- TAB 3
+with tab_adj:
+    if P is None or P.get("res") is None:
+        st.info("Completa proveedores y ofertas en la pestaña 2.")
+    else:
+        pos, det, res, prov = P["pos"], P["det"], P["res"], P["prov_actual"]
+        st.subheader(f"Adjudicación SOLPED {sp}")
+        st.caption("El sistema propone el menor total válido. El comprador decide; si se aparta de la sugerencia, "
+                   "el comentario es obligatorio.")
+
+        src = res.merge(pos[["Pos", "Texto", "Cantidad"]], on="Pos")
+        src["Proveedor adjudicado"] = src["Sugerido"]
+        src["Tipo adjudicación"] = src["Tipo sugerido"].replace("", TIPOS_ADJUDICACION[0])
+        src["Comentario"] = ""
+        for pos_n, ov in P["adj_override"].items():
+            m = src["Pos"] == pos_n
+            if m.any():
+                for k, v in ov.items():
+                    src.loc[m, k] = v
+        src = src[["Pos", "Texto", "Cantidad", "Sugerido", "Mejor total CLP", "Ofertas válidas", "Alertas",
+                   "Proveedor adjudicado", "Tipo adjudicación", "Comentario"]]
+        firma = str(pd.util.hash_pandas_object(src.astype(str), index=False).sum())
+        adj_edit = st.data_editor(
+            src, key=f"adj_{sp}_{firma}", hide_index=True, use_container_width=True,
+            disabled=["Pos", "Texto", "Cantidad", "Sugerido", "Mejor total CLP", "Ofertas válidas", "Alertas"],
+            column_config={
+                "Texto": st.column_config.TextColumn(width="medium"),
+                "Mejor total CLP": st.column_config.NumberColumn(format="$ %.0f"),
+                "Proveedor adjudicado": st.column_config.SelectboxColumn(options=[SIN_ADJ] + list(prov["Proveedor"])),
+                "Tipo adjudicación": st.column_config.SelectboxColumn(options=TIPOS_ADJUDICACION),
+                "Comentario": st.column_config.TextColumn(width="large"),
+            })
+        P["adj_override"] = {int(r["Pos"]): {"Proveedor adjudicado": r["Proveedor adjudicado"],
+                                             "Tipo adjudicación": r["Tipo adjudicación"],
+                                             "Comentario": r["Comentario"] or ""}
+                             for _, r in adj_edit.iterrows()}
+
+        # Valores finales según lo que decidió el comprador
+        adj = adj_edit.merge(
+            det.rename(columns={"Proveedor": "Proveedor adjudicado"})[
+                ["Pos", "Proveedor adjudicado", "Total CLP", "Ahorro spot CLP", "Var. vs últ. compra",
+                 "Entrega planta", "Válida", "Precio unit. CLP"]],
+            on=["Pos", "Proveedor adjudicado"], how="left")
+        adj = adj.merge(pos[["Pos", "Últ. precio CLP"]], on="Pos", how="left")
+        adj["Monto adjudicado CLP"] = adj["Total CLP"].fillna(0)
+        adj["Ahorro spot CLP"] = adj["Ahorro spot CLP"].fillna(0)
+        adj["Ahorro vs histórico CLP"] = ((adj["Últ. precio CLP"] - adj["Precio unit. CLP"]) * adj["Cantidad"]).fillna(0)
+        adj["Válida"] = adj["Válida"].astype("boolean").fillna(False).astype(bool)
+
+        problemas = []
+        for _, r in adj.iterrows():
+            if r["Proveedor adjudicado"] == SIN_ADJ:
+                problemas.append(f"Pos {r['Pos']}: sin proveedor adjudicado.")
+            elif not r["Válida"]:
+                problemas.append(f"Pos {r['Pos']}: {r['Proveedor adjudicado']} no tiene oferta válida (precio o técnico).")
+            elif r["Proveedor adjudicado"] != r["Sugerido"] and not str(r["Comentario"]).strip():
+                problemas.append(f"Pos {r['Pos']}: se adjudica distinto a la sugerencia; falta comentario.")
+
+        total = adj["Monto adjudicado CLP"].sum()
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Monto adjudicado", f"$ {total:,.0f}")
+        k2.metric("Ahorro spot (negociación)", f"$ {adj['Ahorro spot CLP'].sum():,.0f}")
+        k3.metric("Ahorro vs última compra", f"$ {adj['Ahorro vs histórico CLP'].sum():,.0f}")
+        k4.metric("Posiciones adjudicadas", f"{int((adj['Proveedor adjudicado'] != SIN_ADJ).sum())} / {len(adj)}")
+
+        if total > UMBRAL_TC_CLP and not tc_hoy:
+            st.error(f"Monto sobre $ {UMBRAL_TC_CLP:,.0f} CLP: actualiza el tipo de cambio del día "
+                     f"(el actual es del {tc['fecha'] or 'sin fecha'}).")
+        for p in problemas:
+            st.warning(p)
+
+        por_prov = adj[adj["Proveedor adjudicado"] != SIN_ADJ].groupby("Proveedor adjudicado")["Monto adjudicado CLP"].sum()
+        if len(por_prov) > 1:
+            st.bar_chart(por_prov, horizontal=True, height=60 + 40 * len(por_prov))
+
+        st.divider()
+        st.markdown("#### Aprobación del comprador")
+        ap = P["aprobacion"]
+        c1, c2 = st.columns([2, 1])
+        nombre = c1.text_input("Nombre de quien aprueba", value=ap.get("nombre", ""))
+        puede = not problemas and (total <= UMBRAL_TC_CLP or tc_hoy)
+        aprobado = c2.checkbox("Revisé y apruebo esta adjudicación", value=ap.get("ok", False) and puede,
+                               disabled=not puede or not nombre.strip())
+        if not puede:
+            st.caption("La aprobación se habilita cuando no quedan observaciones pendientes.")
+        P["aprobacion"] = {"ok": bool(aprobado), "nombre": nombre.strip(),
+                           "fecha": datetime.now().strftime("%d/%m/%Y %H:%M") if aprobado else ""}
+
+        st.markdown("#### Reportes")
+        adj_rep = adj.merge(pos[["Pos"]], on="Pos")
+        sufijo = "" if P["aprobacion"]["ok"] else "_BORRADOR"
+        d1, d2, d3 = st.columns(3)
+        d1.download_button("Excel cuadro comparativo",
+                           data=generar_excel(sp, pos, prov, det, adj_rep, tc, P["aprobacion"]),
+                           file_name=f"Cuadro_comparativo_{sp}_{date.today():%Y%m%d}{sufijo}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           type="primary", use_container_width=True)
+        d2.download_button("PDF resumen", data=generar_pdf(sp, adj_rep, tc, P["aprobacion"]),
+                           file_name=f"Cuadro_comparativo_{sp}_{date.today():%Y%m%d}{sufijo}.pdf",
+                           mime="application/pdf", use_container_width=True)
+        d3.download_button("Guardar borrador (.json)", data=proyecto_a_json(sp, P),
+                           file_name=f"Borrador_{sp}.json", mime="application/json", use_container_width=True)
