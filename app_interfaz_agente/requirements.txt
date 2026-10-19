@@ -1,8 +1,8 @@
-streamlit
-pandas
-anthropic
-requests
+streamlit>=1.35
+pandas>=2.1
+numpy
 openpyxl
-reportlab
-plotly
+requests
 fpdf2
+python-calamine
+holidays
