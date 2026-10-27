@@ -20,6 +20,7 @@ import json
 import re
 import unicodedata
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import numpy as np
 import openpyxl
@@ -422,29 +423,126 @@ def consolidar_lineas(lineas: pd.DataFrame, agrupar: bool = True):
 # =============================================================================
 # TIPOS DE CAMBIO Y FECHAS
 # =============================================================================
+CACHE_TC = Path(__file__).with_name("tipo_cambio_guardado.json")
+NOMBRE_TC = {"USD": "Dólar", "EUR": "Euro", "UF": "UF"}
+MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre",
+         "octubre", "noviembre", "diciembre"]
+UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"}
+
+
+def leer_cache_tc() -> dict:
+    try:
+        return json.loads(CACHE_TC.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def guardar_cache_tc(valores: dict):
+    """Guarda el último valor conocido de cada moneda (sirve si un día falla internet)."""
+    if not valores:
+        return
+    try:
+        datos = leer_cache_tc()
+        for k, (v, f) in valores.items():
+            if v and v > 0:
+                datos[k] = {"valor": float(v), "fecha": str(f)}
+        CACHE_TC.write_text(json.dumps(datos, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def valor_sii(texto: str, dia: date):
+    """Lee el valor de un día en las tablas anuales del SII (UF o dólar observado).
+    Soporta el formato por mes (div id='mes_enero' con pares día/valor) y la tabla anual
+    (columnas Ene…Dic, una fila por día). Si el día no tiene valor (fin de semana), toma el anterior."""
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(texto, "html.parser")
+
+    def buscar(d: date):
+        cont = soup.find(id=f"mes_{MESES[d.month - 1]}")
+        if cont is not None:
+            celdas = cont.find_all(["th", "td"])
+            for a, b in zip(celdas, celdas[1:]):
+                if a.get_text(strip=True) == str(d.day) and b.name == "td":
+                    v = parse_monto(b.get_text(strip=True))[0]
+                    if v > 0:
+                        return v
+        for tabla in soup.find_all("table"):
+            filas = tabla.find_all("tr")
+            if not filas:
+                continue
+            encabezado = [norm(c.get_text()) for c in filas[0].find_all(["th", "td"])]
+            col = next((i for i, h in enumerate(encabezado) if h[:3] == MESES[d.month - 1][:3]), None)
+            if col is None or not any(h.startswith("ene") for h in encabezado):
+                continue
+            for fila in filas[1:]:
+                celdas = fila.find_all(["th", "td"])
+                if celdas and celdas[0].get_text(strip=True) == str(d.day) and len(celdas) > col:
+                    v = parse_monto(celdas[col].get_text(strip=True))[0]
+                    if v > 0:
+                        return v
+        return None
+
+    for atras in range(0, 8):
+        d = dia - timedelta(days=atras)
+        if d.year != dia.year:
+            break
+        v = buscar(d)
+        if v:
+            return v, d
+    return None, None
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def obtener_indicadores():
-    """Dólar, euro y UF observados (Banco Central vía mindicador.cl). Se refresca cada 15 minutos.
-    Si falla, usa open.er-api.com para dólar y euro (la UF queda para ingresar a mano)."""
+    """Dólar, euro y UF del día, moneda por moneda, probando varias fuentes:
+       1) mindicador.cl (Banco Central)   2) SII (UF y dólar observado)
+       3) open.er-api.com (dólar y euro)  4) último valor guardado en este computador."""
+    hoy = date.today()
     hora = datetime.now().strftime("%H:%M")
+    val = {"USD": 0.0, "EUR": 0.0, "UF": 0.0}
+    fuente, fecha = {}, {}
+
+    def poner(k, v, f, fe):
+        if v and v > 0 and not val[k]:
+            val[k], fuente[k], fecha[k] = float(v), f, str(fe)
+
     try:
-        r = requests.get("https://mindicador.cl/api", timeout=6)
-        if r.ok:
-            d = r.json()
-            return {"USD": float(d["dolar"]["valor"]), "EUR": float(d["euro"]["valor"]),
-                    "UF": float(d["uf"]["valor"]), "fecha": str(d["dolar"]["fecha"])[:10],
-                    "fuente": "Banco Central (mindicador.cl)", "ok": True, "hora": hora}
+        d = requests.get("https://mindicador.cl/api", timeout=10, headers=UA).json()
+        for k, clave in [("USD", "dolar"), ("EUR", "euro"), ("UF", "uf")]:
+            poner(k, d[clave]["valor"], "Banco Central", str(d[clave]["fecha"])[:10])
     except Exception:
         pass
-    try:
-        r = requests.get("https://open.er-api.com/v6/latest/USD", timeout=6)
-        if r.ok:
-            tasas = r.json()["rates"]
-            return {"USD": float(tasas["CLP"]), "EUR": float(tasas["CLP"]) / float(tasas["EUR"]), "UF": 0.0,
-                    "fecha": date.today().isoformat(), "fuente": "open.er-api.com", "ok": True, "hora": hora}
-    except Exception:
-        pass
-    return {"USD": 0.0, "EUR": 0.0, "UF": 0.0, "fecha": "", "fuente": "Sin conexión", "ok": False, "hora": hora}
+    if not val["UF"]:
+        try:
+            d = requests.get(f"https://mindicador.cl/api/uf/{hoy:%d-%m-%Y}", timeout=10, headers=UA).json()
+            poner("UF", d["serie"][0]["valor"], "Banco Central", str(d["serie"][0]["fecha"])[:10])
+        except Exception:
+            pass
+    for k, pagina in [("UF", "uf/uf"), ("USD", "dolar/dolar")]:
+        if not val[k]:
+            try:
+                r = requests.get(f"https://www.sii.cl/valores_y_fechas/{pagina}{hoy.year}.htm", timeout=12, headers=UA)
+                r.encoding = r.apparent_encoding or "latin-1"
+                v, dia = valor_sii(r.text, hoy)
+                poner(k, v, "SII", dia)
+            except Exception:
+                pass
+    if not val["USD"] or not val["EUR"]:
+        try:
+            tasas = requests.get("https://open.er-api.com/v6/latest/USD", timeout=10, headers=UA).json()["rates"]
+            poner("USD", tasas["CLP"], "open.er-api.com", hoy)
+            poner("EUR", float(tasas["CLP"]) / float(tasas["EUR"]), "open.er-api.com", hoy)
+        except Exception:
+            pass
+    en_linea = {k: (val[k], fecha[k]) for k in val if val[k]}
+    guardar_cache_tc(en_linea)
+    cache = leer_cache_tc()
+    for k in val:
+        if not val[k] and cache.get(k):
+            poner(k, cache[k]["valor"], f"último valor guardado ({cache[k]['fecha']})", cache[k]["fecha"])
+    return {**val, "fuente_por_moneda": fuente, "fecha_por_moneda": fecha,
+            "fecha": fecha.get("USD", hoy.isoformat()), "hora": hora, "ok": all(val.values())}
 
 
 def a_clp(monto, moneda, tc) -> float:
@@ -797,21 +895,36 @@ ss.setdefault("sel_sig", None)
 ss.setdefault("sel_ver", 0)
 ss.setdefault("lin_ver", 0)
 ss.setdefault("archivos", {})
-ss.setdefault("tc_manual", False)
-ss.setdefault("tc_ver", 0)
 
 PROV_DEFECTO = {"Moneda": "CLP", "Transporte": "T. Gil", "Flete total": 0.0, "Moneda flete": "CLP", "Plazo": 10,
                 "Tipo plazo": "Días hábiles", "Tipo compra": "Nacional",
                 "Lugar entrega": list(LUGARES_ENTREGA)[0], "Bodega tránsito": False}
 
 # ---------------------------------------------------------------- tipo de cambio en línea
+ss.setdefault("tc_override", {})     # valores escritos a mano, por moneda
 ind = obtener_indicadores()
-if not ss.tc_manual or "tc" not in ss:
-    previo_uf = ss.tc["UF"] if "tc" in ss else 0.0
-    ss.tc = {"USD": ind["USD"], "EUR": ind["EUR"], "UF": ind["UF"] or previo_uf,
-             "fecha": ind["fecha"], "fuente": ind["fuente"], "hora": ind["hora"]}
+ss.tc = {k: float(ss.tc_override.get(k, ind[k]) or 0.0) for k in ["USD", "EUR", "UF"]}
+ss.tc.update({"fecha": ind["fecha"], "hora": ind["hora"],
+              "fuente_por_moneda": {k: ("ingresado a mano" if k in ss.tc_override else ind["fuente_por_moneda"].get(k, ""))
+                                    for k in ["USD", "EUR", "UF"]}})
+fuentes_usadas = list(dict.fromkeys(v for v in ss.tc["fuente_por_moneda"].values() if v))
+ss.tc["fuente"] = " / ".join(fuentes_usadas) or "Sin conexión"
 tc = ss.tc
 TC_OK = min(tc["USD"], tc["EUR"], tc["UF"]) > 0
+
+
+def faltan_tc(monedas) -> list:
+    """Monedas que se necesitan para convertir y que no tienen valor."""
+    return [NOMBRE_TC[m] for m in ["USD", "EUR", "UF"] if m in monedas and tc[m] <= 0]
+
+
+def monedas_en_uso(C) -> set:
+    if C is None:
+        return set()
+    usadas = set()
+    for p in C["prov"].values():
+        usadas |= {p.get("Moneda", "CLP"), p.get("Moneda flete", "CLP")}
+    return usadas - {"CLP"}
 
 
 def firma(*partes) -> str:
@@ -1003,7 +1116,7 @@ def preparar_items(C):
 def calcular(C):
     items = preparar_items(C)
     of = C["of_last"]
-    if not C["prov"] or of is None or not of["Precio inicial"].fillna(0).gt(0).any() or not TC_OK:
+    if not C["prov"] or of is None or not of["Precio inicial"].fillna(0).gt(0).any() or faltan_tc(monedas_en_uso(C)):
         return None, None
     return calcular_comparativo(items, prov_df(C), of, tc)
 
@@ -1048,8 +1161,9 @@ def tasa_html(clase, nombre, valor):
     return f"<div class='tasa {clase}'><span>{nombre}</span><b>{dinero(valor) if valor else '—'}</b></div>"
 
 
-origen_tc = (f"{tc['fuente']} · consultado a las {tc.get('hora', '')}" if not ss.tc_manual
-             else "Ingresado a mano")
+detalle_fuente = ", ".join(f"{NOMBRE_TC[k]}: {v}" for k, v in tc["fuente_por_moneda"].items() if v) \
+    if len(fuentes_usadas) > 1 else (fuentes_usadas[0] if fuentes_usadas else "sin conexión")
+origen_tc = f"{detalle_fuente} · consultado a las {tc['hora']}"
 st.markdown(
     "<div class='banner'><div><div class='marca'>Enaex · Gerencia de Abastecimiento</div>"
     "<div class='titulo'>Cuadro comparativo de ofertas</div></div>"
@@ -1060,26 +1174,45 @@ st.markdown(
 
 def refrescar_tc():
     obtener_indicadores.clear()
-    ss.tc_manual = False
-    ss.tc_ver += 1
-    ss.pop("tc", None)
+    ss.tc_override = {}
+
+
+def fijar_tc(moneda, valor):
+    if valor and valor > 0:
+        ss.tc_override[moneda] = float(valor)
+        guardar_cache_tc({moneda: (valor, date.today().isoformat())})
 
 
 _, a1, a2 = st.columns([5, 1.3, 1.1])
 a2.button("🔄 Actualizar", on_click=refrescar_tc, use_container_width=True,
-          help="Vuelve a consultar el valor del día")
+          help="Vuelve a consultar los valores del día y descarta lo escrito a mano")
 with a1.popover("✏️ Ajustar", use_container_width=True):
-    st.caption("Si necesitas usar otro valor (por ejemplo, el de la fecha de la oferta).")
-    nuevo = {k: st.number_input(n, value=float(tc[k]), min_value=0.0, step=1.0, format="%.2f",
-                                key=f"tc_{k}_{ss.tc_ver}_{firma(tc['USD'], tc['EUR'], tc['UF'])}")
-             for k, n in [("USD", "Dólar"), ("EUR", "Euro"), ("UF", "UF")]}
-    if any(abs(nuevo[k] - tc[k]) > 1e-9 for k in nuevo):
-        ss.tc = {**nuevo, "fecha": date.today().isoformat(), "fuente": "Ingreso manual", "hora": ""}
-        ss.tc_manual = True
-        st.rerun()
-if not TC_OK:
-    caja("ojo", "No pudimos traer " + ("la UF" if tc["USD"] and tc["EUR"] else "el tipo de cambio") +
-         " desde internet. Usa <b>✏️ Ajustar</b> para escribir el valor de hoy.")
+    st.caption("Escribe el valor si necesitas otro (por ejemplo, el de la fecha de la oferta).")
+    for k in ["USD", "EUR", "UF"]:
+        v = st.number_input(NOMBRE_TC[k], value=float(tc[k]), min_value=0.0, step=1.0, format="%.2f",
+                            key=f"tc_{k}_{firma(tc[k])}")
+        if abs(v - tc[k]) > 1e-9:
+            fijar_tc(k, v)
+            st.rerun()
+
+sin_valor = [k for k in ["USD", "EUR", "UF"] if tc[k] <= 0]
+if sin_valor:
+    nombres_sv = [NOMBRE_TC[k] for k in sin_valor]
+    nombres_sv = nombres_sv[0] if len(nombres_sv) == 1 else ", ".join(nombres_sv[:-1]) + " y " + nombres_sv[-1]
+    with st.container(border=True):
+        st.markdown(f"⚠️ No pudimos traer **{nombres_sv}** desde internet (tu red puede estar bloqueando las páginas "
+                    "del Banco Central y del SII). Escribe el valor de hoy y quedará guardado para la próxima vez. "
+                    "Solo es obligatorio si alguna oferta o transporte está en esa moneda.")
+        cols_sv = st.columns(len(sin_valor) + 1)
+        for col, k in zip(cols_sv, sin_valor):
+            v = col.number_input(f"{NOMBRE_TC[k]} de hoy ($)", min_value=0.0, step=1.0, format="%.2f",
+                                 value=None, placeholder="Ej: 39.612,40" if k == "UF" else "Ej: 945,30",
+                                 key=f"tc_falta_{k}")
+            if v:
+                fijar_tc(k, v)
+                st.rerun()
+        cols_sv[-1].markdown("<div class='sub' style='padding-top:1.9rem'>Valor oficial en sii.cl → "
+                             "Valores y fechas</div>", unsafe_allow_html=True)
 
 barra = "".join(
     f"<div class='paso {'actual' if i == ss.paso else 'hecho' if i < ss.paso else ''}'>"
@@ -1502,7 +1635,10 @@ elif ss.paso == 3:
                 caja("ok" if estado == "ok" else "ojo", ("✔ " if estado == "ok" else "⚠ ") + html.escape(msg))
 
     hay_precios = bool(C["prov"]) and C.get("of_last") is not None and C["of_last"]["Precio inicial"].fillna(0).gt(0).any()
-    navegacion(hay_precios and TC_OK, "Ingresa al menos un precio." if TC_OK else "Falta el tipo de cambio (arriba).")
+    faltan = faltan_tc(monedas_en_uso(C))
+    navegacion(hay_precios and not faltan,
+               f"Falta el valor de {' y '.join(faltan)} (cuadro de arriba): hay ofertas en esa moneda." if faltan
+               else "Ingresa al menos un precio.")
 
 # =============================================================================
 # PASO 4 · COMPARA Y ELIGE
@@ -1511,7 +1647,8 @@ elif ss.paso == 4:
     C = ss.cuadro
     det, res = calcular(C)
     if det is None:
-        caja("ojo", "Faltan precios (paso 3) o el tipo de cambio (arriba, ✏️ Ajustar).")
+        faltan = faltan_tc(monedas_en_uso(C))
+        caja("ojo", f"Falta el valor de {' y '.join(faltan)} (arriba)." if faltan else "Faltan precios (paso 3).")
         navegacion(False)
         st.stop()
     items = C["items"]
@@ -1620,8 +1757,9 @@ elif ss.paso == 5:
               (dinero(adj["Ahorro spot CLP"].sum()), "ahorro por negociación"),
               (dinero(adj["Ahorro vs histórico CLP"].sum()), "ahorro vs última compra")])
     if total > UMBRAL_TC_CLP:
-        caja("ok", f"Compra sobre $1.000.000: convertida con dólar {dinero(tc['USD'])}, euro {dinero(tc['EUR'])} "
-                   f"y UF {dinero(tc['UF'])} ({html.escape(tc['fuente'])}, {tc['fecha']}).")
+        usados = ", ".join(f"{NOMBRE_TC[k].lower()} {dinero(tc[k])}" for k in ["USD", "EUR", "UF"] if tc[k] > 0)
+        caja("ok", f"Compra sobre $1.000.000: convertida con el tipo de cambio del día ({usados}; "
+                   f"fuente: {html.escape(tc['fuente'])}).")
 
     st.markdown("##### Resumen de la compra")
     st.dataframe(adj[["Ítem", "Texto", "Cantidad", "UM", "Proveedor adjudicado", "Monto adjudicado CLP",
