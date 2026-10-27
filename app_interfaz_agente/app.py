@@ -1,10 +1,10 @@
 # =============================================================================
-# CUADRO COMPARATIVO DE OFERTAS - ABASTECIMIENTO ENAEX  (v4 · asistente guiado)
+# CUADRO COMPARATIVO DE OFERTAS - ABASTECIMIENTO ENAEX  (v5 · asistente guiado)
 # -----------------------------------------------------------------------------
 # Un asistente de 5 pasos, un paso a la vez:
 #   1. Sube tus archivos        (planilla de SOLPED + histórico opcional)
-#   2. Elige qué cotizar        (por material o por SOLPED; se agrupan solas)
-#   3. Pide la cotización       (descargas la planilla, subes las respuestas)
+#   2. Elige qué cotizar        (por material o SOLPED; tú decides qué posiciones entran)
+#   3. Ingresa las ofertas      (precio, moneda, transporte y plazo por proveedor)
 #   4. Compara y elige          (tarjeta por ítem con el más conveniente)
 #   5. Aprueba y descarga       (Excel, PDF y guardar para seguir después)
 #
@@ -116,7 +116,7 @@ REQ_OBLIGATORIAS = ["solped", "texto", "cantidad"]
 HIST_OBLIGATORIAS = ["material", "fecha", "precio"]
 COLS_HIST = ["Últ. compra", "Últ. proveedor", "Últ. precio", "Últ. moneda", "Últ. OC", "N° compras"]
 
-PASOS = [("📂", "Sube tus archivos"), ("🔎", "Elige qué cotizar"), ("✉️", "Pide la cotización"),
+PASOS = [("📂", "Sube tus archivos"), ("🔎", "Elige qué cotizar"), ("📝", "Ingresa las ofertas"),
          ("⚖️", "Compara y elige"), ("✅", "Aprueba y descarga")]
 
 # =============================================================================
@@ -126,43 +126,51 @@ st.set_page_config(page_title="Cuadro Comparativo - Enaex", page_icon="⚖️", 
                    initial_sidebar_state="collapsed")
 st.markdown("""
 <style>
+  :root { --rojo: #9E2B2F; --rojo-osc: #7F1D1D; }
   [data-testid="stSidebar"], [data-testid="collapsedControl"] { display: none; }
-  [data-testid="stMainBlockContainer"] { max-width: 1180px; padding-top: 1.5rem; padding-bottom: 5rem; }
-  h1, h2, h3 { color: #1E3A8A; }
-  .marca { font-size: .85rem; color: #6B7280; letter-spacing: .04em; text-transform: uppercase; }
-  .pasos { display: flex; gap: .5rem; margin: .4rem 0 1.4rem 0; }
-  .paso { flex: 1; text-align: center; padding: .65rem .3rem; border-radius: 12px; font-size: .9rem;
-          background: #F3F4F6; color: #6B7280; border: 2px solid transparent; }
-  .paso b { display: block; font-size: 1.25rem; margin-bottom: .15rem; }
-  .paso.hecho { background: #ECFDF5; color: #065F46; }
-  .paso.actual { background: #EEF2FF; color: #1E3A8A; border-color: #1E3A8A; font-weight: 600; }
-  .ayuda { background: #F8FAFC; border-left: 4px solid #1E3A8A; padding: .8rem 1rem; border-radius: 8px;
-           color: #374151; margin-bottom: 1rem; }
-  .ok { background: #ECFDF5; border-left: 4px solid #059669; padding: .7rem 1rem; border-radius: 8px;
-        color: #065F46; margin: .4rem 0; }
-  .ojo { background: #FFFBEB; border-left: 4px solid #D97706; padding: .7rem 1rem; border-radius: 8px;
-         color: #92400E; margin: .4rem 0; }
-  .mini { display: flex; gap: .8rem; margin: .5rem 0 1rem 0; }
-  .mini div { flex: 1; background: #F8FAFC; border-radius: 12px; padding: .9rem; text-align: center; color: #374151; }
-  .mini div b { display: block; font-size: 1.6rem; color: #1E3A8A; }
-  .fila-oferta { display: grid; grid-template-columns: 210px 1fr 150px 120px; gap: .6rem; align-items: center;
+  [data-testid="stMainBlockContainer"] { max-width: 1200px; padding-top: 3.2rem; padding-bottom: 5rem; }
+  .banner { background: var(--rojo); border-radius: 14px; padding: 1.1rem 1.4rem; color: #FFFFFF;
+            display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .banner .marca { font-size: .78rem; letter-spacing: .12em; text-transform: uppercase; opacity: .85; }
+  .banner .titulo { font-size: 1.65rem; font-weight: 700; line-height: 1.2; }
+  .tasas { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .tasa { background: rgba(0,0,0,.22); border-radius: 10px; padding: .45rem .8rem; text-align: center; min-width: 110px; }
+  .tasa span { display: block; font-size: .72rem; opacity: .85; text-transform: uppercase; letter-spacing: .06em; }
+  .tasa b { font-size: 1.15rem; }
+  .tasa.usd b { color: #7DD3FC; } .tasa.eur b { color: #FDE047; } .tasa.uf b { color: #FDBA74; }
+  .fuente { font-size: .75rem; opacity: .7; text-align: right; margin-top: .25rem; }
+  .pasos { display: flex; gap: .5rem; margin: .9rem 0 1.2rem 0; }
+  .paso { flex: 1; text-align: center; padding: .6rem .3rem; border-radius: 12px; font-size: .88rem;
+          background: rgba(128,128,128,.12); opacity: .75; border: 2px solid transparent; }
+  .paso b { display: block; font-size: 1.2rem; margin-bottom: .1rem; }
+  .paso.hecho { background: rgba(5,150,105,.16); opacity: 1; }
+  .paso.actual { background: rgba(158,43,47,.14); border-color: var(--rojo); opacity: 1; font-weight: 700; }
+  .ayuda { background: rgba(30,58,138,.08); border-left: 4px solid var(--rojo); padding: .8rem 1rem;
+           border-radius: 8px; margin-bottom: 1rem; }
+  .ok { background: rgba(5,150,105,.13); border-left: 4px solid #059669; padding: .7rem 1rem; border-radius: 8px; margin: .4rem 0; }
+  .ojo { background: rgba(217,119,6,.15); border-left: 4px solid #D97706; padding: .7rem 1rem; border-radius: 8px; margin: .4rem 0; }
+  .mini { display: flex; gap: .7rem; margin: .5rem 0 1rem 0; flex-wrap: wrap; }
+  .mini div { flex: 1; min-width: 150px; background: var(--rojo); border-radius: 12px; padding: .85rem .6rem;
+              text-align: center; color: rgba(255,255,255,.92); font-size: .9rem;
+              box-shadow: inset 0 -3px 0 rgba(0,0,0,.18); }
+  .mini div b { display: block; font-size: 1.55rem; line-height: 1.3; }
+  .mini .c1 { color: #7DD3FC; } .mini .c2 { color: #FDE047; } .mini .c3 { color: #FDBA74; }
+  .mini .c4 { color: #A5F3FC; } .mini .c5 { color: #86EFAC; } .mini .c6 { color: #F9A8D4; }
+  .fila-oferta { display: grid; grid-template-columns: 220px 1fr 150px 120px; gap: .6rem; align-items: center;
                  padding: .35rem 0; font-size: .92rem; }
-  .barra { height: 14px; border-radius: 7px; background: #CBD5E1; }
+  .barra { height: 14px; border-radius: 7px; background: #94A3B8; }
   .barra.gana { background: #059669; }
   .etiqueta { font-size: .75rem; padding: .1rem .5rem; border-radius: 999px; background: #D1FAE5; color: #065F46;
               margin-left: .4rem; white-space: nowrap; }
-  .etiqueta.gris { background: #F3F4F6; color: #6B7280; }
+  .etiqueta.gris { background: #E5E7EB; color: #374151; }
   .etiqueta.roja { background: #FEE2E2; color: #991B1B; }
-  .sub { color: #6B7280; font-size: .88rem; }
+  .sub { opacity: .72; font-size: .88rem; }
   div.stButton > button, div.stDownloadButton > button { border-radius: 10px; padding: .55rem 1.1rem; }
   button[kind="primary"], [data-testid="stBaseButton-primary"] {
-      background: #1E3A8A !important; border-color: #1E3A8A !important; color: #FFFFFF !important; font-weight: 600; }
-  button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover { background: #2548A8 !important; }
+      background: var(--rojo) !important; border-color: var(--rojo) !important; color: #FFFFFF !important; font-weight: 600; }
+  button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover { background: var(--rojo-osc) !important; }
   button[kind="primary"]:disabled, [data-testid="stBaseButton-primary"]:disabled {
-      background: #E5E7EB !important; border-color: #E5E7EB !important; color: #9CA3AF !important; }
-  [data-testid="stBaseButton-segmented_controlActive"], [data-testid="stBaseButton-pillsActive"] {
-      background: #EEF2FF !important; border-color: #1E3A8A !important; color: #1E3A8A !important; }
-  [data-testid="stCheckbox"] input:checked + div, [role="radio"][aria-checked="true"] { accent-color: #1E3A8A; }
+      background: rgba(128,128,128,.25) !important; border-color: transparent !important; color: rgba(128,128,128,.9) !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -311,6 +319,8 @@ def normalizar_requerimientos(df: pd.DataFrame, mapa: dict) -> pd.DataFrame:
         "UM": g("um").fillna("C/U").astype(str).str.strip(),
         "Centro": g("centro").fillna("").astype(str),
         "Precio ref.": g("precio").apply(lambda v: parse_monto(v)[0]),
+        "Moneda ref.": [parse_monto(v)[1] or (str(mo).upper().strip() if str(mo).upper().strip() in MONEDAS else "CLP")
+                        for v, mo in zip(g("precio"), g("moneda"))],
         "F. solicitud": pd.to_datetime(g("fecha_sol"), errors="coerce", dayfirst=True),
         "Días": pd.to_numeric(g("dias"), errors="coerce"),
         "Urgencia": g("urgencia").fillna("").astype(str),
@@ -391,6 +401,11 @@ def consolidar_lineas(lineas: pd.DataFrame, agrupar: bool = True):
     else:
         l["Ítem"] = np.arange(1, len(l) + 1)
     l["Ref"] = l["SOLPED"].astype(str) + "/" + l["Pos"].astype(str)
+    for c, v in [("Precio ref.", 0.0), ("Moneda ref.", "CLP")]:
+        if c not in l:
+            l[c] = v
+    l["Precio ref."] = pd.to_numeric(l["Precio ref."], errors="coerce").fillna(0.0)
+    l["Moneda ref."] = l["Moneda ref."].fillna("CLP").astype(str)
     items = (l.groupby("Ítem", sort=True)
              .agg(Material=("Material", "first"),
                   Texto=("Texto", lambda s: max(s.astype(str), key=len)),
@@ -398,25 +413,38 @@ def consolidar_lineas(lineas: pd.DataFrame, agrupar: bool = True):
                   UM=("UM", "first"),
                   Centro=("Centro", unir_unicos),
                   SOLPEDs=("Ref", lambda s: ", ".join(s)),
-                  **{"N° SOLPED": ("SOLPED", "nunique")})
+                  **{"N° SOLPED": ("SOLPED", "nunique"),
+                     "Precio SOLPED": ("Precio ref.", lambda s: next((float(x) for x in s if x and x > 0), 0.0)),
+                     "Moneda SOLPED": ("Moneda ref.", "first")})
              .reset_index())
     return l, items
 
 # =============================================================================
 # TIPOS DE CAMBIO Y FECHAS
 # =============================================================================
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def obtener_indicadores():
+    """Dólar, euro y UF observados (Banco Central vía mindicador.cl). Se refresca cada 15 minutos.
+    Si falla, usa open.er-api.com para dólar y euro (la UF queda para ingresar a mano)."""
+    hora = datetime.now().strftime("%H:%M")
     try:
         r = requests.get("https://mindicador.cl/api", timeout=6)
         if r.ok:
             d = r.json()
             return {"USD": float(d["dolar"]["valor"]), "EUR": float(d["euro"]["valor"]),
                     "UF": float(d["uf"]["valor"]), "fecha": str(d["dolar"]["fecha"])[:10],
-                    "fuente": "mindicador.cl (Banco Central)", "ok": True}
+                    "fuente": "Banco Central (mindicador.cl)", "ok": True, "hora": hora}
     except Exception:
         pass
-    return {"USD": 0.0, "EUR": 0.0, "UF": 0.0, "fecha": "", "fuente": "Sin conexión", "ok": False}
+    try:
+        r = requests.get("https://open.er-api.com/v6/latest/USD", timeout=6)
+        if r.ok:
+            tasas = r.json()["rates"]
+            return {"USD": float(tasas["CLP"]), "EUR": float(tasas["CLP"]) / float(tasas["EUR"]), "UF": 0.0,
+                    "fecha": date.today().isoformat(), "fuente": "open.er-api.com", "ok": True, "hora": hora}
+    except Exception:
+        pass
+    return {"USD": 0.0, "EUR": 0.0, "UF": 0.0, "fecha": "", "fuente": "Sin conexión", "ok": False, "hora": hora}
 
 
 def a_clp(monto, moneda, tc) -> float:
@@ -762,21 +790,28 @@ ss.setdefault("paso", 1)
 ss.setdefault("req", None)          # posiciones de SOLPED normalizadas
 ss.setdefault("hist", None)         # (última compra por código, por descripción)
 ss.setdefault("cuadro", None)       # el cuadro comparativo en curso
-ss.setdefault("mat_sel", set())     # materiales elegidos  (clave|UM)
-ss.setdefault("sp_sel", set())      # SOLPED elegidas
+ss.setdefault("mat_sel", set())     # materiales marcados  (clave|UM)
+ss.setdefault("sp_sel", set())      # SOLPED marcadas
+ss.setdefault("excluidas", set())   # posiciones que el comprador dejó fuera (SOLPED/Pos)
 ss.setdefault("sel_sig", None)
 ss.setdefault("sel_ver", 0)
-ss.setdefault("archivos", {})       # firma de archivos ya leídos
+ss.setdefault("lin_ver", 0)
+ss.setdefault("archivos", {})
+ss.setdefault("tc_manual", False)
+ss.setdefault("tc_ver", 0)
 
-PROV_DEFECTO = {"Moneda": "CLP", "Flete total": 0.0, "Plazo": 10, "Tipo compra": "Nacional",
-                "Lugar entrega": list(LUGARES_ENTREGA)[0], "Transporte": "T. Gil", "Tipo plazo": "Días hábiles",
-                "Bodega tránsito": False, "Moneda flete": "CLP"}
-COLS_PROV_VISIBLES = ["Proveedor", "Moneda", "Flete total", "Plazo", "Tipo compra", "Lugar entrega"]
+PROV_DEFECTO = {"Moneda": "CLP", "Transporte": "T. Gil", "Flete total": 0.0, "Moneda flete": "CLP", "Plazo": 10,
+                "Tipo plazo": "Días hábiles", "Tipo compra": "Nacional",
+                "Lugar entrega": list(LUGARES_ENTREGA)[0], "Bodega tránsito": False}
 
-if "tc" not in ss:
-    ind = obtener_indicadores()
-    ss.tc = {"USD": ind["USD"], "EUR": ind["EUR"], "UF": ind["UF"], "fecha": ind["fecha"], "fuente": ind["fuente"]}
+# ---------------------------------------------------------------- tipo de cambio en línea
+ind = obtener_indicadores()
+if not ss.tc_manual or "tc" not in ss:
+    previo_uf = ss.tc["UF"] if "tc" in ss else 0.0
+    ss.tc = {"USD": ind["USD"], "EUR": ind["EUR"], "UF": ind["UF"] or previo_uf,
+             "fecha": ind["fecha"], "fuente": ind["fuente"], "hora": ind["hora"]}
 tc = ss.tc
+TC_OK = min(tc["USD"], tc["EUR"], tc["UF"]) > 0
 
 
 def firma(*partes) -> str:
@@ -788,7 +823,8 @@ def dinero(v, moneda="CLP") -> str:
         return "—"
     if moneda == "CLP":
         return "$ " + f"{v:,.0f}".replace(",", ".")
-    return f"{moneda} " + f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    simbolo = {"USD": "US$", "EUR": "€", "UF": "UF"}.get(moneda, moneda)
+    return f"{simbolo} " + f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def nombre_archivo(txt) -> str:
@@ -799,38 +835,67 @@ def caja(clase, texto):
     st.markdown(f"<div class='{clase}'>{texto}</div>", unsafe_allow_html=True)
 
 
+def tarjetas(datos):
+    """Tarjetas de estadísticas: fondo rojo mate, cada número con su color."""
+    html_t = "".join(f"<div><b class='c{(i % 6) + 1}'>{v}</b>{html.escape(str(e))}</div>"
+                     for i, (v, e) in enumerate(datos))
+    st.markdown(f"<div class='mini'>{html_t}</div>", unsafe_allow_html=True)
+
+
 def ir_a(paso: int):
-    """Cambia de paso y 'congela' las grillas editables para no perder lo escrito."""
+    """Cambia de paso y 'congela' las grillas para no perder lo escrito."""
     C = ss.cuadro
-    if C is not None:
-        if C.get("of_last") is not None:
-            C["of_src"], C["of_v"] = C["of_last"].copy(), C["of_v"] + 1
-        if C.get("prov_actual") is not None:
-            C["prov_src"], C["prov_v"] = C["prov_actual"].copy(), C["prov_v"] + 1
+    if C is not None and C.get("of_last") is not None:
+        C["of_src"], C["of_v"] = C["of_last"].copy(), C["of_v"] + 1
     ss.sel_sig = None
+    ss.lin_ver += 1
     ss.paso = paso
 
 
-def lineas_elegidas() -> pd.DataFrame:
+def candidatas() -> pd.DataFrame:
+    """Posiciones de los materiales y SOLPED marcados (antes de quitar las excluidas)."""
     req = ss.req
     if req is None or (not ss.mat_sel and not ss.sp_sel):
         return pd.DataFrame()
     clave = req["Clave"] + "|" + req["UM"]
-    return req[clave.isin(ss.mat_sel) | req["SOLPED"].isin(ss.sp_sel)].sort_values(["Clave", "SOLPED", "Pos"])
+    out = req[clave.isin(ss.mat_sel) | req["SOLPED"].isin(ss.sp_sel)].copy()
+    out["id"] = out["SOLPED"].astype(str) + "/" + out["Pos"].astype(str)
+    return out.sort_values(["SOLPED", "Pos"]).reset_index(drop=True)
+
+
+def lineas_elegidas() -> pd.DataFrame:
+    c = candidatas()
+    return c if c.empty else c[~c["id"].isin(ss.excluidas)].reset_index(drop=True)
+
+
+def valor_referencial(lineas: pd.DataFrame) -> float:
+    if lineas.empty or "Precio ref." not in lineas:
+        return 0.0
+    monedas = lineas["Moneda ref."] if "Moneda ref." in lineas else ["CLP"] * len(lineas)
+    return float(sum(a_clp(p * q, m, tc) for p, q, m in zip(lineas["Precio ref."].fillna(0), lineas["Cantidad"], monedas)))
 
 
 def crear_cuadro(lineas: pd.DataFrame, agrupar: bool = True):
     lin, items = consolidar_lineas(lineas, agrupar)
     items = adjuntar_historico(items)
-    sugeridos = [p for p in items["Últ. proveedor"].dropna().unique() if str(p).strip()][:3]
-    prov = pd.DataFrame([{"Proveedor": p, **PROV_DEFECTO} for p in sugeridos],
-                        columns=["Proveedor", *PROV_DEFECTO])
+    vistos, sugeridos = set(), []
+    for p in items["Últ. proveedor"].dropna():
+        if str(p).strip() and norm(p).replace(" s a", "") not in vistos:
+            vistos.add(norm(p).replace(" s a", ""))
+            sugeridos.append(str(p).strip())
+    sugeridos = sugeridos[:6]
     ref = (f"MAT-{items.iloc[0]['Material'] or 'SINCOD'}" if len(items) == 1 else
            (lin["SOLPED"].iloc[0] if lin["SOLPED"].nunique() == 1 else "AGRUPADO")) + f"-{date.today():%Y%m%d}"
-    ss.cuadro = {"ref": ref, "firma": firma(sorted(lin["SOLPED"] + "/" + lin["Pos"].astype(str)), agrupar),
-                 "lineas": lin, "items": items, "prov_src": prov, "prov_v": 0, "prov_actual": prov,
-                 "of_src": None, "of_v": 0, "of_last": None, "decision": {}, "importados": {},
+    ss.cuadro = {"ref": ref, "firma": firma(sorted(lin["SOLPED"] + "/" + lin["Pos"].astype(str))),
+                 "lineas": lin, "items": items, "prov": {}, "sugeridos": sugeridos,
+                 "of_src": None, "of_v": 0, "of_last": None, "prov_names": None,
+                 "decision": {}, "importados": {},
                  "aprobacion": {"ok": False, "nombre": "", "fecha": "", "firma": ""}}
+
+
+def prov_df(C) -> pd.DataFrame:
+    return pd.DataFrame([{"Proveedor": n, **{**PROV_DEFECTO, **v}} for n, v in C["prov"].items()],
+                        columns=["Proveedor", *PROV_DEFECTO])
 
 
 def armar_ofertas(items, nombres, previas):
@@ -848,37 +913,30 @@ def armar_ofertas(items, nombres, previas):
     return base
 
 
-def limpiar_proveedores(df: pd.DataFrame) -> pd.DataFrame:
-    prov = df.dropna(subset=["Proveedor"]).copy()
-    prov["Proveedor"] = prov["Proveedor"].astype(str).str.strip()
-    prov = prov[prov["Proveedor"] != ""].drop_duplicates("Proveedor")
-    for c, v in PROV_DEFECTO.items():
-        prov[c] = prov[c].fillna(v) if c in prov else v
-    prov["Moneda flete"] = prov["Moneda"]          # el flete se informa en la moneda de la oferta
-    return prov.reset_index(drop=True)
+def sincronizar_ofertas(C):
+    """Reconstruye la grilla de ofertas cuando cambia la lista de proveedores."""
+    nombres = tuple(C["prov"])
+    if C.get("prov_names") != nombres or C["of_src"] is None:
+        of = armar_ofertas(C["items"], nombres, C["of_last"])
+        C["of_src"], C["of_last"], C["of_v"], C["prov_names"] = of, of.copy(), C["of_v"] + 1, nombres
 
 
 def incorporar_respuesta(C, datos, resp, nombre_arch):
-    """Agrega o actualiza el proveedor y carga sus precios. Una segunda respuesta
-    con precio distinto queda como 'Precio mejorado' (ronda de negociación)."""
+    """Carga la planilla devuelta por un proveedor. Un segundo precio distinto queda como 'Precio mejorado'."""
     nombre = str(datos.get("Razón social") or "").strip() or nombre_arch.rsplit(".", 1)[0]
-    prov = C["prov_actual"].copy()
+    d = {**PROV_DEFECTO, **C["prov"].get(nombre, {})}
     moneda = str(datos.get("Moneda de la oferta") or "").upper().strip()
     transporte = str(datos.get("Incoterm / forma de despacho") or "").strip()
-    nuevos = {"Moneda": moneda if moneda in MONEDAS else None,
-              "Transporte": transporte if transporte in TRANSPORTES else None,
-              "Flete total": a_num(datos.get("Costo total de flete"), 0.0),
-              "Plazo": int(a_num(datos.get("Plazo de entrega general (días)"), 0)) or None}
-    if nombre in set(prov["Proveedor"]):
-        for k, v in nuevos.items():
-            if v is not None:
-                prov.loc[prov["Proveedor"] == nombre, k] = v
-    else:
-        prov = pd.concat([prov, pd.DataFrame([{"Proveedor": nombre, **PROV_DEFECTO,
-                                               **{k: v for k, v in nuevos.items() if v is not None}}])],
-                         ignore_index=True)
-    prov = limpiar_proveedores(prov)
-    of = armar_ofertas(C["items"], tuple(prov["Proveedor"]), C["of_last"])
+    if moneda in MONEDAS:
+        d["Moneda"] = d["Moneda flete"] = moneda
+    if transporte in TRANSPORTES:
+        d["Transporte"] = transporte
+    if a_num(datos.get("Costo total de flete"), 0.0):
+        d["Flete total"] = a_num(datos.get("Costo total de flete"), 0.0)
+    if a_num(datos.get("Plazo de entrega general (días)"), 0):
+        d["Plazo"] = int(a_num(datos.get("Plazo de entrega general (días)"), 0))
+    C["prov"][nombre] = d
+    of = armar_ofertas(C["items"], tuple(C["prov"]), C["of_last"])
     n = 0
     for _, r in resp.iterrows():
         item = int(a_num(r.get("Ítem"), 0))
@@ -891,9 +949,8 @@ def incorporar_respuesta(C, datos, resp, nombre_arch):
             of.loc[m, "Precio mejorado"] = precio
         else:
             of.loc[m, "Precio inicial"] = precio
-        plazo = a_num(r.get("Plazo entrega (días)"), 0)
-        if plazo:
-            of.loc[m, "Plazo"] = plazo
+        if a_num(r.get("Plazo entrega (días)"), 0):
+            of.loc[m, "Plazo"] = a_num(r.get("Plazo entrega (días)"), 0)
         cumple = str(r.get("Cumple especificación (Sí/No)") or "").strip().lower()
         of.loc[m, "Cumple técnico"] = not cumple.startswith("n")
         obs = " · ".join(str(x) for x in [r.get("Marca / modelo ofrecido"), r.get("Observaciones")]
@@ -901,17 +958,15 @@ def incorporar_respuesta(C, datos, resp, nombre_arch):
         if obs:
             of.loc[m, "Observación"] = obs
         n += 1
-    C["prov_src"], C["prov_actual"], C["prov_v"] = prov, prov, C["prov_v"] + 1
-    C["of_src"], C["of_last"], C["of_v"] = of, of, C["of_v"] + 1
-    C["prov_names"] = tuple(prov["Proveedor"])
+    C["of_src"], C["of_last"], C["of_v"], C["prov_names"] = of, of.copy(), C["of_v"] + 1, tuple(C["prov"])
     return nombre, n
 
 
 def cuadro_a_json(C) -> str:
     dj = lambda df: None if df is None else df.to_json(orient="records", date_format="iso", force_ascii=False)
     return json.dumps({"ref": C["ref"], "firma": C["firma"], "lineas": dj(C["lineas"]), "items": dj(C["items"]),
-                       "prov": dj(C["prov_actual"]), "ofertas": dj(C["of_last"]), "decision": C["decision"],
-                       "aprobacion": C["aprobacion"]}, ensure_ascii=False)
+                       "prov": C["prov"], "sugeridos": C.get("sugeridos", []), "ofertas": dj(C["of_last"]),
+                       "decision": C["decision"], "aprobacion": C["aprobacion"]}, ensure_ascii=False, default=str)
 
 
 def json_a_cuadro(texto: str):
@@ -920,39 +975,48 @@ def json_a_cuadro(texto: str):
     items = leer(d["items"])
     items["Últ. compra"] = pd.to_datetime(items["Últ. compra"], errors="coerce").dt.date
     items["Material"] = items["Material"].fillna("").astype(str)
-    prov = limpiar_proveedores(leer(d["prov"]))
+    prov = d.get("prov") or {}
+    if isinstance(prov, list):                       # borradores de la versión anterior
+        prov = {p.pop("Proveedor"): p for p in prov}
     of = leer(d["ofertas"])
     ss.cuadro = {"ref": d["ref"], "firma": d.get("firma", ""), "lineas": leer(d["lineas"]), "items": items,
-                 "prov_src": prov, "prov_actual": prov, "prov_v": 1, "of_src": of, "of_last": of, "of_v": 1,
-                 "prov_names": tuple(prov["Proveedor"]), "importados": {},
+                 "prov": prov, "sugeridos": d.get("sugeridos", []), "of_src": of, "of_last": of,
+                 "of_v": 1, "prov_names": tuple(prov), "importados": {},
                  "decision": {int(k): v for k, v in d.get("decision", {}).items()},
                  "aprobacion": d.get("aprobacion", {"ok": False, "nombre": "", "fecha": "", "firma": ""})}
 
 
-def calcular(C):
-    """Comparación del cuadro actual; None si aún no hay precios o falta el tipo de cambio."""
+def preparar_items(C):
+    """Columnas en pesos chilenos para comparar (última compra y precio SOLPED)."""
     items = C["items"]
+    for c, v in [("Precio SOLPED", 0.0), ("Moneda SOLPED", "CLP")]:
+        if c not in items:
+            items[c] = v
     items["Últ. precio CLP"] = [a_clp(p, m, tc) if pd.notna(p) else np.nan
                                 for p, m in zip(items["Últ. precio"], items["Últ. moneda"])]
     items["Últ. precio CLP"] = items["Últ. precio CLP"].where(items["Últ. precio CLP"] > 0)
+    items["Precio SOLPED CLP"] = [a_clp(p, m, tc) if p else np.nan
+                                  for p, m in zip(items["Precio SOLPED"].fillna(0), items["Moneda SOLPED"])]
+    return items
+
+
+def calcular(C):
+    items = preparar_items(C)
     of = C["of_last"]
-    if of is None or not of["Precio inicial"].fillna(0).gt(0).any() or min(tc["USD"], tc["EUR"], tc["UF"]) <= 0:
+    if not C["prov"] or of is None or not of["Precio inicial"].fillna(0).gt(0).any() or not TC_OK:
         return None, None
-    return calcular_comparativo(items, C["prov_actual"], of, tc)
+    return calcular_comparativo(items, prov_df(C), of, tc)
 
 
 def tabla_adjudicacion(C, det, res) -> pd.DataFrame:
-    """Une la decisión del comprador con los valores calculados (insumo de reportes)."""
     src = res.merge(C["items"][["Ítem", "Texto", "Cantidad", "UM", "SOLPEDs", "Últ. precio CLP"]], on="Ítem")
     elegido, tipo, comentario = [], [], []
     for _, r in src.iterrows():
         d = C["decision"].get(int(r["Ítem"]), {})
         p = d.get("prov", r["Sugerido"])
         elegido.append(p)
-        if p == r["Sugerido"]:
-            tipo.append(r["Tipo sugerido"] or TIPOS_ADJUDICACION[0])
-        else:
-            tipo.append(d.get("tipo", "Aprobado Técnicamente"))
+        tipo.append((r["Tipo sugerido"] or TIPOS_ADJUDICACION[0]) if p == r["Sugerido"]
+                    else d.get("tipo", "Aprobado Técnicamente"))
         comentario.append(d.get("comentario", ""))
     src["Proveedor adjudicado"], src["Tipo adjudicación"], src["Comentario"] = elegido, tipo, comentario
     adj = src.merge(det.rename(columns={"Proveedor": "Proveedor adjudicado"})[
@@ -975,15 +1039,48 @@ def pendientes(adj) -> list:
             msgs.append(f"Ítem {r['Ítem']}: {r['Proveedor adjudicado']} no tiene un precio válido.")
         elif r["Proveedor adjudicado"] != r["Sugerido"] and not str(r["Comentario"]).strip():
             msgs.append(f"Ítem {r['Ítem']}: elegiste un proveedor distinto al más conveniente; falta explicar por qué.")
-    if adj["Monto adjudicado CLP"].sum() > UMBRAL_TC_CLP and tc["fecha"] != date.today().isoformat():
-        msgs.append("La compra supera $1.000.000: confirma el tipo de cambio de hoy (paso 4, arriba).")
     return msgs
 
 # =============================================================================
-# ENCABEZADO Y BARRA DE PASOS
+# ENCABEZADO CORPORATIVO CON TIPO DE CAMBIO EN LÍNEA
 # =============================================================================
-st.markdown("<div class='marca'>Enaex · Abastecimiento</div>", unsafe_allow_html=True)
-st.title("Cuadro comparativo de ofertas")
+def tasa_html(clase, nombre, valor):
+    return f"<div class='tasa {clase}'><span>{nombre}</span><b>{dinero(valor) if valor else '—'}</b></div>"
+
+
+origen_tc = (f"{tc['fuente']} · consultado a las {tc.get('hora', '')}" if not ss.tc_manual
+             else "Ingresado a mano")
+st.markdown(
+    "<div class='banner'><div><div class='marca'>Enaex · Gerencia de Abastecimiento</div>"
+    "<div class='titulo'>Cuadro comparativo de ofertas</div></div>"
+    f"<div><div class='tasas'>{tasa_html('usd', 'Dólar', tc['USD'])}{tasa_html('eur', 'Euro', tc['EUR'])}"
+    f"{tasa_html('uf', 'UF', tc['UF'])}</div><div class='fuente'>{html.escape(origen_tc)}</div></div></div>",
+    unsafe_allow_html=True)
+
+
+def refrescar_tc():
+    obtener_indicadores.clear()
+    ss.tc_manual = False
+    ss.tc_ver += 1
+    ss.pop("tc", None)
+
+
+_, a1, a2 = st.columns([5, 1.3, 1.1])
+a2.button("🔄 Actualizar", on_click=refrescar_tc, use_container_width=True,
+          help="Vuelve a consultar el valor del día")
+with a1.popover("✏️ Ajustar", use_container_width=True):
+    st.caption("Si necesitas usar otro valor (por ejemplo, el de la fecha de la oferta).")
+    nuevo = {k: st.number_input(n, value=float(tc[k]), min_value=0.0, step=1.0, format="%.2f",
+                                key=f"tc_{k}_{ss.tc_ver}_{firma(tc['USD'], tc['EUR'], tc['UF'])}")
+             for k, n in [("USD", "Dólar"), ("EUR", "Euro"), ("UF", "UF")]}
+    if any(abs(nuevo[k] - tc[k]) > 1e-9 for k in nuevo):
+        ss.tc = {**nuevo, "fecha": date.today().isoformat(), "fuente": "Ingreso manual", "hora": ""}
+        ss.tc_manual = True
+        st.rerun()
+if not TC_OK:
+    caja("ojo", "No pudimos traer " + ("la UF" if tc["USD"] and tc["EUR"] else "el tipo de cambio") +
+         " desde internet. Usa <b>✏️ Ajustar</b> para escribir el valor de hoy.")
+
 barra = "".join(
     f"<div class='paso {'actual' if i == ss.paso else 'hecho' if i < ss.paso else ''}'>"
     f"<b>{'✓' if i < ss.paso else ic}</b>{i}. {txt}</div>"
@@ -991,16 +1088,15 @@ barra = "".join(
 st.markdown(f"<div class='pasos'>{barra}</div>", unsafe_allow_html=True)
 
 
-def navegacion(puede_seguir=True, motivo="", texto_siguiente=None):
+def navegacion(puede_seguir=True, motivo="", al_seguir=None):
     st.write("")
     st.divider()
     c1, c2, c3 = st.columns([1, 2, 1.4])
     if ss.paso > 1:
         c1.button("← Volver", on_click=ir_a, args=(ss.paso - 1,), use_container_width=True)
     if ss.paso < len(PASOS):
-        etiqueta = texto_siguiente or f"Siguiente: {PASOS[ss.paso][1]} →"
-        c3.button(etiqueta, type="primary", disabled=not puede_seguir, on_click=ir_a, args=(ss.paso + 1,),
-                  use_container_width=True)
+        c3.button(f"Siguiente: {PASOS[ss.paso][1]} →", type="primary", disabled=not puede_seguir,
+                  on_click=al_seguir or ir_a, args=() if al_seguir else (ss.paso + 1,), use_container_width=True)
         if not puede_seguir and motivo:
             c2.markdown(f"<div class='sub' style='text-align:right;padding-top:.6rem'>{motivo}</div>",
                         unsafe_allow_html=True)
@@ -1013,17 +1109,16 @@ if ss.paso == 1:
                   "Si además subes el histórico de compras, verás cuánto se pagó la última vez por cada material.")
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("### 1️⃣ Planilla de SOLPED")
+        st.markdown("#### 1️⃣ Planilla de SOLPED")
         st.caption("Obligatoria · Excel o CSV")
         f_req = st.file_uploader("Planilla de SOLPED", type=["xlsx", "xlsm", "xls", "csv"],
                                  label_visibility="collapsed", key="up_req")
     with c2:
-        st.markdown("### 2️⃣ Histórico de compras")
+        st.markdown("#### 2️⃣ Histórico de compras")
         st.caption("Opcional · Cuadro MRO (hoja Ultima COMPRA), ME2M o CSV")
         f_hist = st.file_uploader("Histórico de compras", type=["xlsx", "xlsm", "xls", "csv"],
                                   label_visibility="collapsed", key="up_hist")
 
-    # Lectura automática: sin botón "procesar"
     for f, tipo, sins, pref in [(f_req, "req", SIN_REQ, ["Carga ARIBA", "Carga", "ME5A", "Planilla anterior"]),
                                 (f_hist, "hist", SIN_HIST, ["Ultima COMPRA", "BASE OC", "ME2M", "Data"])]:
         if f is None:
@@ -1044,13 +1139,13 @@ if ss.paso == 1:
         ss.req = normalizar_requerimientos(ss.req_raw, ss.req_map)
 
     if ss.req is not None:
-        caja("ok", f"✔ Leímos <b>{ss.req['SOLPED'].nunique()} SOLPED</b> con <b>{len(ss.req)} posiciones</b> "
-                   f"y <b>{ss.req['Clave'].nunique()} materiales</b> distintos.")
+        tarjetas([(ss.req["SOLPED"].nunique(), "SOLPED"), (len(ss.req), "posiciones"),
+                  (ss.req["Clave"].nunique(), "materiales distintos"),
+                  (f"{len(ss.hist[0]):,}".replace(",", ".") if ss.hist is not None else "—",
+                   "materiales con historial")])
     elif ss.get("req_raw") is not None:
         caja("ojo", "No pudimos reconocer las columnas de la planilla. Abre <b>¿No se ve bien?</b> aquí abajo "
                     "e indica cuál es la columna de SOLPED, descripción y cantidad.")
-    if ss.hist is not None:
-        caja("ok", f"✔ Histórico listo: última compra de <b>{len(ss.hist[0]):,}</b> materiales.".replace(",", "."))
 
     if ss.get("req_raw") is not None or ss.get("hist_raw") is not None:
         with st.expander("¿No se ve bien? Ajustar cómo leímos el archivo"):
@@ -1059,8 +1154,7 @@ if ss.paso == 1:
                     continue
                 st.markdown(f"**{etiqueta}**")
                 hojas = ss[f"{tipo}_hojas"]
-                st.selectbox("Hoja del Excel", hojas, index=hojas.index(ss[f"{tipo}_hoja_usada"]),
-                             key=f"hoja_{tipo}")
+                st.selectbox("Hoja del Excel", hojas, index=hojas.index(ss[f"{tipo}_hoja_usada"]), key=f"hoja_{tipo}")
                 opciones = ["(no usar)"] + list(ss[f"{tipo}_raw"].columns)
                 cols = st.columns(4)
                 for i, campo in enumerate(sins):
@@ -1081,19 +1175,23 @@ if ss.paso == 1:
     o1, o2 = st.columns(2)
     with o1.expander("✍️ No tengo planilla: escribir los materiales a mano"):
         sp_man = st.text_input("N° de SOLPED", key="sp_manual")
-        plantilla = pd.DataFrame({"Material": [""], "Texto": [""], "Cantidad": [1.0], "UM": ["C/U"], "Centro": [""]})
+        plantilla = pd.DataFrame({"Material": [""], "Texto": [""], "Cantidad": [1.0], "UM": ["C/U"],
+                                  "Precio ref.": [0.0], "Moneda ref.": ["CLP"], "Centro": [""]})
         pos_man = st.data_editor(plantilla, num_rows="dynamic", use_container_width=True, key="pos_manual",
-                                 column_config={"Material": "Código SAP (opcional)", "Texto": "Descripción"})
+                                 column_config={"Material": "Código SAP (opcional)", "Texto": "Descripción",
+                                                "Precio ref.": st.column_config.NumberColumn("Precio SOLPED"),
+                                                "Moneda ref.": st.column_config.SelectboxColumn("Moneda",
+                                                                                                options=MONEDAS)})
         if st.button("Usar estos materiales", disabled=not sp_man.strip()):
             pm = pos_man.dropna(subset=["Texto"])
             pm = pm[pm["Texto"].astype(str).str.strip() != ""].copy()
             pm["SOLPED"], pm["Pos"] = sp_man.strip(), np.arange(1, len(pm) + 1) * 10
             pm["Material"] = pm["Material"].apply(clave_material)
-            for c, v in [("Precio ref.", 0.0), ("F. solicitud", pd.NaT), ("Días", np.nan), ("Urgencia", ""),
-                         ("G. compras", ""), ("Asignado a", ""), ("Contrato marco", "")]:
+            for c, v in [("F. solicitud", pd.NaT), ("Días", np.nan), ("Urgencia", ""), ("G. compras", ""),
+                         ("Asignado a", ""), ("Contrato marco", "")]:
                 pm[c] = v
             pm["Clave"] = [clave_item(m, t) for m, t in zip(pm["Material"], pm["Texto"])]
-            ss.req, ss.sp_sel = pm, {sp_man.strip()}
+            ss.req, ss.sp_sel, ss.excluidas = pm, {sp_man.strip()}, set()
             ir_a(2)
             st.rerun()
     with o2.expander("💾 Retomar un trabajo guardado"):
@@ -1103,7 +1201,7 @@ if ss.paso == 1:
                 json_a_cuadro(f_json.getvalue().decode("utf-8"))
                 ss.archivos["json"] = firma(f_json.name, f_json.size)
             st.success(f"Trabajo «{ss.cuadro['ref']}» recuperado.")
-            st.button("Continuar donde quedé →", type="primary", on_click=ir_a, args=(4,))
+            st.button("Continuar donde quedé →", type="primary", on_click=ir_a, args=(3,))
 
     navegacion(ss.req is not None, "Primero sube la planilla de SOLPED.")
 
@@ -1112,13 +1210,14 @@ if ss.paso == 1:
 # =============================================================================
 elif ss.paso == 2:
     req = ss.req
-    caja("ayuda", "Marca los materiales que quieres cotizar. Si un material lo piden varias SOLPED, "
-                  "<b>se juntan solas en una sola línea</b> con la cantidad total, así el proveedor cotiza una sola vez.")
+    caja("ayuda", "<b>①</b> Marca ✔ los materiales o SOLPED que quieres cotizar. "
+                  "<b>②</b> Abajo aparecen todas sus posiciones: desmarca las que <b>no</b> quieres incluir "
+                  "(se quedan pendientes para otra cotización). Lo que piden varias SOLPED se junta en una sola línea.")
     c1, c2, c3 = st.columns([3, 1.6, 1.4])
     busca = c1.text_input("🔍 Buscar", placeholder="Escribe un material, código o N° de SOLPED…",
                           label_visibility="collapsed")
-    vista = c2.segmented_control("Ver", ["Por material", "Por SOLPED"], default="Por material",
-                                 label_visibility="collapsed") or "Por material"
+    vista = c2.segmented_control("Ver", ["Por SOLPED", "Por material"], default="Por SOLPED",
+                                 label_visibility="collapsed") or "Por SOLPED"
     solo_rep = c3.toggle("Solo repetidos", help="Materiales que piden 2 o más SOLPED")
     compradores = sorted(c for c in req["Asignado a"].unique() if c)
     filtro_comp = st.pills("Comprador", compradores, selection_mode="multi") if len(compradores) > 1 else []
@@ -1135,7 +1234,7 @@ elif ss.paso == 2:
             tabla = (base.groupby(["Clave", "UM"], sort=False)
                      .agg(Material=("Material", "first"), Texto=("Texto", lambda s: max(s, key=len)),
                           **{"SOLPED": ("SOLPED", "nunique"), "Cantidad": ("Cantidad", "sum"),
-                             "Días": ("Días", "max"), "Detalle SOLPED": ("SOLPED", unir_unicos)})
+                             "Días": ("Días", "max")})
                      .reset_index())
             if solo_rep:
                 tabla = tabla[tabla["SOLPED"] > 1]
@@ -1144,7 +1243,7 @@ elif ss.paso == 2:
             tabla.insert(0, "Cotizar", tabla["id"].isin(ss.mat_sel))
         else:
             tabla = (base.groupby("SOLPED")
-                     .agg(Materiales=("Pos", "size"), Días=("Días", "max"), Centro=("Centro", "first"),
+                     .agg(Posiciones=("Pos", "size"), Días=("Días", "max"), Centro=("Centro", "first"),
                           Contenido=("Texto", lambda s: " · ".join(list(s)[:3]) + (" …" if len(s) > 3 else "")))
                      .reset_index().sort_values("Días", ascending=False).reset_index(drop=True))
             if solo_rep:
@@ -1168,213 +1267,301 @@ elif ss.paso == 2:
                  "Últ. moneda"]
     else:
         cfg = {"Cotizar": st.column_config.CheckboxColumn("✔", width="small"),
-               "Materiales": st.column_config.NumberColumn("Posiciones", format="%d"),
+               "Posiciones": st.column_config.NumberColumn("Posiciones", format="%d"),
                "Días": st.column_config.NumberColumn("Antigüedad", format="%d días"),
                "Contenido": st.column_config.TextColumn("Qué pide", width="large")}
-        orden = ["Cotizar", "SOLPED", "Contenido", "Materiales", "Días", "Centro"]
+        orden = ["Cotizar", "SOLPED", "Contenido", "Posiciones", "Días", "Centro"]
+    st.markdown("##### ① ¿Qué quieres cotizar?")
     editado = st.data_editor(tabla, key=f"sel_{ss.sel_ver}", hide_index=True, use_container_width=True,
-                             height=420, column_order=orden, column_config=cfg,
+                             height=300, column_order=orden, column_config=cfg,
                              disabled=[c for c in tabla.columns if c != "Cotizar"])
     destino = ss.mat_sel if vista == "Por material" else ss.sp_sel
     for i, marcado in zip(editado["id"], editado["Cotizar"]):
         (destino.add if marcado else destino.discard)(i)
 
-    lin = lineas_elegidas()
-    if lin.empty:
-        caja("sub", "Marca la casilla ✔ de lo que quieras cotizar.")
+    cand = candidatas()
+    if cand.empty:
+        caja("sub", "Marca la casilla ✔ de una SOLPED o de un material para ver sus posiciones.")
     else:
+        st.markdown("##### ② Elige qué posiciones entran al cuadro")
+        b1, b2, _ = st.columns([1, 1, 3])
+
+        def marcar_todas(valor: bool):
+            ids = set(candidatas()["id"])
+            ss.excluidas = (ss.excluidas - ids) if valor else (ss.excluidas | ids)
+            ss.lin_ver += 1
+
+        b1.button("☑ Marcar todas", on_click=marcar_todas, args=(True,), use_container_width=True)
+        b2.button("☐ Desmarcar todas", on_click=marcar_todas, args=(False,), use_container_width=True)
+        vista_lin = cand[["id", "SOLPED", "Pos", "Material", "Texto", "Cantidad", "UM", "Precio ref.",
+                          "Moneda ref.", "Centro"]].copy()
+        vista_lin.insert(0, "Incluir", ~vista_lin["id"].isin(ss.excluidas))
+        vista_lin["Ref. en pesos"] = [a_clp(p * q, m, tc) if p else np.nan for p, q, m in
+                                      zip(vista_lin["Precio ref."], vista_lin["Cantidad"], vista_lin["Moneda ref."])]
+        lin_sig = firma(sorted(cand["id"]), ss.lin_ver)
+        incl = st.data_editor(
+            vista_lin, key=f"lin_{lin_sig}", hide_index=True, use_container_width=True,
+            height=min(80 + 35 * len(vista_lin), 420),
+            column_order=["Incluir", "SOLPED", "Pos", "Texto", "Material", "Cantidad", "UM", "Precio ref.",
+                          "Moneda ref.", "Ref. en pesos", "Centro"],
+            disabled=[c for c in vista_lin.columns if c != "Incluir"],
+            column_config={"Incluir": st.column_config.CheckboxColumn("Entra", width="small"),
+                           "Texto": st.column_config.TextColumn("Material", width="large"),
+                           "Material": "Código",
+                           "Cantidad": st.column_config.NumberColumn(format="%g"),
+                           "Precio ref.": st.column_config.NumberColumn("Precio SOLPED", format="localized"),
+                           "Moneda ref.": "Moneda",
+                           "Ref. en pesos": st.column_config.NumberColumn("Total en $ CLP", format="localized")})
+        for i, entra in zip(incl["id"], incl["Incluir"]):
+            (ss.excluidas.discard if entra else ss.excluidas.add)(i)
+
+    lin = lineas_elegidas()
+    if not lin.empty:
         _, items_prev = consolidar_lineas(lin, True)
-        st.markdown(f"<div class='mini'><div><b>{len(items_prev)}</b>ítem(s) a cotizar</div>"
-                    f"<div><b>{lin['SOLPED'].nunique()}</b>SOLPED incluidas</div>"
-                    f"<div><b>{len(lin)}</b>posiciones</div></div>", unsafe_allow_html=True)
-        with st.expander("Ver detalle de lo elegido"):
-            st.dataframe(lin[["SOLPED", "Pos", "Material", "Texto", "Cantidad", "UM", "Centro"]],
-                         hide_index=True, use_container_width=True)
-            if st.button("Quitar todo y empezar de nuevo"):
-                ss.mat_sel, ss.sp_sel, ss.sel_sig = set(), set(), None
-                st.rerun()
+        ref_clp = valor_referencial(lin)
+        tarjetas([(len(lin), "posiciones elegidas"), (lin["SOLPED"].nunique(), "SOLPED"),
+                  (len(items_prev), "ítems a cotizar"), (dinero(ref_clp) if ref_clp else "—", "valor referencial SOLPED")])
+        if ref_clp > UMBRAL_TC_CLP:
+            caja("ok", f"Supera $1.000.000: todo se convertirá con el tipo de cambio del día "
+                       f"(dólar {dinero(tc['USD'])}, euro {dinero(tc['EUR'])}, UF {dinero(tc['UF'])}).")
 
     def preparar_y_seguir():
         lineas = lineas_elegidas()
-        f = firma(sorted(lineas["SOLPED"] + "/" + lineas["Pos"].astype(str)), True)
+        f = firma(sorted(lineas["SOLPED"] + "/" + lineas["Pos"].astype(str)))
         if ss.cuadro is None or ss.cuadro["firma"] != f:
             crear_cuadro(lineas, True)
         ir_a(3)
 
-    st.write("")
-    st.divider()
-    b1, b2, b3 = st.columns([1, 2, 1.4])
-    b1.button("← Volver", on_click=ir_a, args=(1,), use_container_width=True)
-    if ss.cuadro is not None and not lin.empty and ss.cuadro["firma"] != firma(
-            sorted(lin["SOLPED"] + "/" + lin["Pos"].astype(str)), True):
-        b2.markdown("<div class='sub' style='text-align:right;padding-top:.6rem'>Cambiaste la selección: "
-                    "se empezará un cuadro nuevo.</div>", unsafe_allow_html=True)
-    b3.button("Siguiente: Pide la cotización →", type="primary", disabled=lin.empty,
-              on_click=preparar_y_seguir, use_container_width=True)
+    aviso = ""
+    if ss.cuadro is not None and not lin.empty and ss.cuadro["firma"] != firma(sorted(lin["SOLPED"] + "/" + lin["Pos"].astype(str))):
+        aviso = "Cambiaste la selección: se armará un cuadro nuevo."
+    navegacion(not lin.empty, aviso or "Marca al menos una posición.", al_seguir=preparar_y_seguir)
+    if aviso and not lin.empty:
+        st.caption(aviso)
 
 # =============================================================================
-# PASO 3 · PIDE LA COTIZACIÓN
+# PASO 3 · INGRESA LAS OFERTAS
 # =============================================================================
 elif ss.paso == 3:
     C = ss.cuadro
-    items, lineas = C["items"], C["lineas"]
-    st.markdown(f"<div class='mini'><div><b>{len(items)}</b>ítem(s)</div><div><b>{lineas['SOLPED'].nunique()}</b>"
-                f"SOLPED</div><div><b>{len(C['prov_actual'])}</b>proveedor(es)</div></div>", unsafe_allow_html=True)
+    items, lineas = preparar_items(C), C["lineas"]
+    sincronizar_ofertas(C)
+    caja("ayuda", "Registra lo que ofreció cada proveedor: <b>precio, moneda, transporte y plazo</b>. "
+                  "Todo se convierte a pesos chilenos con el tipo de cambio de hoy, así puedes comparar euros, "
+                  "dólares y pesos en la misma escala.")
+    ref_clp = float((items["Precio SOLPED CLP"].fillna(0) * items["Cantidad"]).sum())
+    tarjetas([(len(items), "ítems"), (lineas["SOLPED"].nunique(), "SOLPED"), (len(C["prov"]), "proveedores"),
+              (dinero(ref_clp) if ref_clp else "—", "valor referencial SOLPED")])
 
-    st.markdown("### ① Descarga la planilla y envíala a tus proveedores")
-    c1, c2, c3 = st.columns(3)
-    comprador = c1.text_input("Tu nombre", value=ss.get("mi_nombre", unir_unicos(lineas.get("Asignado a", []))))
-    correo = c2.text_input("Tu correo (para que te respondan)", value=ss.get("mi_correo", ""))
-    limite = c3.date_input("Que respondan antes del", value=date.today() + timedelta(days=5), format="DD/MM/YYYY")
-    ss.mi_nombre, ss.mi_correo = comprador, correo
-    st.download_button("⬇️  Descargar planilla para proveedores", type="primary", use_container_width=True,
-                       data=generar_rfq(C["ref"], items, lineas,
-                                        {"comprador": comprador, "correo": correo, "fecha_limite": limite,
-                                         "entrega": unir_unicos(items["Centro"])}),
-                       file_name=f"Solicitud_cotizacion_{nombre_archivo(C['ref'])}.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    st.caption("La planilla no muestra precios históricos ni información interna. El proveedor completa solo las "
-               "celdas amarillas y te la devuelve.")
+    clave_sel = f"psel_{C['ref']}"
+    opciones = list(C["prov"]) + ["➕ Agregar proveedor"]
+    if ss.get(clave_sel) not in opciones:
+        ss[clave_sel] = opciones[0]
 
-    st.markdown("### ② Cuando te respondan, sube aquí sus planillas")
-    respuestas = st.file_uploader("Planillas respondidas", type=["xlsx"], accept_multiple_files=True,
-                                  label_visibility="collapsed", key=f"resp_{C['ref']}")
-    for f in respuestas or []:
-        clave_f = firma(f.name, f.size)
-        if clave_f in C["importados"]:
-            continue
-        try:
-            ref_resp, datos, resp = leer_respuesta_rfq(f.getvalue())
-            if ref_resp and ref_resp != C["ref"]:
-                C["importados"][clave_f] = ("error", f"{f.name}: es de otra cotización ({ref_resp}).")
-            else:
-                nombre, n = incorporar_respuesta(C, datos, resp, f.name)
-                C["importados"][clave_f] = ("ok", f"{nombre}: {n} precio(s) cargados.")
-        except Exception as e:
-            C["importados"][clave_f] = ("error", f"{f.name}: no se pudo leer ({e}).")
-    for estado, msg in C["importados"].values():
-        caja("ok" if estado == "ok" else "ojo", ("✔ " if estado == "ok" else "⚠ ") + html.escape(msg))
+    def congelar():
+        if C.get("of_last") is not None:
+            C["of_src"], C["of_v"] = C["of_last"].copy(), C["of_v"] + 1
 
-    st.markdown("### ③ Revisa los precios recibidos")
-    st.caption("Se llenan solos al subir las planillas. Si te respondieron por correo o PDF, escríbelos aquí. "
-               "Si un proveedor mejora su oferta, anota el nuevo valor en «Precio mejorado».")
+    def agregar_proveedor(nombre=None):
+        nombre = (nombre or ss.get(f"nuevo_{C['ref']}", "")).strip()
+        if nombre and nombre not in C["prov"]:
+            C["prov"][nombre] = dict(PROV_DEFECTO)
+            congelar()
+            ss[clave_sel] = nombre
+            ss[f"nuevo_{C['ref']}"] = ""
 
-    st.markdown("**Proveedores**")
-    prov_edit = st.data_editor(
-        C["prov_src"], key=f"prov_{C['ref']}_{C['prov_v']}", num_rows="dynamic", hide_index=True,
-        use_container_width=True, column_order=COLS_PROV_VISIBLES,
-        column_config={
-            "Proveedor": st.column_config.TextColumn("Proveedor", required=True, width="large"),
-            "Moneda": st.column_config.SelectboxColumn("Moneda", options=MONEDAS, required=True, default="CLP"),
-            "Flete total": st.column_config.NumberColumn("Flete (total)", min_value=0.0, default=0.0,
-                                                         help="Costo de envío total, en la moneda de la oferta"),
-            "Plazo": st.column_config.NumberColumn("Plazo (días hábiles)", min_value=0, step=1, default=10),
-            "Tipo compra": st.column_config.SelectboxColumn("Origen", options=TIPOS_COMPRA, default="Nacional",
-                                                            help="Importación suma 10 días de internación"),
-            "Lugar entrega": st.column_config.SelectboxColumn("Dónde entrega", options=list(LUGARES_ENTREGA),
-                                                              default=list(LUGARES_ENTREGA)[0]),
-        })
-    prov = limpiar_proveedores(prov_edit)
-    C["prov_actual"] = prov
-    nombres = tuple(prov["Proveedor"])
-    if C.get("prov_names") != nombres or C["of_src"] is None:
-        C["of_src"] = armar_ofertas(items, nombres, C["of_last"])
-        C["of_v"] += 1
-        C["prov_names"] = nombres
+    def quitar_proveedor(nombre):
+        C["prov"].pop(nombre, None)
+        congelar()
+        ss[clave_sel] = (list(C["prov"]) or ["➕ Agregar proveedor"])[0]
 
-    if not nombres:
-        caja("sub", "Agrega al menos un proveedor (o sube una planilla respondida).")
+    st.segmented_control("Proveedor", opciones, key=clave_sel, on_change=congelar, label_visibility="collapsed")
+    actual = ss.get(clave_sel) or opciones[0]
+
+    if actual == "➕ Agregar proveedor":
+        with st.container(border=True):
+            st.markdown("#### ➕ Nuevo proveedor")
+            n1, n2 = st.columns([3, 1])
+            n1.text_input("Nombre del proveedor", key=f"nuevo_{C['ref']}", placeholder="Ej: Sonepar Chile S.A.")
+            n2.write("")
+            n2.button("Agregar", type="primary", on_click=agregar_proveedor, use_container_width=True)
+            sugeridos = [s for s in C.get("sugeridos", []) if s not in C["prov"]]
+            if sugeridos:
+                st.caption("Proveedores que ya vendieron estos materiales (un clic para agregar):")
+                cols_s = st.columns(min(3, len(sugeridos)))
+                for i, s in enumerate(sugeridos):
+                    cols_s[i % len(cols_s)].button(f"＋ {s}", key=f"sug_{C['ref']}_{i}", on_click=agregar_proveedor,
+                                                   args=(s,), use_container_width=True)
     else:
-        st.markdown("**Precios por ítem** (precio unitario, en la moneda del proveedor)")
-        of_edit = st.data_editor(
-            C["of_src"], key=f"of_{C['ref']}_{C['of_v']}", hide_index=True, use_container_width=True,
-            height=min(80 + 35 * len(C["of_src"]), 520), disabled=["Ítem", "Texto", "Cantidad", "UM", "Proveedor"],
-            column_order=["Proveedor", "Texto", "Cantidad", "UM", "Precio inicial", "Precio mejorado", "Plazo",
-                          "Cumple técnico", "Observación"],
-            column_config={"Texto": st.column_config.TextColumn("Material", width="large"),
-                           "Cantidad": st.column_config.NumberColumn(format="%g"),
-                           "Precio inicial": st.column_config.NumberColumn("Precio", min_value=0.0, format="%.2f"),
-                           "Precio mejorado": st.column_config.NumberColumn("Precio mejorado", min_value=0.0,
-                                                                            format="%.2f",
-                                                                            help="Opcional: si negociaste un mejor precio"),
-                           "Plazo": st.column_config.NumberColumn("Plazo (días)", min_value=0, step=1,
-                                                                  help="Vacío = plazo general del proveedor"),
-                           "Cumple técnico": st.column_config.CheckboxColumn("¿Cumple?",
-                                                                             help="Desmarca si no cumple la ficha técnica"),
-                           "Observación": st.column_config.TextColumn("Notas")})
-        C["of_last"] = of_edit
+        nombre = actual
+        P = {**PROV_DEFECTO, **C["prov"][nombre]}
+        k = lambda campo: f"pv_{C['ref']}_{firma(nombre)}_{campo}"
+        with st.container(border=True):
+            h1, h2 = st.columns([4, 1])
+            h1.markdown(f"#### 🏢 {html.escape(nombre)}")
+            h2.button("🗑 Quitar", key=k("quitar"), on_click=quitar_proveedor, args=(nombre,), use_container_width=True)
 
-    hay_precios = C.get("of_last") is not None and C["of_last"]["Precio inicial"].fillna(0).gt(0).any()
-    navegacion(hay_precios, "Necesitas al menos un precio para comparar.")
+            st.markdown("**Oferta y transporte**")
+            f1, f2, f3, f4 = st.columns(4)
+            P["Moneda"] = f1.selectbox("Moneda de los precios", MONEDAS, index=MONEDAS.index(P["Moneda"]),
+                                       key=k("mon"))
+            P["Transporte"] = f2.selectbox("Transporte", TRANSPORTES, index=TRANSPORTES.index(P["Transporte"])
+                                           if P["Transporte"] in TRANSPORTES else 0, key=k("trans"))
+            P["Flete total"] = f3.number_input("Costo del transporte", value=float(P["Flete total"]), min_value=0.0,
+                                               step=1000.0 if P["Moneda flete"] == "CLP" else 10.0, key=k("flete"))
+            P["Moneda flete"] = f4.selectbox("Moneda del transporte", MONEDAS, index=MONEDAS.index(P["Moneda flete"]),
+                                             key=k("monfl"))
+            st.markdown("**Envío y entrega**")
+            g1, g2, g3, g4 = st.columns(4)
+            P["Plazo"] = g1.number_input("Plazo de despacho", value=int(a_num(P["Plazo"], 0)), min_value=0, step=1,
+                                         key=k("plazo"))
+            P["Tipo plazo"] = g2.selectbox("Unidad", TIPOS_PLAZO, index=TIPOS_PLAZO.index(P["Tipo plazo"]),
+                                           key=k("tplazo"))
+            P["Tipo compra"] = g3.selectbox("Origen", TIPOS_COMPRA, index=TIPOS_COMPRA.index(P["Tipo compra"]),
+                                            key=k("origen"), help="Importación suma 10 días de internación")
+            P["Lugar entrega"] = g4.selectbox("Dónde entrega", list(LUGARES_ENTREGA),
+                                              index=list(LUGARES_ENTREGA).index(P["Lugar entrega"]), key=k("lugar"))
+            P["Bodega tránsito"] = st.checkbox("Pasa por bodega de tránsito (Isaver / Bello, +7 días)",
+                                               value=bool(P["Bodega tránsito"]), key=k("bodega"))
+            C["prov"][nombre] = P
+            f_desp, f_planta, _ = calcular_fecha_planta(P["Plazo"], P["Tipo plazo"], P["Tipo compra"],
+                                                        P["Lugar entrega"], P["Bodega tránsito"])
+
+            st.markdown(f"**Precios unitarios** (en {P['Moneda']}, sin IVA)")
+            src = C["of_src"][C["of_src"]["Proveedor"] == nombre].merge(
+                items[["Ítem", "Material", "Precio SOLPED", "Moneda SOLPED", "Precio SOLPED CLP"]], on="Ítem", how="left")
+            src["Ref. SOLPED"] = [f"{dinero(p, m)}" + (f"  (≈ {dinero(pc)})" if m != "CLP" and pd.notna(pc) else "")
+                                  if p else "—" for p, m, pc in zip(src["Precio SOLPED"], src["Moneda SOLPED"],
+                                                                     src["Precio SOLPED CLP"])]
+            ed = st.data_editor(
+                src.reset_index(drop=True), key=f"of_{C['ref']}_{firma(nombre)}_{C['of_v']}", hide_index=True,
+                use_container_width=True, height=min(80 + 35 * len(src), 420),
+                column_order=["Ítem", "Texto", "Material", "Cantidad", "UM", "Ref. SOLPED", "Precio inicial",
+                              "Precio mejorado", "Plazo", "Cumple técnico", "Observación"],
+                disabled=["Ítem", "Texto", "Material", "Cantidad", "UM", "Ref. SOLPED"],
+                column_config={"Texto": st.column_config.TextColumn("Material", width="large"),
+                               "Material": "Código",
+                               "Cantidad": st.column_config.NumberColumn(format="%g"),
+                               "Ref. SOLPED": "Precio SOLPED",
+                               "Precio inicial": st.column_config.NumberColumn(f"Precio ({P['Moneda']})", min_value=0.0,
+                                                                               format="localized"),
+                               "Precio mejorado": st.column_config.NumberColumn(
+                                   "Precio negociado", min_value=0.0, format="localized",
+                                   help="Opcional: si el proveedor mejoró su precio"),
+                               "Plazo": st.column_config.NumberColumn("Plazo distinto", min_value=0, step=1,
+                                                                      help="Solo si este ítem tiene otro plazo"),
+                               "Cumple técnico": st.column_config.CheckboxColumn("¿Cumple?"),
+                               "Observación": st.column_config.TextColumn("Notas")})
+            mascara = C["of_last"]["Proveedor"] == nombre
+            editados = ed.set_index("Ítem")
+            for col in ["Precio inicial", "Precio mejorado", "Plazo", "Cumple técnico", "Observación"]:
+                C["of_last"].loc[mascara, col] = C["of_last"].loc[mascara, "Ítem"].map(editados[col]).values
+
+            precio = ed["Precio mejorado"].where(ed["Precio mejorado"].fillna(0) > 0, ed["Precio inicial"]).fillna(0)
+            mat = float((precio * ed["Cantidad"]).sum())
+            mat_clp, fl_clp = a_clp(mat, P["Moneda"], tc), a_clp(P["Flete total"], P["Moneda flete"], tc)
+            tarjetas([(dinero(mat, P["Moneda"]) if P["Moneda"] != "CLP" else dinero(mat), "materiales"),
+                      (dinero(mat_clp), "materiales en pesos"), (dinero(fl_clp), "transporte en pesos"),
+                      (dinero(mat_clp + fl_clp), "total puesto en planta"),
+                      (f"{f_desp:%d/%m/%Y}", "despacho del proveedor"),
+                      (f"{f_planta:%d/%m/%Y}", "llega a planta")])
+
+    with st.expander("📨 Opcional: enviar planilla de cotización por correo e importar respuestas"):
+        caja("sub", "Si prefieres pedir la oferta por escrito, descarga esta planilla (no muestra precios internos). "
+                    "Cuando el proveedor la devuelva, súbela y sus precios se cargan solos.")
+        r1, r2 = st.columns(2)
+        with r1:
+            comprador = st.text_input("Tu nombre", value=ss.get("mi_nombre", unir_unicos(lineas.get("Asignado a", []))))
+            correo = st.text_input("Tu correo", value=ss.get("mi_correo", ""))
+            limite = st.date_input("Responder antes del", value=date.today() + timedelta(days=3), format="DD/MM/YYYY")
+            ss.mi_nombre, ss.mi_correo = comprador, correo
+            st.download_button("⬇️ Descargar planilla para proveedor", use_container_width=True,
+                               data=generar_rfq(C["ref"], items, lineas,
+                                                {"comprador": comprador, "correo": correo, "fecha_limite": limite,
+                                                 "entrega": unir_unicos(items["Centro"])}),
+                               file_name=f"Solicitud_cotizacion_{nombre_archivo(C['ref'])}.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        with r2:
+            respuestas = st.file_uploader("Planillas respondidas (.xlsx)", type=["xlsx"], accept_multiple_files=True,
+                                          key=f"resp_{C['ref']}")
+            for f in respuestas or []:
+                clave_f = firma(f.name, f.size)
+                if clave_f in C["importados"]:
+                    continue
+                try:
+                    ref_resp, datos, resp = leer_respuesta_rfq(f.getvalue())
+                    if ref_resp and ref_resp != C["ref"]:
+                        C["importados"][clave_f] = ("error", f"{f.name}: es de otra cotización ({ref_resp}).")
+                    else:
+                        n_prov, n = incorporar_respuesta(C, datos, resp, f.name)
+                        C["importados"][clave_f] = ("ok", f"{n_prov}: {n} precio(s) cargados.")
+                        st.rerun()
+                except Exception as e:
+                    C["importados"][clave_f] = ("error", f"{f.name}: no se pudo leer ({e}).")
+            for estado, msg in C["importados"].values():
+                caja("ok" if estado == "ok" else "ojo", ("✔ " if estado == "ok" else "⚠ ") + html.escape(msg))
+
+    hay_precios = bool(C["prov"]) and C.get("of_last") is not None and C["of_last"]["Precio inicial"].fillna(0).gt(0).any()
+    navegacion(hay_precios and TC_OK, "Ingresa al menos un precio." if TC_OK else "Falta el tipo de cambio (arriba).")
 
 # =============================================================================
 # PASO 4 · COMPARA Y ELIGE
 # =============================================================================
 elif ss.paso == 4:
     C = ss.cuadro
-
-    def campos_tc():
-        nombres_tc = {"USD": "Dólar (USD)", "EUR": "Euro (EUR)", "UF": "UF"}
-        cols_tc = st.columns(3)
-        nuevo = {k: cols_tc[i].number_input(nombres_tc[k], value=float(tc[k]), min_value=0.0, step=1.0,
-                                            format="%.2f", key=f"tc_in_{k}")
-                 for i, k in enumerate(["USD", "EUR", "UF"])}
-        if any(abs(nuevo[k] - tc[k]) > 1e-9 for k in nuevo):
-            ss.tc = {**nuevo, "fecha": date.today().isoformat(), "fuente": "Ingreso manual"}
-            st.rerun()
-
-    if min(tc["USD"], tc["EUR"], tc["UF"]) <= 0:
-        caja("ojo", "No pudimos traer el tipo de cambio desde internet. Escríbelo aquí (valor de hoy en pesos):")
-        campos_tc()
-    else:
-        t1, t2 = st.columns([4, 1])
-        hoy_txt = "de hoy" if tc["fecha"] == date.today().isoformat() else f"del {tc['fecha'] or '—'}"
-        t1.markdown(f"<div class='sub'>Tipo de cambio {hoy_txt}: Dólar <b>{dinero(tc['USD'])}</b> · "
-                    f"Euro <b>{dinero(tc['EUR'])}</b> · UF <b>{dinero(tc['UF'])}</b></div>", unsafe_allow_html=True)
-        with t2.popover("Cambiar", use_container_width=True):
-            campos_tc()
-            if st.button("Traer de internet"):
-                obtener_indicadores.clear()
-                ind = obtener_indicadores()
-                if ind["ok"]:
-                    ss.tc = {"USD": ind["USD"], "EUR": ind["EUR"], "UF": ind["UF"], "fecha": ind["fecha"],
-                             "fuente": ind["fuente"]}
-                    for k in ["USD", "EUR", "UF"]:
-                        ss.pop(f"tc_in_{k}", None)
-                    st.rerun()
-                st.warning("Sin conexión: escríbelo a mano.")
-
     det, res = calcular(C)
     if det is None:
-        if min(tc["USD"], tc["EUR"], tc["UF"]) > 0:
-            caja("ojo", "Aún no hay precios cargados. Vuelve al paso 3 y sube las respuestas de los proveedores.")
-        navegacion(False, "Completa el tipo de cambio para ver la comparación.")
+        caja("ojo", "Faltan precios (paso 3) o el tipo de cambio (arriba, ✏️ Ajustar).")
+        navegacion(False)
         st.stop()
-    C["det"], C["res"] = det, res
     items = C["items"]
-    caja("ayuda", "Para cada ítem te mostramos el <b>total puesto en planta</b> de cada proveedor (incluye el flete). "
-                  "El verde es el más conveniente y ya viene elegido; puedes cambiarlo si tienes un motivo.")
+    adj_prev = tabla_adjudicacion(C, det, res)
+    tarjetas([(dinero(res["Mejor total CLP"].sum()), "mejor combinación posible"),
+              (len(C["prov"]), "proveedores comparados"),
+              (int((res["Ofertas válidas"] > 1).sum()), "ítems con 2+ ofertas"),
+              (dinero(adj_prev["Ahorro vs histórico CLP"].sum()), "ahorro vs última compra")])
 
+    st.markdown("##### Vista rápida: total puesto en planta por proveedor (en pesos)")
+    matriz = det.pivot_table(index="Ítem", columns="Proveedor", values="Total CLP", aggfunc="first")
+    validas = det.pivot_table(index="Ítem", columns="Proveedor", values="Válida", aggfunc="first")
+    matriz = matriz.where(validas.fillna(False).astype(bool))
+    totales = matriz.sum(min_count=1)
+    matriz.index = [f"{i}. {str(t)[:45]}" for i, t in zip(matriz.index, matriz.index.map(items.set_index("Ítem")["Texto"]))]
+    matriz.loc["TOTAL si le compro todo"] = totales
+
+    def resaltar(fila):
+        v = pd.to_numeric(fila, errors="coerce")
+        if v.notna().sum() == 0:
+            return [""] * len(fila)
+        return ["background-color:#D1FAE5;color:#065F46;font-weight:700" if x == v.min() else "" for x in v]
+
+    st.dataframe(matriz.style.apply(resaltar, axis=1).format(lambda x: dinero(x) if pd.notna(x) else "—"),
+                 use_container_width=True)
+    st.caption("Verde = más conveniente en esa fila. «—» = no cotizó o no cumple. Incluye el transporte repartido.")
+
+    st.markdown("##### Decide por ítem")
     for _, it in items.iterrows():
         n_item = int(it["Ítem"])
         r = res[res["Ítem"] == n_item].iloc[0]
         ofertas = det[det["Ítem"] == n_item].sort_values(["Válida", "Total CLP"], ascending=[False, True])
-        validas = ofertas[ofertas["Válida"]]
-        maximo = validas["Total CLP"].max() if not validas.empty else 1
+        validas_it = ofertas[ofertas["Válida"]]
+        maximo = validas_it["Total CLP"].max() if not validas_it.empty else 1
         with st.container(border=True):
-            st.markdown(f"#### {n_item}. {html.escape(str(it['Texto']))}")
+            st.markdown(f"**{n_item}. {html.escape(str(it['Texto']))}**")
             ult = (f"Última compra: <b>{dinero(it['Últ. precio'], it['Últ. moneda'] or 'CLP')}</b> c/u a "
                    f"{html.escape(str(it['Últ. proveedor']))} ({it['Últ. compra']:%d/%m/%Y})"
                    if it["Con historial"] and pd.notna(it["Últ. precio"]) and pd.notna(it["Últ. compra"])
                    else "<span class='etiqueta roja'>Sin compras anteriores · requiere visto bueno técnico</span>")
+            ref_sp = (f" · Precio SOLPED: <b>{dinero(it['Precio SOLPED'], it['Moneda SOLPED'])}</b> c/u"
+                      + (f" (≈ {dinero(it['Precio SOLPED CLP'])})" if it["Moneda SOLPED"] != "CLP" else "")
+                      if it.get("Precio SOLPED") else "")
             st.markdown(f"<div class='sub'>{it['Cantidad']:g} {html.escape(str(it['UM']))} · "
-                        f"{int(it['N° SOLPED'])} SOLPED · {ult}</div>", unsafe_allow_html=True)
+                        f"{int(it['N° SOLPED'])} SOLPED · {ult}{ref_sp}</div>", unsafe_allow_html=True)
             filas = []
             for _, o in ofertas.iterrows():
                 nom = html.escape(str(o["Proveedor"]))
                 if not o["Cotiza"]:
-                    filas.append(f"<div class='fila-oferta'><div>{nom}</div><div class='sub'>No cotizó</div>"
-                                 f"<div></div><div></div></div>")
+                    filas.append(f"<div class='fila-oferta'><div>{nom}</div><div class='sub'>No cotizó</div><div></div><div></div></div>")
                     continue
                 gana = o["Proveedor"] == r["Sugerido"]
                 ancho = max(6, o["Total CLP"] / maximo * 100) if o["Válida"] else 0
@@ -1384,38 +1571,35 @@ elif ss.paso == 4:
                 var_txt = ("" if pd.isna(var) else
                            f"<span class='etiqueta {'roja' if var > UMBRAL_ALZA else 'gris' if var > 0 else ''}'>"
                            f"{abs(var):.0%} {'más caro' if var > 0 else 'más barato'} que la última vez</span>")
+                orig = (f"<br><span class='sub'>{dinero(o['Precio mejorado'], o['Moneda'])} c/u</span>"
+                        if o["Moneda"] != "CLP" else "")
                 filas.append(
-                    f"<div class='fila-oferta'><div><b>{nom}</b>{badge}</div>"
+                    f"<div class='fila-oferta'><div><b>{nom}</b>{badge}{orig}</div>"
                     f"<div><div class='barra {'gana' if gana else ''}' style='width:{ancho:.0f}%'></div>{var_txt}</div>"
                     f"<div style='text-align:right'><b>{dinero(o['Total CLP'])}</b><br>"
                     f"<span class='sub'>{dinero(o['Unit. puesto CLP'])} c/u</span></div>"
                     f"<div class='sub'>Llega {o['Entrega planta']:%d/%m/%Y}</div></div>")
             st.markdown("".join(filas), unsafe_allow_html=True)
 
-            opciones = list(validas["Proveedor"]) + [SIN_ADJ]
+            opciones = list(validas_it["Proveedor"]) + [SIN_ADJ]
             previo = C["decision"].get(n_item, {}).get("prov", r["Sugerido"])
             elegido = st.radio("¿A quién le compras?", opciones, horizontal=True, key=f"dec_{C['ref']}_{n_item}",
                                index=opciones.index(previo) if previo in opciones else len(opciones) - 1)
-            dec = {"prov": elegido}
+            dec = {"prov": elegido, "comentario": ""}
             if elegido not in (r["Sugerido"], SIN_ADJ):
                 e1, e2 = st.columns([1, 2])
-                dec["tipo"] = e1.selectbox("Motivo", ["Aprobado Técnicamente", "Asignación Directa"],
-                                           key=f"tipo_{C['ref']}_{n_item}",
-                                           index=["Aprobado Técnicamente", "Asignación Directa"].index(
-                                               C["decision"].get(n_item, {}).get("tipo", "Aprobado Técnicamente")))
+                motivos = ["Aprobado Técnicamente", "Asignación Directa"]
+                dec["tipo"] = e1.selectbox("Motivo", motivos, key=f"tipo_{C['ref']}_{n_item}",
+                                           index=motivos.index(C["decision"].get(n_item, {}).get("tipo", motivos[0])))
                 dec["comentario"] = e2.text_input("¿Por qué eliges este proveedor? (obligatorio)",
                                                   value=C["decision"].get(n_item, {}).get("comentario", ""),
                                                   key=f"com_{C['ref']}_{n_item}")
-            else:
-                dec["comentario"] = ""
             C["decision"][n_item] = dec
 
     adj = tabla_adjudicacion(C, det, res)
-    C["adj"] = adj
-    st.markdown(f"<div class='mini'><div><b>{dinero(adj['Monto adjudicado CLP'].sum())}</b>total a comprar</div>"
-                f"<div><b>{dinero(adj['Ahorro spot CLP'].sum())}</b>ahorro por negociación</div>"
-                f"<div><b>{dinero(adj['Ahorro vs histórico CLP'].sum())}</b>ahorro vs última compra</div></div>",
-                unsafe_allow_html=True)
+    tarjetas([(dinero(adj["Monto adjudicado CLP"].sum()), "total de tu elección"),
+              (dinero(adj["Ahorro spot CLP"].sum()), "ahorro por negociación"),
+              (dinero(adj["Ahorro vs histórico CLP"].sum()), "ahorro vs última compra")])
     navegacion(True)
 
 # =============================================================================
@@ -1429,18 +1613,19 @@ elif ss.paso == 5:
         navegacion(False)
         st.stop()
     adj = tabla_adjudicacion(C, det, res)
-    items, lineas, prov = C["items"], C["lineas"], C["prov_actual"]
+    items, lineas, prov = C["items"], C["lineas"], prov_df(C)
     total = adj["Monto adjudicado CLP"].sum()
-    st.markdown(f"<div class='mini'><div><b>{dinero(total)}</b>total a comprar</div>"
-                f"<div><b>{int((adj['Proveedor adjudicado'] != SIN_ADJ).sum())} de {len(adj)}</b>ítems con proveedor</div>"
-                f"<div><b>{dinero(adj['Ahorro spot CLP'].sum())}</b>ahorro por negociación</div>"
-                f"<div><b>{dinero(adj['Ahorro vs histórico CLP'].sum())}</b>ahorro vs última compra</div></div>",
-                unsafe_allow_html=True)
+    tarjetas([(dinero(total), "total a comprar"),
+              (f"{int((adj['Proveedor adjudicado'] != SIN_ADJ).sum())} de {len(adj)}", "ítems con proveedor"),
+              (dinero(adj["Ahorro spot CLP"].sum()), "ahorro por negociación"),
+              (dinero(adj["Ahorro vs histórico CLP"].sum()), "ahorro vs última compra")])
+    if total > UMBRAL_TC_CLP:
+        caja("ok", f"Compra sobre $1.000.000: convertida con dólar {dinero(tc['USD'])}, euro {dinero(tc['EUR'])} "
+                   f"y UF {dinero(tc['UF'])} ({html.escape(tc['fuente'])}, {tc['fecha']}).")
 
-    st.markdown("### Resumen de la compra")
-    resumen = adj[["Ítem", "Texto", "Cantidad", "UM", "Proveedor adjudicado", "Monto adjudicado CLP",
-                   "Entrega planta", "Tipo adjudicación"]]
-    st.dataframe(resumen, hide_index=True, use_container_width=True,
+    st.markdown("##### Resumen de la compra")
+    st.dataframe(adj[["Ítem", "Texto", "Cantidad", "UM", "Proveedor adjudicado", "Monto adjudicado CLP",
+                      "Entrega planta", "Tipo adjudicación"]], hide_index=True, use_container_width=True,
                  column_config={"Texto": st.column_config.TextColumn("Material", width="large"),
                                 "Proveedor adjudicado": "Proveedor",
                                 "Monto adjudicado CLP": st.column_config.NumberColumn("Total ($)", format="localized"),
@@ -1451,7 +1636,7 @@ elif ss.paso == 5:
                                     "Unit. puesto CLP": st.column_config.NumberColumn("Unitario puesto ($)", format="localized"),
                                     "Monto línea CLP": st.column_config.NumberColumn("Monto línea ($)", format="localized")})
 
-    st.markdown("### Aprobación")
+    st.markdown("##### Aprobación")
     faltan = pendientes(adj)
     huella = firma(adj[["Ítem", "Proveedor adjudicado", "Monto adjudicado CLP", "Comentario"]].to_json(),
                    tc["USD"], tc["EUR"], tc["UF"])
@@ -1470,10 +1655,9 @@ elif ss.paso == 5:
             st.rerun()
         st.caption("Al aprobar, los reportes dejan de decir BORRADOR. Si cambias algo después, habrá que aprobar de nuevo.")
 
-    st.markdown("### Descargas")
+    st.markdown("##### Descargas")
     ap_rep = C["aprobacion"] if aprobado else {"ok": False, "nombre": "", "fecha": ""}
-    sufijo = "" if aprobado else "_BORRADOR"
-    base_nombre = f"{nombre_archivo(C['ref'])}_{date.today():%Y%m%d}{sufijo}"
+    base_nombre = f"{nombre_archivo(C['ref'])}_{date.today():%Y%m%d}{'' if aprobado else '_BORRADOR'}"
     d1, d2, d3 = st.columns(3)
     d1.download_button("📊  Cuadro comparativo (Excel)", type="primary", use_container_width=True,
                        data=generar_excel(C["ref"], items, lineas, prov, det, adj, tc, ap_rep),
@@ -1484,8 +1668,7 @@ elif ss.paso == 5:
                        file_name=f"Cuadro_comparativo_{base_nombre}.pdf", mime="application/pdf")
     d3.download_button("💾  Guardar para seguir después", use_container_width=True,
                        data=cuadro_a_json(C), file_name=f"Trabajo_{nombre_archivo(C['ref'])}.json",
-                       mime="application/json",
-                       help="Para retomarlo: paso 1 → «Retomar un trabajo guardado»")
+                       mime="application/json", help="Para retomarlo: paso 1 → «Retomar un trabajo guardado»")
 
     st.write("")
     st.divider()
@@ -1493,7 +1676,7 @@ elif ss.paso == 5:
     n1.button("← Volver", on_click=ir_a, args=(4,), use_container_width=True)
 
     def nueva_cotizacion():
-        ss.cuadro, ss.mat_sel, ss.sp_sel = None, set(), set()
+        ss.cuadro, ss.mat_sel, ss.sp_sel, ss.excluidas = None, set(), set(), set()
         ir_a(2)
 
     n3.button("Empezar otra cotización", on_click=nueva_cotizacion, use_container_width=True)
