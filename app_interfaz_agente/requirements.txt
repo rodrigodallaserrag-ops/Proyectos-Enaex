@@ -4,5 +4,6 @@ numpy
 openpyxl
 requests
 fpdf2
+beautifulsoup4
 python-calamine
 holidays
