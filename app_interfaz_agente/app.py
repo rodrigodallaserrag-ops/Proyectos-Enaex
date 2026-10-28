@@ -9,7 +9,7 @@
 #   5. Aprueba y descarga       (Excel, PDF y guardar para seguir después)
 #
 # requirements.txt:
-#   streamlit>=1.37  pandas>=2.1  numpy  openpyxl  requests  fpdf2
+#   streamlit>=1.46  pandas>=2.1  numpy  openpyxl  requests  fpdf2
 #   python-calamine (opcional, lee Excel ~10x más rápido)
 #   holidays        (opcional, feriados de Chile en fechas de entrega)
 # =============================================================================
@@ -117,13 +117,46 @@ REQ_OBLIGATORIAS = ["solped", "texto", "cantidad"]
 HIST_OBLIGATORIAS = ["material", "fecha", "precio"]
 COLS_HIST = ["Últ. compra", "Últ. proveedor", "Últ. precio", "Últ. moneda", "Últ. OC", "N° compras"]
 
-PASOS = [("📂", "Sube tus archivos"), ("🔎", "Elige qué cotizar"), ("📝", "Ingresa las ofertas"),
-         ("⚖️", "Compara y elige"), ("✅", "Aprueba y descarga")]
+# Íconos dibujados en SVG (trazo, heredan el color del texto con currentColor)
+_SVG = {
+    "carpeta": '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4'
+               'a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+    "buscar": '<circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3"/>',
+    "editar": '<path d="M12.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v9.5"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>'
+              '<path d="M13.4 15.6a1 1 0 1 0-3-3l-5 5a2 2 0 0 0-.5.85l-.84 2.87a.5.5 0 0 0 .62.62l2.87-.84'
+              'a2 2 0 0 0 .85-.5z"/>',
+    "balanza": '<path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1'
+               's-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/>',
+    "aprobado": '<circle cx="12" cy="12" r="10"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
+    "check": '<path d="M20 6 9 17l-5-5"/>',
+    "alerta": '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/>'
+              '<path d="M12 9v4"/><path d="M12 17h.01"/>',
+    "empresa": '<rect width="16" height="20" x="4" y="2" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01M12 6h.01'
+               'M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01"/>',
+    "mas": '<path d="M5 12h14"/><path d="M12 5v14"/>',
+}
+
+
+def ico(nombre: str, tam: float = 1.1, clase: str = "") -> str:
+    """Devuelve un ícono SVG en línea; tam en em para que escale con el texto que lo rodea."""
+    return (f"<svg class='ico {clase}' width='{tam}em' height='{tam}em' viewBox='0 0 24 24' fill='none' "
+            f"stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' "
+            f"aria-hidden='true'>{_SVG[nombre]}</svg>")
+
+
+def num(n) -> str:
+    """Número dentro de una insignia redonda, para pasos y secciones numeradas."""
+    return f"<span class='num'>{n}</span>"
+
+
+PASOS = [("carpeta", "Sube tus archivos"), ("buscar", "Elige qué cotizar"), ("editar", "Ingresa las ofertas"),
+         ("balanza", "Compara y elige"), ("aprobado", "Aprueba y descarga")]
+AGREGAR = ":material/add: Agregar proveedor"
 
 # =============================================================================
 # PÁGINA Y ESTILO VISUAL
 # =============================================================================
-st.set_page_config(page_title="Cuadro Comparativo - Enaex", page_icon="⚖️", layout="wide",
+st.set_page_config(page_title="Cuadro Comparativo - Enaex", page_icon=":material/balance:", layout="wide",
                    initial_sidebar_state="collapsed")
 st.markdown("""
 <style>
@@ -152,7 +185,16 @@ st.markdown("""
   .pasos { display: flex; gap: .5rem; margin: 1.3rem 0 1.2rem 0; }
   .paso { flex: 1; text-align: center; padding: .6rem .3rem; border-radius: 12px; font-size: .88rem;
           background: rgba(128,128,128,.12); opacity: .75; border: 2px solid transparent; }
-  .paso b { display: block; font-size: 1.2rem; margin-bottom: .1rem; }
+  .paso .ico-paso { display: flex; justify-content: center; margin-bottom: .3rem; }
+  .paso.hecho .ico-paso { color: #059669; }
+  .paso.actual .ico-paso { color: var(--rojo); }
+  .ico { display: inline-block; vertical-align: -0.18em; flex-shrink: 0; }
+  .num { display: inline-flex; align-items: center; justify-content: center; min-width: 1.55em; height: 1.55em;
+         padding: 0 .3em; border-radius: 7px; background: var(--rojo); color: #FFFFFF; font-size: .8em;
+         font-weight: 700; line-height: 1; margin-right: .45rem; vertical-align: .12em; }
+  .ok .ico { color: #059669; margin-right: .35rem; }
+  .ojo .ico, .alerta-tc .ico { color: #D97706; margin-right: .35rem; }
+  .titulo-ico { color: var(--rojo); margin-right: .4rem; }
   .paso.hecho { background: rgba(5,150,105,.16); opacity: 1; }
   .paso.actual { background: rgba(158,43,47,.14); border-color: var(--rojo); opacity: 1; font-weight: 700; }
   .ayuda { background: rgba(30,58,138,.08); border-left: 4px solid var(--rojo); padding: .8rem 1rem;
@@ -1195,9 +1237,9 @@ def fijar_tc(moneda, valor):
 
 
 _, a1, a2 = st.columns([5.6, 1.2, 1.2], gap="small")
-a2.button("🔄 Actualizar", on_click=refrescar_tc, use_container_width=True,
+a2.button("Actualizar", icon=":material/refresh:", on_click=refrescar_tc, use_container_width=True,
           help="Vuelve a consultar los valores del día y descarta lo escrito a mano")
-with a1.popover("✏️ Ajustar", use_container_width=True):
+with a1.popover("Ajustar", icon=":material/edit:", use_container_width=True):
     st.caption("Escribe el valor si necesitas otro (por ejemplo, el de la fecha de la oferta).")
     for k in ["USD", "EUR", "UF"]:
         v = st.number_input(NOMBRE_TC[k], value=float(tc[k]), min_value=0.0, step=1.0, format="%.2f",
@@ -1211,9 +1253,10 @@ if sin_valor:
     nombres_sv = [NOMBRE_TC[k] for k in sin_valor]
     nombres_sv = nombres_sv[0] if len(nombres_sv) == 1 else ", ".join(nombres_sv[:-1]) + " y " + nombres_sv[-1]
     with st.container(border=True):
-        st.markdown(f"⚠️ No pudimos traer **{nombres_sv}** desde internet (tu red puede estar bloqueando las páginas "
-                    "del Banco Central y del SII). Escribe el valor de hoy y quedará guardado para la próxima vez. "
-                    "Solo es obligatorio si alguna oferta o transporte está en esa moneda.")
+        st.markdown(f"<span class='alerta-tc'>{ico('alerta')}</span>No pudimos traer **{nombres_sv}** desde internet "
+                    "(tu red puede estar bloqueando las páginas del Banco Central y del SII). Escribe el valor de hoy "
+                    "y quedará guardado para la próxima vez. "
+                    "Solo es obligatorio si alguna oferta o transporte está en esa moneda.", unsafe_allow_html=True)
         cols_sv = st.columns(len(sin_valor) + 1)
         for col, k in zip(cols_sv, sin_valor):
             v = col.number_input(f"{NOMBRE_TC[k]} de hoy ($)", min_value=0.0, step=1.0, format="%.2f",
@@ -1227,7 +1270,7 @@ if sin_valor:
 
 barra = "".join(
     f"<div class='paso {'actual' if i == ss.paso else 'hecho' if i < ss.paso else ''}'>"
-    f"<b>{'✓' if i < ss.paso else ic}</b>{i}. {txt}</div>"
+    f"<span class='ico-paso'>{ico('check' if i < ss.paso else ic, 1.35)}</span>{i}. {txt}</div>"
     for i, (ic, txt) in enumerate(PASOS, start=1))
 st.markdown(f"<div class='pasos'>{barra}</div>", unsafe_allow_html=True)
 
@@ -1253,12 +1296,12 @@ if ss.paso == 1:
                   "Si además subes el histórico de compras, verás cuánto se pagó la última vez por cada material.")
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("#### 1️⃣ Planilla de SOLPED")
+        st.markdown(f"#### {num(1)}Planilla de SOLPED", unsafe_allow_html=True)
         st.caption("Obligatoria · Excel o CSV")
         f_req = st.file_uploader("Planilla de SOLPED", type=["xlsx", "xlsm", "xls", "csv"],
                                  label_visibility="collapsed", key="up_req")
     with c2:
-        st.markdown("#### 2️⃣ Histórico de compras")
+        st.markdown(f"#### {num(2)}Histórico de compras", unsafe_allow_html=True)
         st.caption("Opcional · Cuadro MRO (hoja Ultima COMPRA), ME2M o CSV")
         f_hist = st.file_uploader("Histórico de compras", type=["xlsx", "xlsm", "xls", "csv"],
                                   label_visibility="collapsed", key="up_hist")
@@ -1317,7 +1360,7 @@ if ss.paso == 1:
 
     st.write("")
     o1, o2 = st.columns(2)
-    with o1.expander("✍️ No tengo planilla: escribir los materiales a mano"):
+    with o1.expander("No tengo planilla: escribir los materiales a mano", icon=":material/edit_note:"):
         sp_man = st.text_input("N° de SOLPED", key="sp_manual")
         plantilla = pd.DataFrame({"Material": [""], "Texto": [""], "Cantidad": [1.0], "UM": ["C/U"],
                                   "Precio ref.": [0.0], "Moneda ref.": ["CLP"], "Centro": [""]})
@@ -1338,7 +1381,7 @@ if ss.paso == 1:
             ss.req, ss.sp_sel, ss.excluidas = pm, {sp_man.strip()}, set()
             ir_a(2)
             st.rerun()
-    with o2.expander("💾 Retomar un trabajo guardado"):
+    with o2.expander("Retomar un trabajo guardado", icon=":material/history:"):
         f_json = st.file_uploader("Archivo .json guardado en el paso 5", type=["json"], key="up_json")
         if f_json is not None:
             if ss.archivos.get("json") != firma(f_json.name, f_json.size):
@@ -1354,11 +1397,11 @@ if ss.paso == 1:
 # =============================================================================
 elif ss.paso == 2:
     req = ss.req
-    caja("ayuda", "<b>①</b> Marca ✔ los materiales o SOLPED que quieres cotizar. "
-                  "<b>②</b> Abajo aparecen todas sus posiciones: desmarca las que <b>no</b> quieres incluir "
+    caja("ayuda", f"{num(1)}Marca {ico('check', 1)} los materiales o SOLPED que quieres cotizar. "
+                  f"<br>{num(2)}Abajo aparecen todas sus posiciones: desmarca las que <b>no</b> quieres incluir "
                   "(se quedan pendientes para otra cotización). Lo que piden varias SOLPED se junta en una sola línea.")
     c1, c2, c3 = st.columns([3, 1.6, 1.4])
-    busca = c1.text_input("🔍 Buscar", placeholder="Escribe un material, código o N° de SOLPED…",
+    busca = c1.text_input("Buscar", placeholder="Escribe un material, código o N° de SOLPED…",
                           label_visibility="collapsed")
     vista = c2.segmented_control("Ver", ["Por SOLPED", "Por material"], default="Por SOLPED",
                                  label_visibility="collapsed") or "Por SOLPED"
@@ -1399,7 +1442,7 @@ elif ss.paso == 2:
 
     tabla = ss.sel_tabla
     if vista == "Por material":
-        cfg = {"Cotizar": st.column_config.CheckboxColumn("✔", width="small"),
+        cfg = {"Cotizar": st.column_config.CheckboxColumn("Cotizar", width="small"),
                "Texto": st.column_config.TextColumn("Material", width="large"),
                "Material": st.column_config.TextColumn("Código"),
                "SOLPED": st.column_config.NumberColumn("Lo piden", format="%d SOLPED"),
@@ -1410,12 +1453,12 @@ elif ss.paso == 2:
         orden = ["Cotizar", "Texto", "Material", "UM", "SOLPED", "Cantidad", "Días", "Últ. proveedor", "Últ. precio",
                  "Últ. moneda"]
     else:
-        cfg = {"Cotizar": st.column_config.CheckboxColumn("✔", width="small"),
+        cfg = {"Cotizar": st.column_config.CheckboxColumn("Cotizar", width="small"),
                "Posiciones": st.column_config.NumberColumn("Posiciones", format="%d"),
                "Días": st.column_config.NumberColumn("Antigüedad", format="%d días"),
                "Contenido": st.column_config.TextColumn("Qué pide", width="large")}
         orden = ["Cotizar", "SOLPED", "Contenido", "Posiciones", "Días", "Centro"]
-    st.markdown("##### ① ¿Qué quieres cotizar?")
+    st.markdown(f"##### {num(1)}¿Qué quieres cotizar?", unsafe_allow_html=True)
     editado = st.data_editor(tabla, key=f"sel_{ss.sel_ver}", hide_index=True, use_container_width=True,
                              height=300, column_order=orden, column_config=cfg,
                              disabled=[c for c in tabla.columns if c != "Cotizar"])
@@ -1425,9 +1468,9 @@ elif ss.paso == 2:
 
     cand = candidatas()
     if cand.empty:
-        caja("sub", "Marca la casilla ✔ de una SOLPED o de un material para ver sus posiciones.")
+        caja("sub", f"Marca la casilla {ico('check', 1)} de una SOLPED o de un material para ver sus posiciones.")
     else:
-        st.markdown("##### ② Elige qué posiciones entran al cuadro")
+        st.markdown(f"##### {num(2)}Elige qué posiciones entran al cuadro", unsafe_allow_html=True)
         b1, b2, _ = st.columns([1, 1, 3])
 
         def marcar_todas(valor: bool):
@@ -1435,8 +1478,8 @@ elif ss.paso == 2:
             ss.excluidas = (ss.excluidas - ids) if valor else (ss.excluidas | ids)
             ss.lin_ver += 1
 
-        b1.button("☑ Marcar todas", on_click=marcar_todas, args=(True,), use_container_width=True)
-        b2.button("☐ Desmarcar todas", on_click=marcar_todas, args=(False,), use_container_width=True)
+        b1.button("Marcar todas", icon=":material/check_box:", on_click=marcar_todas, args=(True,), use_container_width=True)
+        b2.button("Desmarcar todas", icon=":material/check_box_outline_blank:", on_click=marcar_todas, args=(False,), use_container_width=True)
         vista_lin = cand[["id", "SOLPED", "Pos", "Material", "Texto", "Cantidad", "UM", "Precio ref.",
                           "Moneda ref.", "Centro"]].copy()
         vista_lin.insert(0, "Incluir", ~vista_lin["id"].isin(ss.excluidas))
@@ -1498,7 +1541,7 @@ elif ss.paso == 3:
               (dinero(ref_clp) if ref_clp else "—", "valor referencial SOLPED")])
 
     clave_sel = f"psel_{C['ref']}"
-    opciones = list(C["prov"]) + ["➕ Agregar proveedor"]
+    opciones = list(C["prov"]) + [AGREGAR]
     if ss.get(clave_sel) not in opciones:
         ss[clave_sel] = opciones[0]
 
@@ -1517,14 +1560,14 @@ elif ss.paso == 3:
     def quitar_proveedor(nombre):
         C["prov"].pop(nombre, None)
         congelar()
-        ss[clave_sel] = (list(C["prov"]) or ["➕ Agregar proveedor"])[0]
+        ss[clave_sel] = (list(C["prov"]) or [AGREGAR])[0]
 
     st.segmented_control("Proveedor", opciones, key=clave_sel, on_change=congelar, label_visibility="collapsed")
     actual = ss.get(clave_sel) or opciones[0]
 
-    if actual == "➕ Agregar proveedor":
+    if actual == AGREGAR:
         with st.container(border=True):
-            st.markdown("#### ➕ Nuevo proveedor")
+            st.markdown(f"#### <span class='titulo-ico'>{ico('mas')}</span>Nuevo proveedor", unsafe_allow_html=True)
             n1, n2 = st.columns([3, 1])
             n1.text_input("Nombre del proveedor", key=f"nuevo_{C['ref']}", placeholder="Ej: Sonepar Chile S.A.")
             n2.write("")
@@ -1542,8 +1585,9 @@ elif ss.paso == 3:
         k = lambda campo: f"pv_{C['ref']}_{firma(nombre)}_{campo}"
         with st.container(border=True):
             h1, h2 = st.columns([4, 1])
-            h1.markdown(f"#### 🏢 {html.escape(nombre)}")
-            h2.button("🗑 Quitar", key=k("quitar"), on_click=quitar_proveedor, args=(nombre,), use_container_width=True)
+            h1.markdown(f"#### <span class='titulo-ico'>{ico('empresa')}</span>{html.escape(nombre)}",
+                        unsafe_allow_html=True)
+            h2.button("Quitar", icon=":material/delete:", key=k("quitar"), on_click=quitar_proveedor, args=(nombre,), use_container_width=True)
 
             st.markdown("**Oferta y transporte**")
             f1, f2, f3, f4 = st.columns(4)
@@ -1610,7 +1654,7 @@ elif ss.paso == 3:
                       (f"{f_desp:%d/%m/%Y}", "despacho del proveedor"),
                       (f"{f_planta:%d/%m/%Y}", "llega a planta")])
 
-    with st.expander("📨 Opcional: enviar planilla de cotización por correo e importar respuestas"):
+    with st.expander("Opcional: enviar planilla de cotización por correo e importar respuestas", icon=":material/mail:"):
         caja("sub", "Si prefieres pedir la oferta por escrito, descarga esta planilla (no muestra precios internos). "
                     "Cuando el proveedor la devuelva, súbela y sus precios se cargan solos.")
         r1, r2 = st.columns(2)
@@ -1619,7 +1663,7 @@ elif ss.paso == 3:
             correo = st.text_input("Tu correo", value=ss.get("mi_correo", ""))
             limite = st.date_input("Responder antes del", value=date.today() + timedelta(days=3), format="DD/MM/YYYY")
             ss.mi_nombre, ss.mi_correo = comprador, correo
-            st.download_button("⬇️ Descargar planilla para proveedor", use_container_width=True,
+            st.download_button("Descargar planilla para proveedor", icon=":material/download:", use_container_width=True,
                                data=generar_rfq(C["ref"], items, lineas,
                                                 {"comprador": comprador, "correo": correo, "fecha_limite": limite,
                                                  "entrega": unir_unicos(items["Centro"])}),
@@ -1643,7 +1687,7 @@ elif ss.paso == 3:
                 except Exception as e:
                     C["importados"][clave_f] = ("error", f"{f.name}: no se pudo leer ({e}).")
             for estado, msg in C["importados"].values():
-                caja("ok" if estado == "ok" else "ojo", ("✔ " if estado == "ok" else "⚠ ") + html.escape(msg))
+                caja("ok" if estado == "ok" else "ojo", ico("check" if estado == "ok" else "alerta") + html.escape(msg))
 
     hay_precios = bool(C["prov"]) and C.get("of_last") is not None and C["of_last"]["Precio inicial"].fillna(0).gt(0).any()
     faltan = faltan_tc(monedas_en_uso(C))
@@ -1792,13 +1836,13 @@ elif ss.paso == 5:
     ap = C["aprobacion"]
     aprobado = ap.get("ok") and ap.get("firma") == huella
     if faltan:
-        caja("ojo", "<b>Antes de aprobar, revisa:</b><br>" + "<br>".join("• " + html.escape(m) for m in faltan))
+        caja("ojo", ico("alerta") + "<b>Antes de aprobar, revisa:</b><br>" + "<br>".join("• " + html.escape(m) for m in faltan))
     elif aprobado:
-        caja("ok", f"✔ Aprobado por <b>{html.escape(ap['nombre'])}</b> el {ap['fecha']}.")
+        caja("ok", f"{ico('aprobado')}Aprobado por <b>{html.escape(ap['nombre'])}</b> el {ap['fecha']}.")
     else:
         a1, a2 = st.columns([2, 1])
         quien = a1.text_input("Tu nombre", value=ss.get("mi_nombre", ""), placeholder="Quién aprueba")
-        if a2.button("✅ Aprobar compra", type="primary", disabled=not quien.strip(), use_container_width=True):
+        if a2.button("Aprobar compra", icon=":material/task_alt:", type="primary", disabled=not quien.strip(), use_container_width=True):
             C["aprobacion"] = {"ok": True, "nombre": quien.strip(),
                                "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "firma": huella}
             st.rerun()
@@ -1808,14 +1852,14 @@ elif ss.paso == 5:
     ap_rep = C["aprobacion"] if aprobado else {"ok": False, "nombre": "", "fecha": ""}
     base_nombre = f"{nombre_archivo(C['ref'])}_{date.today():%Y%m%d}{'' if aprobado else '_BORRADOR'}"
     d1, d2, d3 = st.columns(3)
-    d1.download_button("📊  Cuadro comparativo (Excel)", type="primary", use_container_width=True,
+    d1.download_button("Cuadro comparativo (Excel)", icon=":material/table_view:", type="primary", use_container_width=True,
                        data=generar_excel(C["ref"], items, lineas, prov, det, adj, tc, ap_rep),
                        file_name=f"Cuadro_comparativo_{base_nombre}.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    d2.download_button("📄  Resumen (PDF)", use_container_width=True,
+    d2.download_button("Resumen (PDF)", icon=":material/picture_as_pdf:", use_container_width=True,
                        data=generar_pdf(C["ref"], adj, lineas, tc, ap_rep),
                        file_name=f"Cuadro_comparativo_{base_nombre}.pdf", mime="application/pdf")
-    d3.download_button("💾  Guardar para seguir después", use_container_width=True,
+    d3.download_button("Guardar para seguir después", icon=":material/save:", use_container_width=True,
                        data=cuadro_a_json(C), file_name=f"Trabajo_{nombre_archivo(C['ref'])}.json",
                        mime="application/json", help="Para retomarlo: paso 1 → «Retomar un trabajo guardado»")
 
