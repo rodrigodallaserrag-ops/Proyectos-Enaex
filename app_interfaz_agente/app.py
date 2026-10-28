@@ -129,18 +129,27 @@ st.markdown("""
 <style>
   :root { --rojo: #9E2B2F; --rojo-osc: #7F1D1D; }
   [data-testid="stSidebar"], [data-testid="collapsedControl"] { display: none; }
-  [data-testid="stMainBlockContainer"] { max-width: 1200px; padding-top: 3.2rem; padding-bottom: 5rem; }
-  .banner { background: var(--rojo); border-radius: 14px; padding: 1.1rem 1.4rem; color: #FFFFFF;
-            display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  [data-testid="stMainBlockContainer"] { max-width: 1200px; padding-top: 2.6rem; padding-bottom: 5rem; }
+  .banner { background: linear-gradient(135deg, var(--rojo) 0%, var(--rojo-osc) 100%); border-radius: 16px;
+            padding: 1.6rem 2rem; color: #FFFFFF; margin: .4rem 0 1.1rem 0;
+            box-shadow: 0 6px 18px rgba(127,29,29,.18);
+            display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 2rem; row-gap: 1rem; }
+  .banner .izq { display: flex; flex-direction: column; justify-content: center; gap: .35rem; }
   .banner .marca { font-size: .78rem; letter-spacing: .12em; text-transform: uppercase; opacity: .85; }
-  .banner .titulo { font-size: 1.65rem; font-weight: 700; line-height: 1.2; }
-  .tasas { display: flex; gap: .5rem; flex-wrap: wrap; }
-  .tasa { background: rgba(0,0,0,.22); border-radius: 10px; padding: .45rem .8rem; text-align: center; min-width: 110px; }
-  .tasa span { display: block; font-size: .72rem; opacity: .85; text-transform: uppercase; letter-spacing: .06em; }
-  .tasa b { font-size: 1.15rem; }
+  .banner .titulo { font-size: 1.75rem; font-weight: 700; line-height: 1.15; }
+  .banner .fuente { font-size: .74rem; opacity: .72; margin-top: .2rem; }
+  .tasas { display: grid; grid-template-columns: repeat(3, 128px); gap: .6rem; }
+  .tasa { background: rgba(0,0,0,.2); border: 1px solid rgba(255,255,255,.08); border-radius: 12px;
+          padding: .65rem .5rem; text-align: center; }
+  .tasa span { display: block; font-size: .7rem; opacity: .85; text-transform: uppercase; letter-spacing: .08em;
+               margin-bottom: .15rem; }
+  .tasa b { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
   .tasa.usd b { color: #7DD3FC; } .tasa.eur b { color: #FDE047; } .tasa.uf b { color: #FDBA74; }
-  .fuente { font-size: .75rem; opacity: .7; text-align: right; margin-top: .25rem; }
-  .pasos { display: flex; gap: .5rem; margin: .9rem 0 1.2rem 0; }
+  @media (max-width: 860px) {
+    .banner { grid-template-columns: 1fr; padding: 1.3rem 1.3rem; }
+    .tasas { grid-template-columns: repeat(3, 1fr); }
+  }
+  .pasos { display: flex; gap: .5rem; margin: 1.3rem 0 1.2rem 0; }
   .paso { flex: 1; text-align: center; padding: .6rem .3rem; border-radius: 12px; font-size: .88rem;
           background: rgba(128,128,128,.12); opacity: .75; border: 2px solid transparent; }
   .paso b { display: block; font-size: 1.2rem; margin-bottom: .1rem; }
@@ -1165,10 +1174,12 @@ detalle_fuente = ", ".join(f"{NOMBRE_TC[k]}: {v}" for k, v in tc["fuente_por_mon
     if len(fuentes_usadas) > 1 else (fuentes_usadas[0] if fuentes_usadas else "sin conexión")
 origen_tc = f"{detalle_fuente} · consultado a las {tc['hora']}"
 st.markdown(
-    "<div class='banner'><div><div class='marca'>Enaex · Gerencia de Abastecimiento</div>"
-    "<div class='titulo'>Cuadro comparativo de ofertas</div></div>"
-    f"<div><div class='tasas'>{tasa_html('usd', 'Dólar', tc['USD'])}{tasa_html('eur', 'Euro', tc['EUR'])}"
-    f"{tasa_html('uf', 'UF', tc['UF'])}</div><div class='fuente'>{html.escape(origen_tc)}</div></div></div>",
+    "<div class='banner'>"
+    "<div class='izq'><div class='marca'>Enaex · Gerencia de Abastecimiento</div>"
+    "<div class='titulo'>Cuadro comparativo de ofertas</div>"
+    f"<div class='fuente'>{html.escape(origen_tc)}</div></div>"
+    f"<div class='tasas'>{tasa_html('usd', 'Dólar', tc['USD'])}{tasa_html('eur', 'Euro', tc['EUR'])}"
+    f"{tasa_html('uf', 'UF', tc['UF'])}</div></div>",
     unsafe_allow_html=True)
 
 
@@ -1183,7 +1194,7 @@ def fijar_tc(moneda, valor):
         guardar_cache_tc({moneda: (valor, date.today().isoformat())})
 
 
-_, a1, a2 = st.columns([5, 1.3, 1.1])
+_, a1, a2 = st.columns([5.6, 1.2, 1.2], gap="small")
 a2.button("🔄 Actualizar", on_click=refrescar_tc, use_container_width=True,
           help="Vuelve a consultar los valores del día y descarta lo escrito a mano")
 with a1.popover("✏️ Ajustar", use_container_width=True):
