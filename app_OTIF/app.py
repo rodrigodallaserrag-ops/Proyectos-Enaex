@@ -1,6 +1,8 @@
 import html
 import io
+import unicodedata
 
+import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
@@ -47,6 +49,19 @@ COLOR_PIZARRA = "#3b4852"
 COLOR_AZUL = "#2f7fc1"
 COLOR_AMBAR = "#c98a12"
 COLOR_VERDE = "#2e8b57"
+COLOR_GRIS = "#7a8691"
+
+# Movimientos de ME80FN: 101 suma la recepción, 102 la anula
+MOV_POSITIVOS = {101}
+MOV_NEGATIVOS = {102}
+# Nombres posibles de la columna de cantidad en ME80FN (se usa la primera que exista)
+CANDIDATOS_CANTIDAD = ['Cantidad', 'Ctd.en UM pedido', 'Cantidad en UMP']
+
+# Contraseña: se toma de st.secrets["password"] si existe; si no, se usa la actual
+try:
+    CLAVE_ACCESO = st.secrets["password"]
+except Exception:
+    CLAVE_ACCESO = "ENAEX2026"
 
 COLOR_ESTADO = {
     "A Tiempo": COLOR_AZUL,
@@ -56,6 +71,7 @@ COLOR_ESTADO = {
     "Atrasado": COLOR_ROJO,
     "Incompleto": COLOR_ROJO,
     "No Cumple": COLOR_ROJO,
+    "En plazo": COLOR_GRIS,
 }
 
 # ==========================================
@@ -421,6 +437,7 @@ def aviso(texto, tipo="info"):
         "info": ("info", COLOR_AZUL),
         "error": ("alerta", COLOR_ROJO),
         "ok": ("check_circulo", COLOR_VERDE),
+        "advertencia": ("alerta", COLOR_AMBAR),
     }
     nombre_icono, color = config.get(tipo, config["info"])
     st.markdown(
@@ -467,7 +484,7 @@ if not st.session_state["autenticado"]:
             ingresar = st.form_submit_button("Ingresar", type="primary", use_container_width=True)
 
         if ingresar:
-            if clave == "ENAEX2026":
+            if clave == CLAVE_ACCESO:
                 st.session_state["autenticado"] = True
                 st.rerun()
             elif clave != "":
@@ -495,25 +512,83 @@ def obtener_buffer_archivo(origen):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
         }
-        response = requests.get(origen, headers=headers)
+        response = requests.get(origen, headers=headers, timeout=60)
         response.raise_for_status()
         return io.BytesIO(response.content)
     return origen
 
+def normalizar_llave(serie):
+    """Convierte códigos a texto comparable: 4500012345.0, '4500012345' y ' 00010' quedan iguales."""
+    numeros = pd.to_numeric(serie, errors="coerce")
+    texto_num = numeros.map(lambda x: str(int(round(x))) if pd.notna(x) else None)
+    texto = serie.astype(str).str.strip()
+    return texto_num.fillna(texto)
+
+
+def normalizar_texto(valor):
+    """Minúsculas y sin tildes, para comparar nombres como 'Sofia' y 'Sofía'."""
+    sin_tildes = unicodedata.normalize("NFKD", str(valor))
+    return "".join(c for c in sin_tildes if not unicodedata.combining(c)).lower().strip()
+
+
+def calcular_fecha_recepcion(df_mov, col_cantidad, llaves):
+    """
+    Fecha en que cada posición alcanzó su cantidad recibida neta final.
+    Las anulaciones (102) restan, así una recepción reversada no cuenta para el On Time.
+    """
+    df_mov = df_mov.dropna(subset=['Fe.contabilización']).copy()
+    mov = pd.to_numeric(df_mov['Clase de movimiento'], errors='coerce')
+
+    if col_cantidad is None:
+        df_101 = df_mov[mov.isin(MOV_POSITIVOS)]
+        return df_101.groupby(llaves).agg(Fecha_Ingreso_SAP=('Fe.contabilización', 'max')).reset_index()
+
+    signo = np.where(mov.isin(MOV_NEGATIVOS), -1, 1)
+    df_mov['Cant_neta'] = pd.to_numeric(df_mov[col_cantidad], errors='coerce').abs().fillna(0) * signo
+
+    diario = (
+        df_mov.groupby(llaves + ['Fe.contabilización'], as_index=False)['Cant_neta'].sum()
+        .sort_values(llaves + ['Fe.contabilización'])
+    )
+    diario['acum'] = diario.groupby(llaves)['Cant_neta'].cumsum().round(6)
+    diario['previo'] = (diario['acum'] - diario['Cant_neta']).round(6)
+    diario['final'] = diario.groupby(llaves)['acum'].transform('last')
+
+    # Último día en que el acumulado pasó de estar bajo el total final a alcanzarlo
+    cruces = diario[
+        (diario['final'] > 0) &
+        (diario['previo'] < diario['final']) &
+        (diario['acum'] >= diario['final'])
+    ]
+    return cruces.groupby(llaves).agg(Fecha_Ingreso_SAP=('Fe.contabilización', 'max')).reset_index()
+
+
 @st.cache_data(show_spinner="Cargando y procesando datos...")
-def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
+def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo, hoy):
+    """Devuelve (df_otif, avisos). 'hoy' forma parte de la caché para que el cálculo se renueve cada día."""
+    avisos = []
+    llaves = ['Documento compras', 'Posición']
+
     buffer_me2m = obtener_buffer_archivo(file_me2m)
     buffer_me80fn = obtener_buffer_archivo(file_me80fn)
     buffer_centro = obtener_buffer_archivo(file_centro)
     buffer_grupo = obtener_buffer_archivo(file_grupo)
 
-    # 1. LECTURA Y FILTRO DE ME80FN (Agregada Clase de movimiento 101)
+    # 1. LECTURA DE ME2M Y ME80FN
     df_me2m = pd.read_excel(buffer_me2m, engine="openpyxl")
-    cols_me80fn = ['Documento compras', 'Posición', 'Fe.contabilización', 'Clase de movimiento']
+    cols_me80fn = llaves + ['Fe.contabilización', 'Clase de movimiento'] + CANDIDATOS_CANTIDAD
     df_me80fn = pd.read_excel(buffer_me80fn, engine="openpyxl", usecols=lambda c: c in cols_me80fn)
 
-    if 'Clase de movimiento' in df_me80fn.columns:
-        df_me80fn = df_me80fn[df_me80fn['Clase de movimiento'].astype(str) == '101']
+    # Clase de movimiento como número: evita que 101.0 se pierda al comparar con '101'
+    mov = pd.to_numeric(df_me80fn['Clase de movimiento'], errors='coerce')
+    df_me80fn = df_me80fn[mov.isin(MOV_POSITIVOS | MOV_NEGATIVOS)].copy()
+
+    col_cantidad = next((c for c in CANDIDATOS_CANTIDAD if c in df_me80fn.columns), None)
+    if col_cantidad is None:
+        avisos.append(
+            "ME80FN no trae una columna de cantidad, así que las anulaciones (102) no se descuentan. "
+            f"Columnas buscadas: {', '.join(CANDIDATOS_CANTIDAD)}."
+        )
 
     # 2. FILTROS EN ME2M (Reglas de negocio)
     if 'Indicador de borrado' in df_me2m.columns:
@@ -531,25 +606,40 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
     # if 'Clase de documento' in df_me2m.columns:
     #     df_me2m = df_me2m[df_me2m['Clase de documento'] != 'ZMAS'].copy()
 
-    # 3. MERGE DE CENTROS Y GRUPOS
+    # Llaves en el mismo formato en ambos archivos
+    for col in llaves:
+        df_me2m[col] = normalizar_llave(df_me2m[col])
+        df_me80fn[col] = normalizar_llave(df_me80fn[col])
+
+    # 3. MERGE DE CENTROS Y GRUPOS (sin duplicar posiciones)
+    df_me2m['Centro'] = normalizar_llave(df_me2m['Centro'])
     try:
         df_centro = pd.read_excel(buffer_centro, engine="openpyxl")
-        df_centro['Título'] = df_centro['Título'].astype(str)
-        df_me2m['Centro'] = df_me2m['Centro'].astype(str)
+        df_centro['Título'] = normalizar_llave(df_centro['Título'])
+        repetidos = df_centro['Título'].duplicated().sum()
+        if repetidos:
+            avisos.append(f"El archivo de centros tiene {repetidos} código(s) repetido(s); se usó la primera fila de cada uno.")
+        df_centro = df_centro.drop_duplicates(subset='Título')
         df_me2m = pd.merge(df_me2m, df_centro[['Título', 'Nombre Centro', 'Nombre Centro 2']],
                            left_on='Centro', right_on='Título', how='left')
-    except Exception:
+    except Exception as e:
+        avisos.append(f"No se pudo usar el archivo de centros ({e}). Se muestran los códigos de centro.")
         df_me2m['Nombre Centro'] = df_me2m['Centro']
         df_me2m['Nombre Centro 2'] = df_me2m['Centro']
 
+    df_me2m['Grupo de compras'] = normalizar_llave(df_me2m['Grupo de compras'])
     try:
         df_grupo = pd.read_excel(buffer_grupo, engine="openpyxl")
-        df_grupo['Grupo de Compras'] = df_grupo['Grupo de Compras'].astype(str)
-        df_me2m['Grupo de compras'] = df_me2m['Grupo de compras'].astype(str)
+        df_grupo['Grupo de Compras'] = normalizar_llave(df_grupo['Grupo de Compras'])
+        repetidos = df_grupo['Grupo de Compras'].duplicated().sum()
+        if repetidos:
+            avisos.append(f"El archivo de grupos tiene {repetidos} grupo(s) repetido(s); se usó la primera fila de cada uno.")
+        df_grupo = df_grupo.drop_duplicates(subset='Grupo de Compras')
         df_me2m = pd.merge(df_me2m, df_grupo[['Grupo de Compras', 'Responsable.title']],
                            left_on='Grupo de compras', right_on='Grupo de Compras', how='left')
         df_me2m.rename(columns={'Responsable.title': 'Comprador'}, inplace=True)
-    except Exception:
+    except Exception as e:
+        avisos.append(f"No se pudo usar el archivo de grupos ({e}). Se muestran los códigos de grupo como comprador.")
         df_me2m['Comprador'] = df_me2m['Grupo de compras']
 
     df_me2m['Nombre Centro'] = df_me2m['Nombre Centro'].fillna(df_me2m['Centro'])
@@ -569,44 +659,56 @@ def procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo):
 
     df_me2m['Nombre Centro 2'] = df_me2m['Nombre Centro 2'].apply(agrupar_centro_logistico)
 
-    # 4. AGRUPACIÓN DE RECEPCIONES (Deduplicación)
-    df_recepciones = df_me80fn.groupby(['Documento compras', 'Posición']).agg(
-        Fecha_Ingreso_SAP=('Fe.contabilización', 'max')
-    ).reset_index()
+    # 4. FECHA DE RECEPCIÓN EFECTIVA (neta de anulaciones)
+    df_me80fn['Fe.contabilización'] = pd.to_datetime(df_me80fn['Fe.contabilización'], errors='coerce', dayfirst=True)
+    df_recepciones = calcular_fecha_recepcion(df_me80fn, col_cantidad, llaves)
 
     # 5. MERGE FINAL Y CÁLCULOS
-    df_otif = pd.merge(df_me2m, df_recepciones, on=['Documento compras', 'Posición'], how='left')
+    df_otif = pd.merge(df_me2m, df_recepciones, on=llaves, how='left')
 
-    df_otif['Fecha_Estadistica'] = pd.to_datetime(df_otif['Fecha entrega estad.'], errors='coerce').dt.date
-    df_otif['Fecha_Ingreso_SAP'] = pd.to_datetime(df_otif['Fecha_Ingreso_SAP'], errors='coerce').dt.date
+    if len(df_recepciones) > 0 and df_otif['Fecha_Ingreso_SAP'].notna().sum() == 0:
+        avisos.append(
+            "Ninguna recepción de ME80FN cruzó con las posiciones de ME2M. "
+            "Revisa que 'Documento compras' y 'Posición' correspondan a los mismos pedidos."
+        )
 
-    def formatear_semana(fecha_val):
-        if pd.isna(fecha_val):
-            return 'Sin Fecha'
-        d = pd.to_datetime(fecha_val)
-        lunes = d - pd.Timedelta(days=d.weekday())
-        sem = d.isocalendar()[1]
-        return f"Sem {sem:02d} - {lunes.strftime('%d/%m/%y')}"
+    fecha_estad = pd.to_datetime(df_otif['Fecha entrega estad.'], errors='coerce', dayfirst=True).dt.normalize()
+    fecha_ingreso = pd.to_datetime(df_otif['Fecha_Ingreso_SAP'], errors='coerce').dt.normalize()
+    hoy_ts = pd.Timestamp(hoy)
 
-    df_otif['Semana/Año'] = df_otif['Fecha_Estadistica'].apply(formatear_semana)
+    # Semana (vectorizado) y lunes para ordenar correctamente entre años
+    lunes = fecha_estad - pd.to_timedelta(fecha_estad.dt.weekday, unit='D')
+    semana_iso = fecha_estad.dt.isocalendar().week
+    etiqueta = "Sem " + semana_iso.astype('Int64').astype(str).str.zfill(2) + " - " + lunes.dt.strftime('%d/%m/%y')
+    df_otif['Semana/Año'] = etiqueta.where(fecha_estad.notna(), 'Sin Fecha')
+    df_otif['Semana_Lunes'] = lunes.dt.date
 
-    df_otif['In_Full'] = df_otif['Por entregar (cantidad)'] == 0
-    df_otif['On_Time'] = (
-        df_otif['Fecha_Ingreso_SAP'].notna() &
-        df_otif['Fecha_Estadistica'].notna() &
-        (df_otif['Fecha_Ingreso_SAP'] <= df_otif['Fecha_Estadistica'])
-    )
+    df_otif['In_Full'] = pd.to_numeric(df_otif['Por entregar (cantidad)'], errors='coerce') <= 0
+    df_otif['On_Time'] = fecha_ingreso.notna() & fecha_estad.notna() & (fecha_ingreso <= fecha_estad)
     df_otif['OTIF'] = df_otif['In_Full'] & df_otif['On_Time']
 
-    df_otif['Estado On Time'] = df_otif.apply(
-        lambda r: 'A Tiempo' if r['On_Time']
-        else ('Pendiente' if pd.isna(r['Fecha_Ingreso_SAP']) else 'Atrasado'),
-        axis=1
-    )
-    df_otif['Estado In Full'] = df_otif['In_Full'].map({True: 'Completo', False: 'Incompleto'})
-    df_otif['Estado OTIF'] = df_otif['OTIF'].map({True: 'Cumple OTIF', False: 'No Cumple'})
+    # Vencida: la fecha estadística ya llegó (o no tiene fecha, como antes)
+    df_otif['Vencida'] = fecha_estad.isna() | (fecha_estad <= hoy_ts)
+    # Evaluable: ya se puede juzgar. Una posición que cumplió antes de su fecha también cuenta.
+    df_otif['Evaluable'] = df_otif['Vencida'] | df_otif['OTIF']
 
-    return df_otif
+    recibido = fecha_ingreso.notna()
+    df_otif['Estado On Time'] = np.select(
+        [df_otif['On_Time'], recibido, ~df_otif['Vencida']],
+        ['A Tiempo', 'Atrasado', 'En plazo'],
+        default='Pendiente'
+    )
+    df_otif['Estado In Full'] = np.where(df_otif['In_Full'], 'Completo', 'Incompleto')
+    df_otif['Estado OTIF'] = np.select(
+        [df_otif['OTIF'], ~df_otif['Evaluable']],
+        ['Cumple OTIF', 'En plazo'],
+        default='No Cumple'
+    )
+
+    df_otif['Fecha_Estadistica'] = fecha_estad.dt.date
+    df_otif['Fecha_Ingreso_SAP'] = fecha_ingreso.dt.date
+
+    return df_otif, avisos
 
 def generar_tabla_resumen(df_filtrado, col_agrupacion, nombre_columna):
     if df_filtrado.empty:
@@ -804,19 +906,39 @@ else:
 
 if listos_para_procesar:
     try:
-        df_base = procesar_otif(file_me2m, file_me80fn, file_centro, file_grupo)
+        df_base, avisos_carga = procesar_otif(
+            file_me2m, file_me80fn, file_centro, file_grupo, pd.Timestamp.today().date()
+        )
     except Exception as e:
         aviso(f"<b>No se pudieron cargar los datos.</b><br>{html.escape(str(e))}", "error")
         st.stop()
+
+    for texto_aviso in avisos_carga:
+        aviso(html.escape(texto_aviso), "advertencia")
 
     # Filtro de tiempo en la barra lateral
     with st.sidebar:
         st.divider()
         encabezado_seccion("calendario", "Periodo", "Vacío incluye todas las semanas.")
-        semanas_disp = sorted([s for s in df_base['Semana/Año'].unique() if s != 'Sin Fecha'])
+        semanas_disp = (
+            df_base.dropna(subset=['Semana_Lunes'])
+            .drop_duplicates('Semana/Año')
+            .sort_values('Semana_Lunes')['Semana/Año']
+            .tolist()
+        )
         if 'Sin Fecha' in df_base['Semana/Año'].unique():
             semanas_disp.append('Sin Fecha')
         semana_sel = st.multiselect("Semana / Año", semanas_disp, placeholder="Todas las semanas")
+
+        st.divider()
+        encabezado_seccion("reloj", "Criterio de cálculo")
+        interruptor = getattr(st, "toggle", st.checkbox)
+        excluir_en_plazo = interruptor(
+            "Excluir posiciones aún no vencidas",
+            value=True,
+            help="Las posiciones cuya fecha estadística todavía no llega y que aún no se completan "
+                 "quedan 'En plazo' y no se cuentan como incumplimiento.",
+        )
 
         st.divider()
         if st.button("Cerrar sesión", use_container_width=True):
@@ -826,10 +948,10 @@ if listos_para_procesar:
     # Pre-calcular listas para los filtros
     centros = sorted(df_base['Nombre Centro 2'].dropna().unique())
     grupos = sorted(df_base['Grupo de compras'].dropna().unique())
-    nombres_permitidos = ['Consuelo', 'Sofia', 'Sofía', 'Felipe', 'Constanza']
+    nombres_permitidos = [normalizar_texto(n) for n in ['Consuelo', 'Sofia', 'Felipe', 'Constanza']]
     compradores = sorted([
         c for c in df_base['Comprador'].dropna().astype(str).unique()
-        if any(n in c for n in nombres_permitidos)
+        if any(n in normalizar_texto(c) for n in nombres_permitidos)
     ])
     proveedores = sorted(df_base['Proveedor/Centro suministrador'].dropna().astype(str).unique())
     estados_on_time = sorted(df_base['Estado On Time'].dropna().unique())
@@ -888,17 +1010,26 @@ if listos_para_procesar:
     if semana_sel:
         df = df[df['Semana/Año'].isin(semana_sel)]
 
-    total_lineas = len(df)
-    pct_on_time = (df['On_Time'].sum() / total_lineas * 100) if total_lineas > 0 else 0
-    pct_in_full = (df['In_Full'].sum() / total_lineas * 100) if total_lineas > 0 else 0
-    pct_otif = (df['OTIF'].sum() / total_lineas * 100) if total_lineas > 0 else 0
+    # Base del indicador: solo posiciones evaluables, salvo que se desactive el criterio
+    df_eval = df[df['Evaluable']] if excluir_en_plazo else df
+    n_en_plazo = len(df) - len(df_eval)
+
+    total_lineas = len(df_eval)
+    pct_on_time = (df_eval['On_Time'].sum() / total_lineas * 100) if total_lineas > 0 else 0
+    pct_in_full = (df_eval['In_Full'].sum() / total_lineas * 100) if total_lineas > 0 else 0
+    pct_otif = (df_eval['OTIF'].sum() / total_lineas * 100) if total_lineas > 0 else 0
+
+    if excluir_en_plazo:
+        ayuda_lineas = f"Posiciones evaluadas. {n_en_plazo:,} en plazo quedan fuera."
+    else:
+        ayuda_lineas = "Todas las posiciones filtradas, incluidas las que aún no vencen."
 
     st.divider()
 
     encabezado_seccion("grafico", "Indicadores de cumplimiento", "Calculados sobre las posiciones que cumplen los filtros.")
     tarjetas_kpi([
-        {"icono": "lista", "titulo": "Líneas activas", "valor": f"{total_lineas:,}", "pct": None,
-         "ayuda": "Posiciones de OC incluidas en el cálculo."},
+        {"icono": "lista", "titulo": "Líneas evaluadas", "valor": f"{total_lineas:,}", "pct": None,
+         "ayuda": ayuda_lineas},
         {"icono": "reloj", "titulo": "On Time", "valor": f"{pct_on_time:.1f}%", "pct": pct_on_time,
          "ayuda": "Recepción en SAP en o antes de la fecha estadística."},
         {"icono": "caja", "titulo": "In Full", "valor": f"{pct_in_full:.1f}%", "pct": pct_in_full,
@@ -915,20 +1046,21 @@ if listos_para_procesar:
         'Felipe Martínez Ulloa',
         'Constanza Caruz Ruiz'
     ]
-    df_comp = df[df['Comprador'].isin(compradores_obj)]
+    compradores_obj_norm = {normalizar_texto(c) for c in compradores_obj}
+    df_comp = df_eval[df_eval['Comprador'].map(normalizar_texto).isin(compradores_obj_norm)]
 
     df_t1 = generar_tabla_resumen(df_comp, 'Comprador', 'Comprador (Grupo de compras)')
-    df_t2 = generar_tabla_resumen(df, 'Nombre Centro 2', 'Centro')
-    df_t3 = generar_tabla_resumen(df, 'Nombre Centro', 'Centro (Macro)')
+    df_t2 = generar_tabla_resumen(df_eval, 'Nombre Centro 2', 'Centro')
+    df_t3 = generar_tabla_resumen(df_eval, 'Nombre Centro', 'Centro (Macro)')
 
-    encabezado_seccion("persona", "Por comprador", "Posiciones y porcentaje OTIF de cada comprador.")
+    encabezado_seccion("persona", "Por comprador", "Solo los compradores del equipo; el resto de las posiciones aparece en las vistas por centro.")
     renderizar_tabla_html(df_t1)
 
     st.write("")
 
     col_izq, col_der = st.columns(2)
     with col_izq:
-        encabezado_seccion("planta", "Por centro logístico", "Vista fija: el total calza con la vista por comprador.")
+        encabezado_seccion("planta", "Por centro logístico", "Incluye todas las posiciones filtradas, de cualquier comprador.")
         renderizar_tabla_html(df_t2)
 
     with col_der:
@@ -940,7 +1072,7 @@ if listos_para_procesar:
     encabezado_seccion(
         "tabla",
         "Detalle de posiciones y trazabilidad",
-        "Estados en azul cumplen, en rojo no cumplen y en ámbar siguen pendientes de recepción.",
+        "Azul cumple, rojo no cumple, ámbar vencida sin recepción y gris en plazo (aún no vence). Se listan todas las posiciones filtradas.",
     )
     cols_mostrar = [
         'Documento compras', 'Posición', 'Semana/Año', 'Centro', 'Nombre Centro',
